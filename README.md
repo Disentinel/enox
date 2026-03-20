@@ -25,6 +25,16 @@ In 2024-2026, all three barriers disappeared simultaneously:
 
 ## What's in this repo
 
+### Protocol Specification
+
+**[PROTOCOL.md](PROTOCOL.md)** — the normative document defining the ENOX data format:
+
+- Entity URI scheme: `enox://{host}/{scope}/{owner}/{domain}/{slug}`
+- Relation format: directed typed connections with confidence, provenance, perspective
+- Perspective manifests: named, versioned lenses over shared entity graphs
+- Serialization: JSONL interchange format + file materialization for static nodes
+- Federation: node types, discovery, cross-node relations
+
 ### Reference Implementation: Smart Node
 
 A working personal knowledge graph node with federation support.

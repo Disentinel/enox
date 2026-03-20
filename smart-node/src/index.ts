@@ -8,6 +8,7 @@ import { startEmbeddingWorker, stopEmbeddingWorker } from './embeddings.js';
 import { startBackupWorker, stopBackupWorker, materialize, listSnapshots, getSnapshotPath } from './backup.js';
 import { loadConfig } from './config.js';
 import { initFederation } from './federation.js';
+import { loadFederationEdges, addFederationEdge, getFederationEdges, removeFederationEdge } from './federation-edges.js';
 import fs from 'node:fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -15,6 +16,7 @@ const config = loadConfig();
 
 async function main() {
   initFederation(config);
+  loadFederationEdges();
   await initDb(config.dbPath);
 
   const app = express();
@@ -71,7 +73,34 @@ async function main() {
     });
   });
 
-  // Federation-wide graph: merge local + all peers
+  // Cross-node edge CRUD
+  app.get('/api/federation/edges', (_req, res) => {
+    res.json(getFederationEdges());
+  });
+
+  app.post('/api/federation/edges', (req, res) => {
+    const { from, to, rel, confidence = 1.0, context = '' } = req.body;
+    if (!from || !to || !rel) {
+      res.status(400).json({ error: 'from, to, rel required' });
+      return;
+    }
+    const edge = addFederationEdge(from, to, rel, confidence, context);
+    if (!edge) {
+      res.status(409).json({ error: 'Edge already exists' });
+      return;
+    }
+    res.status(201).json(edge);
+  });
+
+  app.delete('/api/federation/edges/:fact_id', (req, res) => {
+    if (removeFederationEdge(req.params.fact_id)) {
+      res.status(204).end();
+    } else {
+      res.status(404).json({ error: 'Edge not found' });
+    }
+  });
+
+  // Federation-wide graph: merge local + all peers + cross-edges
   app.get('/api/federation/graph', async (_req, res) => {
     try {
       // Local data
@@ -99,6 +128,20 @@ async function main() {
         } catch {
           // Peer unreachable, skip
         }
+      }
+
+      // Inject cross-node edges
+      const crossEdges = getFederationEdges();
+      for (const ce of crossEdges) {
+        allEdges.push({
+          source: ce.from,
+          target: ce.to,
+          relation: ce.rel,
+          confidence: ce.confidence,
+          context: ce.context,
+          fact_id: ce.fact_id,
+          _cross: true,
+        });
       }
 
       res.json({ nodes: allNodes, edges: allEdges });

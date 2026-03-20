@@ -16,6 +16,10 @@ export const NODE_TYPES = [
   'channel',
   'post',
   'person',
+  // openloops
+  'effort',
+  'task',
+  'session',
 ] as const;
 
 export type NodeType = (typeof NODE_TYPES)[number];
@@ -48,6 +52,11 @@ export const RELATION_TYPES = [
   'published_in',
   'authored_by',
   'mentioned_in',
+  // openloops
+  'task_of',
+  'blocks',
+  'produced_by',
+  'references',
 ] as const;
 
 export type RelationType = (typeof RELATION_TYPES)[number];
