@@ -206,7 +206,7 @@ Storage: negligible (S3: $0.05/month per million nodes)
 
 ## License
 
-ODbL (Open Database License). Facts are not copyrightable. The labor of assembly is protected. Derived datasets must remain open. Services built on top can be commercial.
+Apache 2.0. See [LICENSE](LICENSE).
 
 ---
 
