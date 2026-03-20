@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Enox Smart Node — Graph</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, system-ui, sans-serif; background: #0a0a0f; color: #e0e0e0; overflow: hidden; display: flex; }
+#graph-area { flex: 1; position: relative; }
+
+/* Left panel — collapsible sections, scrollable */
+#controls {
+  position: absolute; top: 12px; left: 12px; z-index: 10;
+  background: rgba(20,20,30,0.92); border: 1px solid #333; border-radius: 8px;
+  font-size: 13px; min-width: 200px; max-height: calc(100vh - 24px); overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: #444 transparent;
+}
+#controls::-webkit-scrollbar { width: 5px; }
+#controls::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+#controls h2 { font-size: 14px; padding: 12px 16px 8px; color: #8af; }
+#controls label { display: block; margin: 2px 0; cursor: pointer; padding: 0 16px; }
+#controls input[type=checkbox] { margin-right: 5px; }
+#stats { color: #888; padding: 8px 16px; font-size: 12px; border-top: 1px solid #282830; }
+
+.filter-section {
+  border-bottom: 1px solid #222;
+}
+.filter-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 16px; cursor: pointer; user-select: none;
+  color: #888; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.filter-header:hover { color: #aaa; }
+.filter-header .arrow { transition: transform 0.2s; font-size: 8px; }
+.filter-header .arrow.collapsed { transform: rotate(-90deg); }
+.filter-body { padding: 0 0 4px; }
+.filter-body.collapsed { display: none; }
+.filter-header .count { color: #555; font-size: 9px; margin-left: 4px; }
+
+#search {
+  position: absolute; top: 12px; right: 12px; z-index: 10;
+}
+#search input {
+  background: rgba(20,20,30,0.92); border: 1px solid #444; border-radius: 6px;
+  padding: 8px 12px; color: #e0e0e0; font-size: 13px; width: 240px; outline: none;
+}
+#search input:focus { border-color: #8af; }
+#search-results {
+  background: rgba(20,20,30,0.95); border: 1px solid #444; border-top: none;
+  border-radius: 0 0 6px 6px; max-height: 320px; overflow-y: auto;
+  display: none; width: 240px;
+  scrollbar-width: thin; scrollbar-color: #444 transparent;
+}
+#search-results::-webkit-scrollbar { width: 5px; }
+#search-results::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+.search-item {
+  padding: 6px 12px; cursor: pointer; font-size: 12px;
+  border-bottom: 1px solid #1a1a22; display: flex; align-items: center; gap: 6px;
+}
+.search-item:hover, .search-item.active { background: #1a1a28; }
+.search-item .dot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+}
+.search-item .name { color: #e0e0e0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-item .domain-tag { color: #555; font-size: 10px; flex-shrink: 0; }
+
+/* Right panel */
+#panel {
+  width: 360px; min-width: 360px; background: #111118; border-left: 1px solid #333;
+  display: flex; flex-direction: column; overflow: hidden; height: 100vh;
+}
+#panel.empty { display: flex; align-items: center; justify-content: center; }
+#panel.empty::after { content: 'Click a node to inspect'; color: #555; font-size: 13px; }
+#panel-header {
+  padding: 16px; border-bottom: 1px solid #282830; flex-shrink: 0;
+}
+#panel-header h3 { color: #e0e0e0; font-size: 15px; margin-bottom: 4px; line-height: 1.3; }
+#panel-header .type-badge {
+  display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px;
+  font-weight: 600; margin-top: 4px;
+}
+#panel-header .domain-badge {
+  display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px;
+  background: #282830; color: #888; margin-left: 4px; margin-top: 4px;
+}
+#panel-id {
+  padding: 4px 16px 8px; color: #555; font-size: 10px; font-family: monospace;
+  border-bottom: 1px solid #282830; word-break: break-all; flex-shrink: 0;
+  cursor: pointer; transition: color 0.15s;
+}
+#panel-id:hover { color: #8af; }
+#panel-id .copied { color: #93c47d; font-family: inherit; font-size: 10px; margin-left: 6px; }
+#panel-desc {
+  padding: 12px 16px; color: #aaa; font-size: 12px; line-height: 1.5;
+  border-bottom: 1px solid #282830; flex-shrink: 0; max-height: 100px; overflow-y: auto;
+}
+#panel-edges-title {
+  padding: 10px 16px 6px; color: #888; font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.5px; border-bottom: 1px solid #1a1a22; flex-shrink: 0;
+}
+#panel-edges {
+  flex: 1; min-height: 0; overflow-y: auto; padding: 0;
+  scrollbar-width: thin; scrollbar-color: #444 transparent;
+}
+#panel-edges::-webkit-scrollbar { width: 5px; }
+#panel-edges::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+.edge-item {
+  padding: 8px 16px; border-bottom: 1px solid #1a1a22; font-size: 12px;
+  cursor: pointer; transition: background 0.15s; position: relative;
+}
+.edge-item:hover { background: #1a1a28; }
+.edge-rel { color: #fa8; font-weight: 600; font-size: 11px; }
+.edge-name { color: #8af; margin-left: 4px; }
+.edge-conf { color: #555; font-size: 11px; float: right; }
+
+/* Tooltip */
+.edge-tooltip {
+  display: none; position: absolute; left: 16px; right: 16px; top: 100%;
+  background: #1a1a2a; border: 1px solid #333; border-radius: 4px;
+  padding: 6px 10px; font-size: 11px; color: #aaa; line-height: 1.4;
+  z-index: 100; pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+.edge-item:hover .edge-tooltip { display: block; }
+
+#panel-actions {
+  padding: 8px 16px; flex-shrink: 0; display: flex; gap: 6px; flex-wrap: wrap;
+}
+#panel-actions button {
+  background: #1a1a28; border: 1px solid #333; border-radius: 4px;
+  color: #aaa; font-size: 11px; padding: 4px 10px; cursor: pointer; transition: all 0.15s;
+}
+#panel-actions button:hover { background: #282840; color: #e0e0e0; border-color: #555; }
+#panel-actions button.active { background: #2a2a4a; border-color: #8af; color: #8af; }
+#panel-ingest {
+  flex-shrink: 0; border-top: 1px solid #333; padding: 12px;
+}
+#ingest-input {
+  width: 100%; background: #1a1a24; border: 1px solid #333; border-radius: 6px;
+  color: #e0e0e0; font-size: 12px; font-family: inherit; padding: 8px 10px;
+  resize: none; outline: none; line-height: 1.4;
+}
+#ingest-input:focus { border-color: #8af; }
+#ingest-status {
+  font-size: 11px; color: #888; margin-top: 4px; min-height: 16px;
+}
+#ingest-status.success { color: #93c47d; }
+#ingest-status.error { color: #e06666; }
+#ingest-status.loading { color: #f0e68c; }
+
+svg { width: 100%; height: 100vh; display: block; }
+.link { stroke-opacity: 0.35; }
+.node-label { font-size: 10px; fill: #ccc; pointer-events: none; }
+</style>
+</head>
+<body>
+
+<div id="graph-area">
+  <div id="controls">
+    <h2>Enox Graph</h2>
+
+    <div class="filter-section" id="sec-nodes"></div>
+    <div class="filter-section" id="sec-perspectives"></div>
+    <div class="filter-section" id="sec-types"></div>
+    <div class="filter-section" id="sec-domains"></div>
+    <div class="filter-section" id="sec-rels"></div>
+
+    <div id="stats"></div>
+  </div>
+  <div id="search">
+    <input type="text" placeholder="Search nodes..." id="search-input" autocomplete="off">
+    <div id="search-results"></div>
+  </div>
+  <svg></svg>
+</div>
+
+<div id="panel" class="empty">
+  <div id="panel-header" style="display:none">
+    <h3 id="panel-name"></h3>
+    <span id="panel-badge" class="type-badge"></span>
+    <span id="panel-domain-badge" class="domain-badge"></span>
+  </div>
+  <div id="panel-id" style="display:none"></div>
+  <div id="panel-desc" style="display:none"></div>
+  <div id="panel-actions" style="display:none"></div>
+  <div id="panel-edges-title" style="display:none">Connections</div>
+  <div id="panel-edges"></div>
+  <div id="panel-ingest">
+    <textarea id="ingest-input" placeholder="Add a note... Paste entity URIs to reference them. Shift+Enter to send." rows="3"></textarea>
+    <div id="ingest-status"></div>
+  </div>
+</div>
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+const API = window.location.origin;
+
+const TYPE_COLORS = {
+  concept: '#6fa8dc',
+  decision: '#e06666',
+  component: '#93c47d',
+  pattern: '#f6b26b',
+  rejected_alternative: '#999',
+  opinion: '#ff9ff3',
+  preference: '#c792ea',
+  value: '#ffb8b8',
+  belief: '#dda0dd',
+  date: '#777',
+  event: '#aaa',
+  channel: '#00d2d3',
+  post: '#54a0ff',
+  person: '#ff6348',
+};
+
+const REL_COLORS = {
+  depends_on: '#ff6b6b',
+  supersedes: '#ffa07a',
+  implements: '#98fb98',
+  contradicts: '#ff4444',
+  part_of: '#87ceeb',
+  extends: '#dda0dd',
+  enables: '#f0e68c',
+  isomorphic_to: '#20b2aa',
+  discussed_on: '#666',
+  decided_on: '#888',
+  created_on: '#555',
+  prefers: '#ff9ff3',
+  believes: '#c792ea',
+  values: '#ffb8b8',
+  rejects: '#ff6348',
+  published_in: '#54a0ff',
+  authored_by: '#00d2d3',
+};
+
+let allNodes = [], allEdges = [], simulation, svg, g, link, node;
+let activeTypes = new Set();
+let activeDomains = new Set();
+let activeRels = new Set();
+let activeNodeSources = new Set(); // federation node names
+let searchTerm = '';
+let selectedId = null;
+let focusSourceId = null;
+
+// Perspective definitions: which types and relations belong to each
+const PERSPECTIVES = {
+  'Knowledge': {
+    types: ['concept', 'decision', 'component', 'pattern', 'rejected_alternative'],
+    rels: ['depends_on', 'supersedes', 'implements', 'contradicts', 'part_of', 'extends', 'enables', 'isomorphic_to'],
+    on: true, color: '#6fa8dc',
+  },
+  'Provenance': {
+    types: ['channel', 'post', 'person'],
+    rels: ['published_in', 'authored_by', 'mentioned_in'],
+    on: true, color: '#00d2d3',
+  },
+  'Temporal': {
+    types: ['date', 'event'],
+    rels: ['discussed_on', 'decided_on', 'changed_on', 'created_on', 'preceded_by', 'triggered_by'],
+    on: false, color: '#aaa',
+  },
+  'Opinions': {
+    types: ['opinion', 'preference', 'value', 'belief'],
+    rels: ['prefers', 'distrusts', 'values', 'rejects', 'believes', 'frustrated_by'],
+    on: false, color: '#ff9ff3',
+  },
+};
+
+function applyPerspective(name, enabled) {
+  const p = PERSPECTIVES[name];
+  p.types.forEach(t => enabled ? activeTypes.add(t) : activeTypes.delete(t));
+  p.rels.forEach(r => enabled ? activeRels.add(r) : activeRels.delete(r));
+  // Sync individual checkboxes
+  document.querySelectorAll('#sec-types input[type=checkbox]').forEach(cb => {
+    if (p.types.includes(cb.dataset.type)) { cb.checked = enabled; }
+  });
+  document.querySelectorAll('#sec-rels input[type=checkbox]').forEach(cb => {
+    if (p.rels.includes(cb.dataset.rel)) { cb.checked = enabled; }
+  });
+}
+
+// Build a collapsible filter section
+function buildFilterSection(containerId, title, items, activeSet, colorMap, onChange) {
+  const section = document.getElementById(containerId);
+
+  const header = document.createElement('div');
+  header.className = 'filter-header';
+  header.innerHTML = `<span>${title} <span class="count">(${items.length})</span></span><span class="arrow">&#9660;</span>`;
+  section.appendChild(header);
+
+  const body = document.createElement('div');
+  body.className = 'filter-body';
+  section.appendChild(body);
+
+  header.addEventListener('click', () => {
+    body.classList.toggle('collapsed');
+    header.querySelector('.arrow').classList.toggle('collapsed');
+  });
+
+  items.forEach(item => {
+    const lbl = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = activeSet.has(item);
+    // Store data attribute for syncing from perspective toggles
+    if (title === 'Node types') cb.dataset.type = item;
+    if (title === 'Relations') cb.dataset.rel = item;
+    cb.addEventListener('change', () => {
+      if (cb.checked) activeSet.add(item); else activeSet.delete(item);
+      onChange();
+    });
+    const color = colorMap ? colorMap[item] : null;
+    if (color) {
+      const dot = document.createElement('span');
+      dot.style.cssText = `display:inline-block;width:8px;height:8px;border-radius:${title === 'Relations' ? '2px' : '50%'};background:${color};margin-right:4px;`;
+      lbl.appendChild(cb); lbl.appendChild(dot);
+    } else {
+      lbl.appendChild(cb);
+    }
+    lbl.appendChild(document.createTextNode(item));
+    body.appendChild(lbl);
+  });
+}
+
+async function load() {
+  // Try federation endpoint first, fall back to local-only
+  let nodesRaw, edgesRaw;
+  try {
+    const fedResp = await fetch(`${API}/api/federation/graph`);
+    if (fedResp.ok) {
+      const fed = await fedResp.json();
+      nodesRaw = fed.nodes;
+      edgesRaw = fed.edges;
+    }
+  } catch {}
+
+  if (!nodesRaw) {
+    const [nr, er] = await Promise.all([
+      fetch(`${API}/api/nodes`).then(r => r.json()),
+      fetch(`${API}/api/assertions`).then(r => r.json()),
+    ]);
+    nodesRaw = nr;
+    edgesRaw = er;
+  }
+
+  allNodes = nodesRaw.map(n => ({ ...n, id: n.id }));
+  allEdges = edgesRaw.map(e => ({ ...e, source: e.source, target: e.target }));
+
+  // Build node source filter (federation nodes)
+  const nodeSources = [...new Set(allNodes.map(n => n._node || 'local'))].sort();
+  nodeSources.forEach(ns => activeNodeSources.add(ns));
+  if (nodeSources.length > 1) {
+    buildFilterSection('sec-nodes', 'Nodes (federation)', nodeSources, activeNodeSources, null, update);
+  }
+
+  // Apply perspective defaults to active sets BEFORE building filter sections
+  const allTypes = [...new Set(allNodes.map(n => n.type))].sort();
+  const allRels = [...new Set(allEdges.map(e => e.relation))].sort();
+  const allDomains = [...new Set(allNodes.map(n => n.domain).filter(Boolean))].sort();
+
+  // Start with empty, then add from enabled perspectives
+  allTypes.forEach(t => {
+    const inAnyEnabledPerspective = Object.values(PERSPECTIVES).some(p => p.on && p.types.includes(t));
+    if (inAnyEnabledPerspective) activeTypes.add(t);
+  });
+  allRels.forEach(r => {
+    const inAnyEnabledPerspective = Object.values(PERSPECTIVES).some(p => p.on && p.rels.includes(r));
+    if (inAnyEnabledPerspective) activeRels.add(r);
+  });
+  allDomains.forEach(d => activeDomains.add(d));
+
+  // Build Perspectives section (always expanded)
+  const secP = document.getElementById('sec-perspectives');
+  const pHeader = document.createElement('div');
+  pHeader.className = 'filter-header';
+  pHeader.innerHTML = '<span>Perspectives</span><span class="arrow">&#9660;</span>';
+  secP.appendChild(pHeader);
+  const pBody = document.createElement('div');
+  pBody.className = 'filter-body';
+  secP.appendChild(pBody);
+  pHeader.addEventListener('click', () => {
+    pBody.classList.toggle('collapsed');
+    pHeader.querySelector('.arrow').classList.toggle('collapsed');
+  });
+
+  Object.entries(PERSPECTIVES).forEach(([name, p]) => {
+    const lbl = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.checked = p.on;
+    cb.addEventListener('change', () => {
+      p.on = cb.checked;
+      applyPerspective(name, cb.checked);
+      update();
+    });
+    const dot = document.createElement('span');
+    dot.style.cssText = `display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:4px;`;
+    const countNode = p.types.filter(t => allTypes.includes(t)).length;
+    const countRel = p.rels.filter(r => allRels.includes(r)).length;
+    lbl.appendChild(cb); lbl.appendChild(dot);
+    lbl.appendChild(document.createTextNode(`${name}`));
+    const countSpan = document.createElement('span');
+    countSpan.style.cssText = 'color:#555;font-size:10px;margin-left:4px;';
+    countSpan.textContent = `(${countNode}t ${countRel}r)`;
+    lbl.appendChild(countSpan);
+    pBody.appendChild(lbl);
+  });
+
+  // Build individual filter sections (collapsed by default)
+  buildFilterSection('sec-types', 'Node types', allTypes, activeTypes, TYPE_COLORS, update);
+  buildFilterSection('sec-domains', 'Domains', allDomains, activeDomains, null, update);
+  buildFilterSection('sec-rels', 'Relations', allRels, activeRels, REL_COLORS, update);
+
+  // Collapse all detail sections by default
+  ['sec-types', 'sec-domains', 'sec-rels'].forEach(id => {
+    document.querySelector(`#${id} .filter-body`).classList.add('collapsed');
+    document.querySelector(`#${id} .arrow`).classList.add('collapsed');
+  });
+
+  initGraph();
+  update();
+}
+
+function initGraph() {
+  const area = document.getElementById('graph-area');
+  const width = area.clientWidth, height = area.clientHeight;
+
+  svg = d3.select('svg').attr('width', width).attr('height', height);
+
+  svg.append('defs').append('marker')
+    .attr('id', 'arrow').attr('viewBox', '0 -5 10 10')
+    .attr('refX', 20).attr('refY', 0)
+    .attr('markerWidth', 6).attr('markerHeight', 6)
+    .attr('orient', 'auto')
+    .append('path').attr('d', 'M0,-5L10,0L0,5').attr('fill', '#666');
+
+  g = svg.append('g');
+
+  svg.call(d3.zoom().scaleExtent([0.1, 8]).on('zoom', (e) => {
+    g.attr('transform', e.transform);
+  }));
+
+  svg.on('click', (ev) => {
+    if (ev.target.tagName === 'svg') selectNode(null);
+  });
+
+  simulation = d3.forceSimulation()
+    .force('link', d3.forceLink().id(d => d.id).distance(80))
+    .force('charge', d3.forceManyBody().strength(-120))
+    .force('center', d3.forceCenter(width / 2, height / 2))
+    .force('collision', d3.forceCollide(20));
+}
+
+function update() {
+  // If focusing on a source, compute which nodes are reachable from it
+  let focusSet = null;
+  if (focusSourceId) {
+    focusSet = new Set();
+    focusSet.add(focusSourceId);
+    allEdges.forEach(e => {
+      const s = typeof e.source === 'object' ? e.source.id : e.source;
+      const t = typeof e.target === 'object' ? e.target.id : e.target;
+      if (s === focusSourceId) focusSet.add(t);
+      if (t === focusSourceId) focusSet.add(s);
+    });
+  }
+
+  const nodeSet = new Set();
+  const filteredNodes = allNodes.filter(n => {
+    const nodeSource = n._node || 'local';
+    const show = activeTypes.has(n.type) &&
+      (!n.domain || activeDomains.has(n.domain)) &&
+      activeNodeSources.has(nodeSource) &&
+      (!searchTerm || n.name.toLowerCase().includes(searchTerm)) &&
+      (!focusSet || focusSet.has(n.id));
+    if (show) nodeSet.add(n.id);
+    return show;
+  });
+
+  const filteredEdges = allEdges.filter(e => {
+    const srcId = typeof e.source === 'object' ? e.source.id : e.source;
+    const tgtId = typeof e.target === 'object' ? e.target.id : e.target;
+    return nodeSet.has(srcId) && nodeSet.has(tgtId) && activeRels.has(e.relation);
+  });
+
+  document.getElementById('stats').textContent =
+    `${filteredNodes.length} nodes, ${filteredEdges.length} edges`;
+
+  link = g.selectAll('.link').data(filteredEdges, d => d.fact_id);
+  link.exit().remove();
+  const linkEnter = link.enter().append('line')
+    .attr('class', 'link')
+    .attr('stroke-width', d => Math.max(1, d.confidence * 2.5))
+    .attr('stroke', d => REL_COLORS[d.relation] || '#555')
+    .attr('marker-end', 'url(#arrow)');
+  link = linkEnter.merge(link);
+
+  linkEnter.append('title').text(d => `${d.relation} (${d.confidence})`);
+
+  node = g.selectAll('.node-g').data(filteredNodes, d => d.id);
+  node.exit().remove();
+  const nodeEnter = node.enter().append('g').attr('class', 'node-g')
+    .call(d3.drag()
+      .on('start', dragStart)
+      .on('drag', dragging)
+      .on('end', dragEnd));
+
+  nodeEnter.append('circle')
+    .attr('r', d => d.type === 'component' ? 8 : d.type === 'decision' ? 7 : d.type === 'event' ? 9 : 5)
+    .attr('fill', d => TYPE_COLORS[d.type] || '#888')
+    .attr('stroke', '#222').attr('stroke-width', 1)
+    .style('cursor', 'pointer');
+
+  nodeEnter.append('text')
+    .attr('class', 'node-label')
+    .attr('dx', 10).attr('dy', 3)
+    .text(d => d.name.length > 30 ? d.name.slice(0, 28) + '...' : d.name);
+
+  nodeEnter.on('click', (ev, d) => {
+    ev.stopPropagation();
+    selectNode(d.id);
+  });
+
+  nodeEnter.on('dblclick', (ev, d) => {
+    ev.stopPropagation();
+    d.fx = null;
+    d.fy = null;
+    simulation.alpha(0.3).restart();
+  });
+
+  node = nodeEnter.merge(node);
+
+  applyVisualState();
+
+  simulation.nodes(filteredNodes).on('tick', () => {
+    link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+        .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    node.attr('transform', d => `translate(${d.x},${d.y})`);
+  });
+  simulation.force('link').links(filteredEdges);
+  simulation.alpha(0.8).restart();
+}
+
+function applyVisualState() {
+  if (!node) return;
+
+  const neighborIds = new Set();
+  if (selectedId) {
+    neighborIds.add(selectedId);
+    allEdges.forEach(e => {
+      const s = typeof e.source === 'object' ? e.source.id : e.source;
+      const t = typeof e.target === 'object' ? e.target.id : e.target;
+      if (s === selectedId) neighborIds.add(t);
+      if (t === selectedId) neighborIds.add(s);
+    });
+  }
+
+  node.select('circle')
+    .attr('stroke', d => d.id === selectedId ? '#ff3333' : '#222')
+    .attr('stroke-width', d => d.id === selectedId ? 3 : 1)
+    .attr('opacity', d => {
+      if (searchTerm && !d.name.toLowerCase().includes(searchTerm)) return 0.15;
+      if (selectedId && !neighborIds.has(d.id)) return 0.2;
+      return 1;
+    });
+
+  node.select('text')
+    .attr('opacity', d => {
+      if (searchTerm && !d.name.toLowerCase().includes(searchTerm)) return 0.1;
+      if (selectedId && !neighborIds.has(d.id)) return 0.15;
+      return 1;
+    });
+
+  if (link) {
+    link
+      .attr('stroke-opacity', d => {
+        if (!selectedId) return 0.35;
+        const s = typeof d.source === 'object' ? d.source.id : d.source;
+        const t = typeof d.target === 'object' ? d.target.id : d.target;
+        return (s === selectedId || t === selectedId) ? 0.85 : 0.08;
+      })
+      .attr('stroke-width', d => {
+        if (!selectedId) return Math.max(1, d.confidence * 2.5);
+        const s = typeof d.source === 'object' ? d.source.id : d.source;
+        const t = typeof d.target === 'object' ? d.target.id : d.target;
+        return (s === selectedId || t === selectedId) ? Math.max(2, d.confidence * 3.5) : 0.5;
+      });
+  }
+}
+
+function selectNode(id) {
+  selectedId = id;
+  applyVisualState();
+  showPanel(id);
+}
+
+function showPanel(id) {
+  const panel = document.getElementById('panel');
+  const header = document.getElementById('panel-header');
+  const idDiv = document.getElementById('panel-id');
+  const desc = document.getElementById('panel-desc');
+  const edgesTitle = document.getElementById('panel-edges-title');
+  const edgesDiv = document.getElementById('panel-edges');
+
+  const actionsDiv = document.getElementById('panel-actions');
+
+  if (!id) {
+    panel.classList.add('empty');
+    header.style.display = 'none';
+    idDiv.style.display = 'none';
+    desc.style.display = 'none';
+    actionsDiv.style.display = 'none';
+    edgesTitle.style.display = 'none';
+    edgesDiv.innerHTML = '';
+    return;
+  }
+
+  panel.classList.remove('empty');
+  header.style.display = 'block';
+  idDiv.style.display = 'block';
+  desc.style.display = 'block';
+  actionsDiv.style.display = 'flex';
+  edgesTitle.style.display = 'block';
+
+  const d = allNodes.find(n => n.id === id);
+  if (!d) return;
+
+  document.getElementById('panel-name').textContent = d.name;
+  const badge = document.getElementById('panel-badge');
+  badge.textContent = d.type;
+  badge.style.background = TYPE_COLORS[d.type] || '#888';
+  badge.style.color = '#000';
+
+  const domBadge = document.getElementById('panel-domain-badge');
+  const nodeLabel = d._node && d._node !== 'local' ? `${d.domain || ''} @ ${d._node}` : (d.domain || '');
+  domBadge.textContent = nodeLabel;
+  domBadge.style.display = nodeLabel ? 'inline-block' : 'none';
+
+  idDiv.textContent = d.id;
+  idDiv.onclick = () => {
+    navigator.clipboard.writeText(d.id);
+    const span = document.createElement('span');
+    span.className = 'copied';
+    span.textContent = 'copied';
+    idDiv.appendChild(span);
+    setTimeout(() => span.remove(), 1500);
+  };
+  desc.textContent = d.description || 'No description';
+
+  // Actions
+  actionsDiv.innerHTML = '';
+
+  // Focus button — scope graph to this node's connections
+  const hasConnections = allEdges.some(e => {
+    const s = typeof e.source === 'object' ? e.source.id : e.source;
+    const t = typeof e.target === 'object' ? e.target.id : e.target;
+    return s === id || t === id;
+  });
+  if (hasConnections) {
+    const focusBtn = document.createElement('button');
+    const isFocused = focusSourceId === id;
+    focusBtn.textContent = isFocused ? 'Show all' : 'Focus';
+    focusBtn.title = isFocused ? 'Remove source filter' : 'Show only nodes connected to this one';
+    if (isFocused) focusBtn.className = 'active';
+    focusBtn.addEventListener('click', () => {
+      focusSourceId = isFocused ? null : id;
+      update();
+      showPanel(id);
+    });
+    actionsDiv.appendChild(focusBtn);
+  }
+
+  // Filter by URI prefix — show all nodes under same domain/path
+  const idParts = d.id.split('/');
+  if (idParts.length >= 5) { // enox://host/personal/owner/domain/entity
+    const domainPrefix = idParts.slice(0, 5).join('/'); // up to domain
+    const domainName = idParts[4];
+    const countInDomain = allNodes.filter(n => n.id.startsWith(domainPrefix + '/')).length;
+    if (countInDomain > 1) {
+      const prefixBtn = document.createElement('button');
+      prefixBtn.textContent = `${domainName}/ (${countInDomain})`;
+      prefixBtn.title = `Filter to domain: ${domainName}`;
+      prefixBtn.addEventListener('click', () => {
+        // Toggle this domain in the domain filter
+        const isActive = activeDomains.has(domainName);
+        if (isActive) {
+          // Solo this domain: deactivate all others, keep only this
+          const allDomains = [...new Set(allNodes.map(n => n.domain).filter(Boolean))];
+          allDomains.forEach(dd => activeDomains.delete(dd));
+          activeDomains.add(domainName);
+        } else {
+          activeDomains.add(domainName);
+        }
+        update();
+      });
+      actionsDiv.appendChild(prefixBtn);
+    }
+  }
+
+  // Reset all filters button (if any filter is active)
+  if (focusSourceId) {
+    const resetBtn = document.createElement('button');
+    resetBtn.textContent = 'Reset filters';
+    resetBtn.addEventListener('click', () => {
+      focusSourceId = null;
+      // Re-enable all domains
+      allNodes.forEach(n => { if (n.domain) activeDomains.add(n.domain); });
+      update();
+      showPanel(id);
+    });
+    actionsDiv.appendChild(resetBtn);
+  }
+
+  const neighbors = allEdges.filter(e => {
+    const s = typeof e.source === 'object' ? e.source.id : e.source;
+    const t = typeof e.target === 'object' ? e.target.id : e.target;
+    return s === id || t === id;
+  });
+
+  const outgoing = [];
+  const incoming = [];
+  neighbors.forEach(e => {
+    const s = typeof e.source === 'object' ? e.source.id : e.source;
+    const t = typeof e.target === 'object' ? e.target.id : e.target;
+    if (s === id) {
+      const other = allNodes.find(n => n.id === t);
+      outgoing.push({ ...e, otherId: t, otherName: other ? other.name : t, otherType: other ? other.type : '', otherDesc: other ? (other.description || '') : '' });
+    } else {
+      const other = allNodes.find(n => n.id === s);
+      incoming.push({ ...e, otherId: s, otherName: other ? other.name : s, otherType: other ? other.type : '', otherDesc: other ? (other.description || '') : '' });
+    }
+  });
+
+  let html = '';
+  if (outgoing.length) {
+    html += `<div style="padding:6px 16px 2px;color:#666;font-size:10px;text-transform:uppercase">Outgoing (${outgoing.length})</div>`;
+    outgoing.forEach(e => {
+      const tooltipText = e.otherDesc ? e.otherDesc.replace(/"/g, '&quot;').replace(/</g, '&lt;') : '';
+      const contextText = e.context ? e.context.replace(/"/g, '&quot;').replace(/</g, '&lt;') : '';
+      const tipContent = [tooltipText, contextText ? `Edge: ${contextText}` : ''].filter(Boolean).join('<br>');
+      html += `<div class="edge-item" data-target="${e.otherId}">
+        <span class="edge-rel" style="color:${REL_COLORS[e.relation]||'#fa8'}">${e.relation}</span>
+        <span class="edge-name">${e.otherName}</span>
+        <span class="edge-conf">${e.confidence}</span>
+        ${tipContent ? `<div class="edge-tooltip">${tipContent}</div>` : ''}
+      </div>`;
+    });
+  }
+  if (incoming.length) {
+    html += `<div style="padding:6px 16px 2px;color:#666;font-size:10px;text-transform:uppercase">Incoming (${incoming.length})</div>`;
+    incoming.forEach(e => {
+      const tooltipText = e.otherDesc ? e.otherDesc.replace(/"/g, '&quot;').replace(/</g, '&lt;') : '';
+      const contextText = e.context ? e.context.replace(/"/g, '&quot;').replace(/</g, '&lt;') : '';
+      const tipContent = [tooltipText, contextText ? `Edge: ${contextText}` : ''].filter(Boolean).join('<br>');
+      html += `<div class="edge-item" data-target="${e.otherId}">
+        <span class="edge-rel" style="color:${REL_COLORS[e.relation]||'#fa8'}">${e.relation}</span>
+        <span class="edge-name">${e.otherName}</span>
+        <span class="edge-conf">${e.confidence}</span>
+        ${tipContent ? `<div class="edge-tooltip">${tipContent}</div>` : ''}
+      </div>`;
+    });
+  }
+
+  edgesDiv.innerHTML = html;
+
+  edgesDiv.querySelectorAll('.edge-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const targetId = el.dataset.target;
+      selectNode(targetId);
+    });
+  });
+}
+
+function dragStart(ev, d) { if (!ev.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; }
+function dragging(ev, d) { d.fx = ev.x; d.fy = ev.y; }
+function dragEnd(ev, d) { if (!ev.active) simulation.alphaTarget(0); }
+
+const searchInput = document.getElementById('search-input');
+const searchResults = document.getElementById('search-results');
+let searchActiveIdx = -1;
+
+searchInput.addEventListener('input', (e) => {
+  searchTerm = e.target.value.toLowerCase();
+  searchActiveIdx = -1;
+  applyVisualState();
+  updateSearchDropdown();
+});
+
+searchInput.addEventListener('keydown', (e) => {
+  const items = searchResults.querySelectorAll('.search-item');
+  if (!items.length) return;
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    searchActiveIdx = Math.min(searchActiveIdx + 1, items.length - 1);
+    items.forEach((el, i) => el.classList.toggle('active', i === searchActiveIdx));
+    items[searchActiveIdx]?.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    searchActiveIdx = Math.max(searchActiveIdx - 1, 0);
+    items.forEach((el, i) => el.classList.toggle('active', i === searchActiveIdx));
+    items[searchActiveIdx]?.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter' && searchActiveIdx >= 0) {
+    e.preventDefault();
+    const id = items[searchActiveIdx]?.dataset.id;
+    if (id) {
+      selectNode(id);
+      searchResults.style.display = 'none';
+      searchTerm = '';
+      searchInput.value = '';
+      applyVisualState();
+    }
+  } else if (e.key === 'Escape') {
+    searchResults.style.display = 'none';
+    searchTerm = '';
+    searchInput.value = '';
+    searchActiveIdx = -1;
+    applyVisualState();
+  }
+});
+
+searchInput.addEventListener('focus', () => { if (searchTerm) updateSearchDropdown(); });
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#search')) searchResults.style.display = 'none';
+});
+
+function updateSearchDropdown() {
+  if (!searchTerm || searchTerm.length < 1) {
+    searchResults.style.display = 'none';
+    return;
+  }
+
+  const matches = allNodes
+    .filter(n => n.name.toLowerCase().includes(searchTerm))
+    .slice(0, 20);
+
+  if (!matches.length) {
+    searchResults.style.display = 'none';
+    return;
+  }
+
+  searchResults.innerHTML = matches.map((n, i) =>
+    `<div class="search-item${i === searchActiveIdx ? ' active' : ''}" data-id="${n.id}">
+      <span class="dot" style="background:${TYPE_COLORS[n.type]||'#888'}"></span>
+      <span class="name">${n.name}</span>
+      <span class="domain-tag">${n.domain || ''}</span>
+    </div>`
+  ).join('');
+
+  searchResults.style.display = 'block';
+
+  searchResults.querySelectorAll('.search-item').forEach(el => {
+    el.addEventListener('click', () => {
+      selectNode(el.dataset.id);
+      searchResults.style.display = 'none';
+      searchTerm = '';
+      searchInput.value = '';
+      applyVisualState();
+    });
+  });
+}
+
+// Ingest: free-text note input
+document.getElementById('ingest-input').addEventListener('keydown', async (e) => {
+  if (e.key === 'Enter' && e.shiftKey) {
+    e.preventDefault();
+    const input = document.getElementById('ingest-input');
+    const status = document.getElementById('ingest-status');
+    const text = input.value.trim();
+    if (!text) return;
+
+    // Get currently selected node for context
+    const selNode = selectedId ? allNodes.find(n => n.id === selectedId) : null;
+    const selectedNode = selNode ? { id: selNode.id, name: selNode.name, description: selNode.description } : null;
+
+    status.textContent = 'Extracting...';
+    status.className = 'loading';
+    input.disabled = true;
+
+    try {
+      const resp = await fetch(`${API}/api/ingest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, selectedNode }),
+      });
+      const data = await resp.json();
+
+      if (resp.ok) {
+        status.textContent = data.summary;
+        status.className = 'success';
+        input.value = '';
+
+        // Reload graph data
+        const [nr, er] = await Promise.all([
+          fetch(`${API}/api/nodes`).then(r => r.json()),
+          fetch(`${API}/api/assertions`).then(r => r.json()),
+        ]);
+        allNodes = nr.map(n => ({ ...n, id: n.id }));
+        allEdges = er.map(e => ({ ...e, source: e.source, target: e.target }));
+
+        // Rebuild filters (new types/domains/rels may have appeared)
+        // For simplicity, just add new ones to active sets
+        allNodes.forEach(n => { activeTypes.add(n.type); if (n.domain) activeDomains.add(n.domain); });
+        allEdges.forEach(e => activeRels.add(e.relation));
+
+        update();
+
+        // Clear status after 5s
+        setTimeout(() => { status.textContent = ''; status.className = ''; }, 5000);
+      } else {
+        status.textContent = data.error || 'Failed';
+        status.className = 'error';
+      }
+    } catch (err) {
+      status.textContent = 'Network error';
+      status.className = 'error';
+    }
+
+    input.disabled = false;
+    input.focus();
+  }
+});
+
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+node_modules/
+dist/
+data/
+data-*/
+sessions/
+scripts/output/
+.env
+.env.personal
+.env.sources
+.kdl-markers/
+*.session
+*.db
+*.db.wal
+embeddings.json
+.DS_Store
