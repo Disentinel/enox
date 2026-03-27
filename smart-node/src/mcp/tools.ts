@@ -5,6 +5,7 @@ import { queryAll, queryOne, execute } from '../db.js';
 import { computeFactId } from '../util.js';
 import { NODE_TYPES, RELATION_TYPES, ENTITY_URI_PREFIX } from '../types.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { logQuery } from '../lance.js';
 
 export function registerTools(server: McpServer): void {
   server.registerTool(
@@ -20,6 +21,7 @@ export function registerTools(server: McpServer): void {
       },
     },
     async ({ query, node_id, relation, type }) => {
+      const startTime = Date.now();
       // If node_id is given, return neighbors
       if (node_id) {
         const conditions = relation ? 'AND r.relation = $relation ' : '';
@@ -42,6 +44,14 @@ export function registerTools(server: McpServer): void {
           { id: node_id },
         );
 
+        logQuery({
+          tool: 'query_graph',
+          queryText: node_id ?? '',
+          nodeIds: [node_id],
+          resultCount: 1,
+          responseMs: Date.now() - startTime,
+          source: 'mcp',
+        }).catch(() => {});
         return {
           content: [
             {
@@ -74,6 +84,14 @@ export function registerTools(server: McpServer): void {
         'RETURN e.id AS id, e.type AS type, e.name AS name, e.description AS description, e.aliases AS aliases';
 
       const nodes = await queryAll(cypher, params);
+      logQuery({
+        tool: 'query_graph',
+        queryText: query ?? type ?? '',
+        nodeIds: (nodes as any[]).map((n: any) => n.id),
+        resultCount: (nodes as any[]).length,
+        responseMs: Date.now() - startTime,
+        source: 'mcp',
+      }).catch(() => {});
       return {
         content: [
           {

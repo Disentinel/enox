@@ -20,6 +20,10 @@ export const NODE_TYPES = [
   'effort',
   'task',
   'session',
+  // research
+  'paper',
+  'framework',
+  'tool',
 ] as const;
 
 export type NodeType = (typeof NODE_TYPES)[number];

@@ -42,8 +42,9 @@ SELECTED_PLACEHOLDER
 
 async function getExistingGraph(): Promise<string> {
   try {
+    // Limit to 200 concept/pattern/component nodes to avoid prompt overflow (6700+ total)
     const nodes = await queryAll<{ id: string; name: string }>(
-      'MATCH (e:Entity) RETURN e.id AS id, e.name AS name',
+      "MATCH (e:Entity) WHERE e.type IN ['concept', 'pattern', 'component'] RETURN e.id AS id, e.name AS name LIMIT 200",
     );
     return nodes.map((n) => `${n.id} — ${n.name}`).join('\n');
   } catch {
@@ -93,7 +94,7 @@ export async function ingest(req: Request, res: Response) {
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: 'Extraction failed', detail: msg.slice(0, 200) });
+    const stdout2 = (err as any).stdout ? (err as any).stdout.toString().slice(0, 500) : "no stdout"; const stderr = (err as any).stderr ? (err as any).stderr.toString().slice(0, 500) : "no stderr"; res.status(500).json({ error: "Extraction failed", detail: msg.slice(0, 500), stderr, stdout: stdout2, status: (err as any).status });
     return;
   }
 

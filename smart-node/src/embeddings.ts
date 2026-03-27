@@ -1,44 +1,33 @@
-import fs from 'node:fs';
+/**
+ * Embeddings module — now backed by LanceDB instead of JSON.
+ *
+ * Keeps the same public API (startEmbeddingWorker, searchSimilar, etc.)
+ * but stores vectors in LanceDB for persistence and scalability.
+ */
+
 import path from 'node:path';
-import { queryAll, execute } from './db.js';
+import { queryAll } from './db.js';
+import {
+  openLanceDb,
+  upsertEmbeddingsBatch,
+  searchSimilarLance,
+  getEmbeddingCount,
+  hasEmbedding,
+  migrateFromJson,
+} from './lance.js';
 
 // Lazy-loaded pipeline
 let embedPipeline: any = null;
 const EMBEDDING_DIM = 384; // all-MiniLM-L6-v2
-const EMBEDDINGS_FILE = path.resolve(process.env.KUZU_DB_PATH ?? './data/enox.db', '..', 'embeddings.json');
+const EMBEDDINGS_JSON = path.resolve(process.env.KUZU_DB_PATH ?? './data/enox.db', '..', 'embeddings.json');
 
-// In-memory store: id → float[]
-let store: Map<string, number[]> = new Map();
 let workerRunning = false;
 let workerInterval: ReturnType<typeof setInterval> | null = null;
-
-// Load embeddings from disk
-export function loadEmbeddings(): void {
-  if (fs.existsSync(EMBEDDINGS_FILE)) {
-    try {
-      const raw = JSON.parse(fs.readFileSync(EMBEDDINGS_FILE, 'utf-8'));
-      store = new Map(Object.entries(raw));
-      console.log(`[embed] Loaded ${store.size} embeddings from disk`);
-    } catch {
-      console.log('[embed] Failed to load embeddings file, starting fresh');
-      store = new Map();
-    }
-  }
-}
-
-// Save embeddings to disk
-function saveEmbeddings(): void {
-  const dir = path.dirname(EMBEDDINGS_FILE);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  const obj: Record<string, number[]> = {};
-  for (const [k, v] of store) obj[k] = v;
-  fs.writeFileSync(EMBEDDINGS_FILE, JSON.stringify(obj));
-}
 
 // Initialize the embedding model (lazy, first call downloads ~80MB)
 async function getEmbedder() {
   if (!embedPipeline) {
-    console.log('[embed] Loading model all-MiniLM-L6-v2 (first time may download ~80MB)...');
+    console.log('[embed] Loading model all-MiniLM-L6-v2...');
     const { pipeline } = await import('@huggingface/transformers');
     embedPipeline = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
       dtype: 'fp32',
@@ -55,76 +44,99 @@ async function embed(text: string): Promise<number[]> {
   return Array.from(result.data as Float32Array).slice(0, EMBEDDING_DIM);
 }
 
-// Cosine similarity
-function cosineSim(a: number[], b: number[]): number {
-  let dot = 0, na = 0, nb = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    na += a[i] * a[i];
-    nb += b[i] * b[i];
-  }
-  return dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-8);
-}
-
-// Search by embedding similarity
+/**
+ * Search by embedding similarity — now via LanceDB vector search.
+ */
 export async function searchSimilar(
   query: string,
   topK = 10,
 ): Promise<Array<{ id: string; score: number }>> {
-  if (store.size === 0) return [];
+  const count = await getEmbeddingCount();
+  if (count <= 1) return []; // only seed row
 
   const qVec = await embed(query);
-  const results: Array<{ id: string; score: number }> = [];
+  const results = await searchSimilarLance(qVec, topK);
 
-  for (const [id, vec] of store) {
-    const score = cosineSim(qVec, vec);
-    results.push({ id, score });
-  }
-
-  results.sort((a, b) => b.score - a.score);
-  return results.slice(0, topK);
+  // Convert LanceDB distance to similarity score (L2 distance → 1/(1+d))
+  return results.map((r) => ({
+    id: r.id,
+    score: 1 / (1 + (r._distance ?? 0)),
+  }));
 }
 
-// Background worker: find unembedded nodes, process them one by one
+/**
+ * Background worker: find unembedded nodes, process them in batches.
+ */
 async function processUnembedded(): Promise<number> {
-  const allNodes = await queryAll<{ id: string; name: string; description: string }>(
-    'MATCH (e:Entity) RETURN e.id AS id, e.name AS name, e.description AS description',
+  const allNodes = await queryAll<{ id: string; name: string; description: string; type: string }>(
+    'MATCH (e:Entity) RETURN e.id AS id, e.name AS name, e.description AS description, e.type AS type',
   );
 
-  let processed = 0;
+  // Filter to those not yet in LanceDB
+  const toEmbed: typeof allNodes = [];
   for (const node of allNodes) {
-    if (store.has(node.id)) continue;
+    if (!(await hasEmbedding(node.id))) {
+      toEmbed.push(node);
+    }
+  }
 
-    const text = `${node.name}. ${node.description || ''}`.trim();
-    try {
-      const vec = await embed(text);
-      store.set(node.id, vec);
-      processed++;
+  if (toEmbed.length === 0) return 0;
 
-      // Save every 20 embeddings
-      if (processed % 20 === 0) {
-        saveEmbeddings();
-        console.log(`[embed] Processed ${processed} nodes...`);
+  console.log(`[embed] ${toEmbed.length} unembedded nodes found`);
+
+  const BATCH_SIZE = 20;
+  let processed = 0;
+
+  for (let i = 0; i < toEmbed.length; i += BATCH_SIZE) {
+    const batch = toEmbed.slice(i, i + BATCH_SIZE);
+    const records: Array<{ id: string; vector: number[]; name: string; type: string }> = [];
+
+    for (const node of batch) {
+      const text = `${node.name}. ${node.description || ''}`.trim();
+      try {
+        const vec = await embed(text);
+        records.push({ id: node.id, vector: vec, name: node.name, type: node.type ?? 'concept' });
+      } catch (err) {
+        console.error(`[embed] Failed to embed ${node.id}:`, err);
       }
-    } catch (err) {
-      console.error(`[embed] Failed to embed ${node.id}:`, err);
+    }
+
+    if (records.length > 0) {
+      await upsertEmbeddingsBatch(records);
+      processed += records.length;
+      console.log(`[embed] Processed ${processed}/${toEmbed.length}...`);
     }
   }
 
   if (processed > 0) {
-    saveEmbeddings();
-    console.log(`[embed] Done: ${processed} new embeddings (total: ${store.size})`);
+    console.log(`[embed] Done: ${processed} new embeddings`);
   }
 
   return processed;
 }
 
-// Start the background embedding worker
-export function startEmbeddingWorker(intervalMs = 30_000): void {
-  loadEmbeddings();
+/**
+ * Load embeddings — migrate from JSON if needed, then open LanceDB.
+ */
+export async function loadEmbeddings(): Promise<void> {
+  await openLanceDb();
+  // Migrate old JSON store if it exists
+  await migrateFromJson(EMBEDDINGS_JSON);
+}
 
-  // Run immediately after startup (with delay to let server start)
+/**
+ * Start the background embedding worker.
+ */
+export function startEmbeddingWorker(intervalMs = 30_000): void {
+  // Load/migrate on startup (async)
   setTimeout(async () => {
+    try {
+      await loadEmbeddings();
+    } catch (err) {
+      console.error('[embed] Failed to load/migrate:', err);
+    }
+
+    // First run
     workerRunning = true;
     try {
       await processUnembedded();
@@ -134,9 +146,9 @@ export function startEmbeddingWorker(intervalMs = 30_000): void {
     workerRunning = false;
   }, 5000);
 
-  // Then periodically check for new unembedded nodes
+  // Periodic
   workerInterval = setInterval(async () => {
-    if (workerRunning) return; // Skip if previous run still going
+    if (workerRunning) return;
     workerRunning = true;
     try {
       await processUnembedded();
@@ -151,7 +163,7 @@ export function stopEmbeddingWorker(): void {
   if (workerInterval) clearInterval(workerInterval);
 }
 
-// Get embedding count
 export function getEmbeddingStats(): { total: number; embedded: number } {
-  return { total: -1, embedded: store.size }; // total needs a query
+  // Synchronous — return cached or -1
+  return { total: -1, embedded: -1 }; // Use getEmbeddingCount() for async
 }
