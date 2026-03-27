@@ -5,6 +5,7 @@ import { initDb, closeDb } from './db.js';
 import { createCrudRouter } from './crud/router.js';
 import { mountMcpTransports } from './mcp/transport.js';
 import { startEmbeddingWorker, stopEmbeddingWorker } from './embeddings.js';
+import { getPopularNodes, getQueryStats, getEmbeddingCount } from './lance.js';
 import { startBackupWorker, stopBackupWorker, materialize, listSnapshots, getSnapshotPath } from './backup.js';
 import { loadConfig } from './config.js';
 import { initFederation } from './federation.js';
@@ -34,6 +35,19 @@ async function main() {
   app.use('/api', createCrudRouter());
 
   // Export: materialize graph to JSONL snapshot
+  app.get('/api/metrics', async (_req, res) => {
+    try {
+      const [popular, stats, embedCount] = await Promise.all([
+        getPopularNodes(20),
+        getQueryStats(24),
+        getEmbeddingCount(),
+      ]);
+      res.json({ popular_nodes: popular, query_stats: stats, embedding_count: embedCount });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
   app.post('/api/export', async (_req, res) => {
     try {
       const result = await materialize();

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
+    "@lancedb/lancedb": "^0.27.1",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "express": "^5.1.0",
     "kuzu": "0.11.3",
