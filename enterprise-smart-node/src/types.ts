@@ -59,7 +59,7 @@ export const SUGGESTED_RELATION_TYPES = [
   'published_in',
   'authored_by',
   'mentioned_in',
-  // openloops
+  // tasks & intents
   'task_of',
   'blocks',
   'produced_by',
@@ -68,7 +68,7 @@ export const SUGGESTED_RELATION_TYPES = [
   'decomposes_into',    // intent → task (intent broken into tasks)
   // npm registry
   'exports',     // npm_package → npm_symbol
-  // linkedin professional graph
+  // people & organizations
   'works_at',        // person → company (current)
   'worked_at',       // person → company (past)
   'has_skill',       // person → skill
