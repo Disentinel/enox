@@ -47,8 +47,16 @@ RUN apt-get update \
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-# Install the claude CLI used by the optional LLM-judge dedup / ingest workers.
-RUN npm install -g @anthropic-ai/claude-code
+# NOTE: the default image is a PURE DATA LAYER and deliberately ships with NO
+# LLM and NO `claude` CLI. Store / query / traverse / local-ONNX embed / auth /
+# admin all work with zero LLM. The LLM-dependent features (free-text note→graph
+# ingestion, LLM-judged dedup linking) are OPT-IN: an operator who wants them
+# sets LLM_INGEST_ENABLED=1 and LLM_CMD to a command of their choice, and is
+# responsible for making that command available on the host — e.g. by extending
+# this image:
+#     RUN npm install -g @anthropic-ai/claude-code
+#     ENV LLM_INGEST_ENABLED=1 \
+#         LLM_CMD="claude -p --model {model} --output-format text"
 
 # ── BAKE THE MODEL INTO THE FINAL IMAGE ──────────────────────────────────────
 # CRITICAL: this MUST run in the FINAL stage, AFTER `npm ci --omit=dev`.

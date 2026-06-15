@@ -1,6 +1,4 @@
 import { z } from 'zod';
-import { execSync } from 'node:child_process';
-import path from 'node:path';
 import { queryAll, queryOne, execute } from '../db/kuzu.js';
 import { computeFactId } from '../util.js';
 import { SUGGESTED_NODE_TYPES, SUGGESTED_RELATION_TYPES, ENTITY_URI_PREFIX } from '../types.js';

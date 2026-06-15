@@ -1,10 +1,8 @@
 import type { Request, Response } from 'express';
-import { execSync } from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
 import { queryAll } from '../db/kuzu.js';
 import { ENTITY_URI_PREFIX } from '../types.js';
 import { computeFactId } from '../util.js';
+import { isLlmEnabled, runLlm, LlmDisabledError } from '../llm.js';
 
 const PROMPT_TEMPLATE = `You are an ENOX knowledge graph extractor. You receive a short free-text note from a user about their knowledge graph. Extract entities and relations.
 
@@ -71,6 +69,18 @@ export async function ingest(req: Request, res: Response) {
     return;
   }
 
+  // Free-text note→graph extraction is an LLM-dependent feature. It is OPT-IN
+  // and OFF by default. Fail fast with a clear, actionable error rather than
+  // attempting to spawn an LLM the operator never configured. The rest of the
+  // node (CRUD / embeddings / auth / admin / MCP data tools) is unaffected.
+  if (!isLlmEnabled()) {
+    res.status(501).json({
+      error: 'LLM ingest is opt-in',
+      detail: new LlmDisabledError('Free-text note ingestion (note→graph extraction)').message,
+    });
+    return;
+  }
+
   // Build prompt
   const existingGraph = await getExistingGraph();
   const selectedCtx = selectedNode
@@ -84,16 +94,17 @@ export async function ingest(req: Request, res: Response) {
     .replace('DATEPLACEHOLDER', today);
   prompt += text;
 
-  // Run Sonnet
+  // Run the operator-configured LLM (note→graph extraction). Default model is
+  // "sonnet" (substituted into LLM_CMD's {model} placeholder); the operator
+  // controls the actual command and provider.
   let rawOutput: string;
   try {
-    rawOutput = execSync('claude -p --model sonnet --output-format text', {
-      input: prompt,
-      encoding: 'utf-8',
-      timeout: 60_000,
-      maxBuffer: 1024 * 1024,
-    });
+    rawOutput = runLlm(prompt, { feature: 'Free-text note ingestion', model: 'sonnet' });
   } catch (err: unknown) {
+    if (err instanceof LlmDisabledError) {
+      res.status(501).json({ error: 'LLM ingest is opt-in', detail: err.message });
+      return;
+    }
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: 'Extraction failed', detail: msg.slice(0, 200) });
     return;

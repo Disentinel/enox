@@ -106,12 +106,33 @@ the owner may want to decide whether they belong in the first public cut:
   review whether the federation surface should ship in v1.
 - `src/perspectives/` — extraction "perspective" definitions. `seedDefaults()` seeds
   four generic perspectives (Knowledge Extraction, Temporal Events, Opinions &
-  Preferences, Intent & Task). No personal content, but they presume the (now removed)
-  extraction pipeline.
+  Preferences, Intent & Task). These are descriptive metadata only — they carry an
+  `llm_model` field but the node never invokes an LLM from them; an external,
+  operator-run extractor is expected to consume them.
 - `src/queue/`, `src/workers/` (incl. `dedup.ts`) — task queue + worker pool + entity
-  dedup (LLM-judge via the `claude` CLI). `dedup.ts` shells out to `claude -p`; review
-  whether shelling to a CLI is acceptable for the public build.
-- `src/crud/ingest.ts` — also shells out to `claude -p` for free-text extraction.
+  dedup. The dedup worker does deterministic, embedding-based merges with NO LLM. Its
+  generative "LLM-judge" link-suggestion step is OPT-IN (see below) and is skipped with
+  a log line when no LLM is configured; the worker never crashes the node and never
+  spawns a CLI implicitly.
+- `src/crud/ingest.ts` — free-text note→graph extraction. LLM-dependent and OPT-IN; with
+  the LLM disabled (the default) `POST /api/ingest` returns HTTP 501 with a clear,
+  actionable opt-in message instead of spawning anything.
+
+### LLM features are OFF by default (pure data layer)
+
+The node stores / queries / traverses / locally-embeds (ONNX) / authenticates / admins
+with **no LLM and no `claude` CLI on the host**. The two LLM-dependent features above are
+gated behind a single mechanism in `src/llm.ts`:
+
+- `LLM_INGEST_ENABLED` (default off) — master switch.
+- `LLM_CMD` — operator-supplied command; receives the prompt on STDIN, prints the
+  completion to STDOUT. `{model}` is substituted with the requested model name. No
+  provider is hardcoded (e.g. `LLM_CMD="claude -p --model {model} --output-format text"`).
+
+When disabled or unconfigured, any LLM-dependent op fails with `LlmDisabledError` (a clear
+opt-in message) — it never silently spawns `claude` and never crashes the process. The
+default Docker image does NOT install any LLM CLI; the Dockerfile documents how an operator
+extends the image to enable these features.
 
 ## EXCLUDED — left out, flagged for owner review
 

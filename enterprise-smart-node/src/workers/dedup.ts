@@ -16,6 +16,7 @@ import { getSqlite } from '../db/sqlite.js';
 import { searchSimilar } from '../embeddings.js';
 import { materialize } from '../backup.js';
 import { computeFactId } from '../util.js';
+import { isLlmEnabled, runLlm } from '../llm.js';
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -235,13 +236,10 @@ For pairs that should NOT be linked, omit them from the array.
 Return [] if none should be linked.`;
 
   try {
-    const { execSync } = await import('node:child_process');
-    const raw = execSync('claude -p --model haiku --output-format text', {
-      input: prompt,
-      encoding: 'utf-8',
-      timeout: 60_000,
-      maxBuffer: 1024 * 1024,
-    }).trim();
+    // LLM-judged linking is opt-in. When no LLM is configured the dedup worker
+    // still does its deterministic embedding-based merges; it just skips the
+    // generative link-suggestion step. Never spawns `claude` implicitly.
+    const raw = runLlm(prompt, { feature: 'LLM-judged dedup linking', model: 'haiku' }).trim();
 
     // Extract JSON array from response
     const jsonMatch = raw.match(/\[[\s\S]*\]/);
@@ -494,17 +492,26 @@ export async function runDedupCycle(): Promise<{ candidates: number; merged: num
       }
     }
 
-    // Step 5: LLM Judge for linkable pairs
+    // Step 5: LLM Judge for linkable pairs — OPT-IN. The deterministic merges
+    // above (slug / alias / high-similarity) ran with no LLM. The generative
+    // link-suggestion step only runs when an LLM is explicitly configured.
     let linked = 0;
     const toLinkJudge = linkable.slice(0, MAX_LINKS_PER_RUN);
     if (toLinkJudge.length > 0) {
-      console.log(`[dedup] Running LLM judge on ${toLinkJudge.length} link candidates...`);
-      const judgements = await judgeLinkCandidates(toLinkJudge);
-      console.log(`[dedup] LLM judge suggested ${judgements.length} links`);
+      if (!isLlmEnabled()) {
+        console.log(
+          `[dedup] ${toLinkJudge.length} link candidate(s) skipped — LLM-judged linking is opt-in ` +
+            `(set LLM_INGEST_ENABLED=1 and LLM_CMD to enable). Deterministic merges still applied.`,
+        );
+      } else {
+        console.log(`[dedup] Running LLM judge on ${toLinkJudge.length} link candidates...`);
+        const judgements = await judgeLinkCandidates(toLinkJudge);
+        console.log(`[dedup] LLM judge suggested ${judgements.length} links`);
 
-      if (judgements.length > 0) {
-        linked = await createLinks(judgements);
-        console.log(`[dedup] Created ${linked} new links`);
+        if (judgements.length > 0) {
+          linked = await createLinks(judgements);
+          console.log(`[dedup] Created ${linked} new links`);
+        }
       }
     }
 
