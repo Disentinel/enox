@@ -1,0 +1,47 @@
+{
+  "name": "@enox/smart-node",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "dev:client": "vite --config vite.config.ts",
+    "dev:all": "npx concurrently \"npm run dev\" \"npm run dev:client\"",
+    "build": "tsc && npm run copy:assets",
+    "copy:assets": "mkdir -p dist/public && cp -r src/public/*.html dist/public/",
+    "build:client": "vite build --config vite.config.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@tanstack/react-query": "^5.91.3",
+    "better-sqlite3": "^12.8.0",
+    "express": "^5.1.0",
+    "graphology": "^0.26.0",
+    "graphology-communities-louvain": "^2.0.2",
+    "graphology-layout": "^0.6.1",
+    "graphology-layout-forceatlas2": "^0.10.1",
+    "kuzu": "0.11.3",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-router": "^7.13.1",
+    "recharts": "^3.8.0",
+    "sigma": "^3.0.2",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.2",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.15.18",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^9.2.1",
+    "tailwindcss": "^4.2.2",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vite": "^8.0.1"
+  }
+}

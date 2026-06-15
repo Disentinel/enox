@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Enox Smart Node — Admin</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, system-ui, sans-serif; background: #0a0a0f; color: #e0e0e0; margin: 0; padding: 24px; }
+  h1 { font-size: 18px; color: #8af; margin: 0 0 4px; }
+  .sub { color: #888; font-size: 13px; margin-bottom: 20px; }
+  .card { background: #14141e; border: 1px solid #2a2a36; border-radius: 8px; padding: 16px; margin-bottom: 18px; max-width: 920px; }
+  h2 { font-size: 14px; color: #cde; margin: 0 0 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid #222; }
+  th { color: #889; font-weight: 500; font-size: 11px; text-transform: uppercase; }
+  input, select { background: #0e0e16; border: 1px solid #333; border-radius: 5px; color: #e0e0e0; padding: 7px 9px; font-size: 13px; }
+  button { background: #2b6; border: none; border-radius: 5px; color: #04140a; padding: 7px 12px; font-size: 13px; cursor: pointer; font-weight: 600; }
+  button.ghost { background: #222; color: #ccc; font-weight: 400; }
+  button.danger { background: #b33; color: #fee; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+  .token { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; background: #0e0e16; border: 1px solid #353; border-radius: 5px; padding: 8px; color: #9e9; margin-top: 8px; }
+  .muted { color: #777; }
+  .pill { font-size: 11px; padding: 2px 7px; border-radius: 99px; background: #223; color: #9af; }
+  .pill.admin { background: #432; color: #fb6; }
+  .pill.off { background: #422; color: #f88; }
+  #login { max-width: 420px; }
+  .err { color: #f77; font-size: 12px; margin-top: 6px; min-height: 14px; }
+  a { color: #8af; }
+</style>
+</head>
+<body>
+<h1>Enox Smart Node — Admin</h1>
+<div class="sub">Manage users and remote-MCP bearer tokens. <a href="/legacy">Graph view →</a></div>
+
+<div class="card" id="login">
+  <h2>Admin token</h2>
+  <div class="row">
+    <input id="admin-token" type="password" placeholder="Bearer token (admin)" style="flex:1; min-width:240px;">
+    <button onclick="saveToken()">Connect</button>
+    <button class="ghost" onclick="clearToken()">Clear</button>
+  </div>
+  <div class="err" id="login-err"></div>
+</div>
+
+<div id="app" style="display:none">
+  <div class="card">
+    <h2>Create user</h2>
+    <div class="row">
+      <input id="nu-username" placeholder="username" />
+      <input id="nu-display" placeholder="display name (optional)" />
+      <select id="nu-role"><option value="member">member</option><option value="admin">admin</option></select>
+      <button onclick="createUser()">Create</button>
+    </div>
+    <div class="err" id="cu-err"></div>
+  </div>
+
+  <div class="card">
+    <h2>Users</h2>
+    <table><thead><tr><th>Username</th><th>Display</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
+    <tbody id="users-body"></tbody></table>
+  </div>
+
+  <div class="card">
+    <h2>Issue token</h2>
+    <div class="row">
+      <select id="it-user"></select>
+      <input id="it-label" placeholder="label (e.g. laptop, ci)" />
+      <button onclick="issueToken()">Issue token</button>
+    </div>
+    <div class="token" id="new-token" style="display:none"></div>
+    <div class="err" id="it-err"></div>
+  </div>
+
+  <div class="card">
+    <h2>Tokens</h2>
+    <table><thead><tr><th>User</th><th>Label</th><th>Created</th><th>Last used</th><th>Status</th><th></th></tr></thead>
+    <tbody id="tokens-body"></tbody></table>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let TOKEN = localStorage.getItem('enox_admin_token') || '';
+
+function authHeaders() { return { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' }; }
+
+async function api(method, path, body) {
+  const res = await fetch(path, { method, headers: authHeaders(), body: body ? JSON.stringify(body) : undefined });
+  if (res.status === 204) return null;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  return data;
+}
+
+function saveToken() {
+  TOKEN = $('admin-token').value.trim();
+  localStorage.setItem('enox_admin_token', TOKEN);
+  refresh();
+}
+function clearToken() { TOKEN = ''; localStorage.removeItem('enox_admin_token'); $('app').style.display='none'; }
+
+async function refresh() {
+  $('login-err').textContent = '';
+  try {
+    const users = await api('GET', '/api/admin/users');
+    $('app').style.display = 'block';
+    renderUsers(users);
+    const tokens = await api('GET', '/api/admin/tokens');
+    renderTokens(tokens);
+  } catch (e) {
+    $('app').style.display = 'none';
+    $('login-err').textContent = 'Auth failed: ' + e.message;
+  }
+}
+
+function renderUsers(users) {
+  $('users-body').innerHTML = users.map(u => `
+    <tr>
+      <td>${u.username}</td>
+      <td class="muted">${u.display_name || ''}</td>
+      <td><span class="pill ${u.role==='admin'?'admin':''}">${u.role}</span></td>
+      <td>${u.disabled ? '<span class="pill off">disabled</span>' : '<span class="pill">active</span>'}</td>
+      <td><button class="ghost" onclick="toggleUser('${u.id}', ${u.disabled?0:1})">${u.disabled?'Enable':'Disable'}</button></td>
+    </tr>`).join('');
+  $('it-user').innerHTML = users.filter(u=>!u.disabled).map(u => `<option value="${u.id}">${u.username}</option>`).join('');
+}
+
+function renderTokens(tokens) {
+  $('tokens-body').innerHTML = tokens.map(t => `
+    <tr>
+      <td>${t.username}</td>
+      <td class="muted">${t.label || ''}</td>
+      <td class="muted">${(t.created_at||'').slice(0,16)}</td>
+      <td class="muted">${(t.last_used_at||'—').slice(0,16)}</td>
+      <td>${t.revoked ? '<span class="pill off">revoked</span>' : '<span class="pill">active</span>'}</td>
+      <td>${t.revoked ? '' : `<button class="danger" onclick="revokeToken('${t.id}')">Revoke</button>`}</td>
+    </tr>`).join('');
+}
+
+async function createUser() {
+  $('cu-err').textContent = '';
+  try {
+    await api('POST', '/api/admin/users', {
+      username: $('nu-username').value.trim(),
+      display_name: $('nu-display').value.trim() || undefined,
+      role: $('nu-role').value,
+    });
+    $('nu-username').value = ''; $('nu-display').value = '';
+    refresh();
+  } catch (e) { $('cu-err').textContent = e.message; }
+}
+
+async function toggleUser(id, disabled) {
+  try { await api('POST', `/api/admin/users/${id}/disabled`, { disabled: !!disabled }); refresh(); }
+  catch (e) { alert(e.message); }
+}
+
+async function issueToken() {
+  $('it-err').textContent = ''; $('new-token').style.display = 'none';
+  try {
+    const r = await api('POST', '/api/admin/tokens', { user_id: $('it-user').value, label: $('it-label').value.trim() || undefined });
+    $('it-label').value = '';
+    $('new-token').style.display = 'block';
+    $('new-token').textContent = r.token + '   — copy now, it will not be shown again';
+    refresh();
+  } catch (e) { $('it-err').textContent = e.message; }
+}
+
+async function revokeToken(id) {
+  if (!confirm('Revoke this token?')) return;
+  try { await api('DELETE', `/api/admin/tokens/${id}`); refresh(); }
+  catch (e) { alert(e.message); }
+}
+
+if (TOKEN) { $('admin-token').value = TOKEN; refresh(); }
+</script>
+</body>
+</html>
