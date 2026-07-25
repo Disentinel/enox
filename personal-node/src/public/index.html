@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Enox Smart Node — Graph</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sigma.js/3.0.0/sigma.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/graphology/0.25.4/graphology.umd.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, system-ui, sans-serif; background: #0a0a0f; color: #e0e0e0; overflow: hidden; display: flex; }
+#graph-area { flex: 1; position: relative; }
+#sigma-container { width: 100%; height: 100vh; }
+
+#controls {
+  position: absolute; top: 12px; left: 12px; z-index: 10;
+  background: rgba(20,20,30,0.92); border: 1px solid #333; border-radius: 8px;
+  font-size: 13px; min-width: 200px; max-height: calc(100vh - 24px); overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: #444 transparent;
+}
+#controls::-webkit-scrollbar { width: 5px; }
+#controls::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+#controls h2 { font-size: 14px; padding: 12px 16px 8px; color: #8af; }
+#controls label { display: block; margin: 2px 0; cursor: pointer; padding: 0 16px; font-size: 12px; }
+#controls input[type=checkbox] { margin-right: 5px; }
+#stats { color: #888; padding: 8px 16px; font-size: 12px; border-top: 1px solid #282830; }
+.filter-section { border-bottom: 1px solid #222; }
+.filter-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 16px; cursor: pointer; user-select: none;
+  color: #888; font-size: 10px; text-transform: uppercase;
+}
+.filter-header:hover { color: #aaa; }
+.filter-header .arrow { transition: transform 0.2s; font-size: 8px; }
+.filter-header .arrow.collapsed { transform: rotate(-90deg); }
+.filter-body { padding: 0 0 4px; }
+.filter-body.collapsed { display: none; }
+
+#search { position: absolute; top: 12px; right: 372px; z-index: 10; }
+#search input {
+  background: rgba(20,20,30,0.92); border: 1px solid #444; border-radius: 6px;
+  padding: 8px 12px; color: #e0e0e0; font-size: 13px; width: 260px; outline: none;
+}
+#search input:focus { border-color: #8af; }
+#search-results {
+  background: rgba(20,20,30,0.95); border: 1px solid #444; border-top: none;
+  border-radius: 0 0 6px 6px; max-height: 320px; overflow-y: auto; display: none; width: 260px;
+}
+.search-item { padding: 6px 12px; cursor: pointer; font-size: 12px; border-bottom: 1px solid #1a1a22; display: flex; align-items: center; gap: 6px; }
+.search-item:hover { background: #1a1a28; }
+.search-item .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.search-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-item .dtag { color: #555; font-size: 10px; }
+
+#panel {
+  width: 360px; min-width: 360px; background: #111118; border-left: 1px solid #333;
+  display: flex; flex-direction: column; height: 100vh;
+}
+#panel.empty { position: relative; }
+#panel.empty::after { content: 'Click a node to inspect'; color: #555; font-size: 13px; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); }
+#panel-header { padding: 16px; border-bottom: 1px solid #282830; flex-shrink: 0; display: none; }
+#panel-header h3 { color: #e0e0e0; font-size: 15px; margin-bottom: 4px; line-height: 1.3; }
+.type-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; margin-top: 4px; }
+.domain-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; background: #282830; color: #888; margin-left: 4px; margin-top: 4px; }
+#panel-id { padding: 4px 16px 8px; color: #555; font-size: 10px; font-family: monospace; border-bottom: 1px solid #282830; word-break: break-all; flex-shrink: 0; cursor: pointer; display: none; }
+#panel-id:hover { color: #8af; }
+#panel-desc { padding: 12px 16px; color: #aaa; font-size: 12px; line-height: 1.5; border-bottom: 1px solid #282830; flex-shrink: 0; max-height: 100px; overflow-y: auto; display: none; }
+#panel-edges-title { padding: 10px 16px 6px; color: #888; font-size: 11px; text-transform: uppercase; border-bottom: 1px solid #1a1a22; flex-shrink: 0; display: none; }
+#panel-edges { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #444 transparent; }
+#panel-edges::-webkit-scrollbar { width: 5px; }
+#panel-edges::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+.edge-item { padding: 8px 16px; border-bottom: 1px solid #1a1a22; font-size: 12px; cursor: pointer; }
+.edge-item:hover { background: #1a1a28; }
+.edge-rel { color: #fa8; font-weight: 600; font-size: 11px; }
+.edge-name { color: #8af; margin-left: 4px; }
+.edge-conf { color: #555; font-size: 11px; float: right; }
+#panel-ingest { flex-shrink: 0; border-top: 1px solid #333; padding: 12px; }
+#ingest-input { width: 100%; background: #1a1a24; border: 1px solid #333; border-radius: 6px; color: #e0e0e0; font-size: 12px; font-family: inherit; padding: 8px 10px; resize: none; outline: none; }
+#ingest-input:focus { border-color: #8af; }
+#ingest-status { font-size: 11px; color: #888; margin-top: 4px; min-height: 16px; }
+#ingest-status.success { color: #93c47d; }
+#ingest-status.error { color: #e06666; }
+#ingest-status.loading { color: #f0e68c; }
+</style>
+</head>
+<body>
+<div id="graph-area">
+  <div id="controls">
+    <h2>Enox Graph</h2>
+    <div class="filter-section" id="sec-nodes"></div>
+    <div class="filter-section" id="sec-perspectives"></div>
+    <div class="filter-section" id="sec-types"></div>
+    <div class="filter-section" id="sec-domains"></div>
+    <div class="filter-section" id="sec-rels"></div>
+    <div id="stats"></div>
+  </div>
+  <div id="search">
+    <input type="text" placeholder="Search nodes..." id="search-input" autocomplete="off">
+    <div id="search-results"></div>
+  </div>
+  <div id="sigma-container"></div>
+</div>
+<div id="panel" class="empty">
+  <div id="panel-header"><h3 id="panel-name"></h3><span id="panel-badge" class="type-badge"></span><span id="panel-domain-badge" class="domain-badge"></span></div>
+  <div id="panel-id"></div>
+  <div id="panel-desc"></div>
+  <div id="panel-edges-title">Connections</div>
+  <div id="panel-edges"></div>
+  <div id="panel-ingest">
+    <textarea id="ingest-input" placeholder="Add a note... Shift+Enter to send." rows="3"></textarea>
+    <div id="ingest-status"></div>
+  </div>
+</div>
+<script>
+const API = window.location.origin;
+const TC = { concept:'#6fa8dc', decision:'#e06666', component:'#93c47d', pattern:'#f6b26b', rejected_alternative:'#999', opinion:'#ff9ff3', preference:'#c792ea', value:'#ffb8b8', belief:'#dda0dd', date:'#777', event:'#aaa', channel:'#00d2d3', post:'#54a0ff', person:'#ff6348' };
+
+let allNodes=[], allEdges=[], graph, renderer;
+let activeTypes=new Set(), activeDomains=new Set(), activeRels=new Set(), activeNodeSources=new Set(), selectedId=null;
+
+const PERSPECTIVES = {
+  'Knowledge': { types:['concept','decision','component','pattern','rejected_alternative'], rels:['depends_on','supersedes','implements','contradicts','part_of','extends','enables','isomorphic_to'], on:true, color:'#6fa8dc' },
+  'Provenance': { types:['channel','post','person','event'], rels:['published_in','authored_by','mentioned_in','discussed_on','created_on'], on:true, color:'#00d2d3' },
+  'Temporal': { types:['date'], rels:['decided_on','changed_on','preceded_by','triggered_by'], on:false, color:'#aaa' },
+  'Opinions': { types:['opinion','preference','value','belief'], rels:['prefers','distrusts','values','rejects','believes','frustrated_by'], on:false, color:'#ff9ff3' },
+};
+
+function buildFilter(id, title, items, set, colors, onChange) {
+  const sec=document.getElementById(id);
+  const h=document.createElement('div'); h.className='filter-header';
+  h.innerHTML=`<span>${title} (${items.length})</span><span class="arrow collapsed">&#9660;</span>`;
+  sec.appendChild(h);
+  const b=document.createElement('div'); b.className='filter-body collapsed'; sec.appendChild(b);
+  h.onclick=()=>{b.classList.toggle('collapsed');h.querySelector('.arrow').classList.toggle('collapsed');};
+  items.forEach(item=>{
+    const l=document.createElement('label'),c=document.createElement('input');c.type='checkbox';c.checked=true;
+    c.onchange=()=>{c.checked?set.add(item):set.delete(item);onChange();};
+    l.appendChild(c);
+    if(colors&&colors[item]){const d=document.createElement('span');d.style.cssText=`display:inline-block;width:8px;height:8px;border-radius:50%;background:${colors[item]};margin-right:4px;`;l.appendChild(d);}
+    l.appendChild(document.createTextNode(item));b.appendChild(l);
+  });
+}
+
+async function load(){
+  let nr,er;
+  try{const r=await fetch(`${API}/api/federation/graph`);if(r.ok){const d=await r.json();nr=d.nodes;er=d.edges;}}catch{}
+  if(!nr){const[a,b]=await Promise.all([fetch(`${API}/api/nodes`).then(r=>r.json()),fetch(`${API}/api/assertions`).then(r=>r.json())]);nr=a;er=b;}
+  allNodes=nr;allEdges=er;
+  if(!document.querySelector('#sec-types .filter-header')){
+    const types=[...new Set(allNodes.map(n=>n.type))].sort();
+    const domains=[...new Set(allNodes.map(n=>n.domain).filter(Boolean))].sort();
+    const rels=[...new Set(allEdges.map(e=>e.relation).filter(Boolean))].sort();
+    const nodeSources=[...new Set(allNodes.map(n=>n._node||'local'))].sort();
+
+    // Init active sets from perspectives
+    types.forEach(t=>{
+      if(Object.values(PERSPECTIVES).some(p=>p.on&&p.types.includes(t))) activeTypes.add(t);
+    });
+    rels.forEach(r=>{
+      if(Object.values(PERSPECTIVES).some(p=>p.on&&p.rels.includes(r))) activeRels.add(r);
+    });
+    domains.forEach(d=>activeDomains.add(d));
+    nodeSources.forEach(ns=>activeNodeSources.add(ns));
+
+    // Federation nodes filter
+    if(nodeSources.length>1) buildFilter('sec-nodes','Nodes (federation)',nodeSources,activeNodeSources,null,rebuild);
+
+    // Perspectives toggle
+    const secP=document.getElementById('sec-perspectives');
+    const pH=document.createElement('div');pH.className='filter-header';
+    pH.innerHTML='<span>Perspectives</span><span class="arrow">&#9660;</span>';
+    secP.appendChild(pH);
+    const pB=document.createElement('div');pB.className='filter-body';secP.appendChild(pB);
+    pH.onclick=()=>{pB.classList.toggle('collapsed');pH.querySelector('.arrow').classList.toggle('collapsed');};
+    Object.entries(PERSPECTIVES).forEach(([name,p])=>{
+      const l=document.createElement('label'),c=document.createElement('input');c.type='checkbox';c.checked=p.on;
+      c.onchange=()=>{
+        p.on=c.checked;
+        p.types.forEach(t=>c.checked?activeTypes.add(t):activeTypes.delete(t));
+        p.rels.forEach(r=>c.checked?activeRels.add(r):activeRels.delete(r));
+        // Sync type/rel checkboxes
+        document.querySelectorAll('#sec-types input[type=checkbox]').forEach(cb=>{
+          if(p.types.includes(cb.parentElement.textContent.trim())) cb.checked=activeTypes.has(cb.parentElement.textContent.trim());
+        });
+        document.querySelectorAll('#sec-rels input[type=checkbox]').forEach(cb=>{
+          if(p.rels.includes(cb.parentElement.textContent.trim())) cb.checked=activeRels.has(cb.parentElement.textContent.trim());
+        });
+        rebuild();
+      };
+      const dot=document.createElement('span');dot.style.cssText=`display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:4px;`;
+      l.appendChild(c);l.appendChild(dot);l.appendChild(document.createTextNode(name));pB.appendChild(l);
+    });
+
+    buildFilter('sec-types','Node types',types,activeTypes,TC,rebuild);
+    buildFilter('sec-domains','Domains',domains,activeDomains,null,rebuild);
+    buildFilter('sec-rels','Relations',rels,activeRels,null,rebuild);
+  }
+  rebuild();
+}
+
+function rebuild(){
+  const ns=new Set();
+  const fn=allNodes.filter(n=>activeTypes.has(n.type)&&(!n.domain||activeDomains.has(n.domain))&&activeNodeSources.has(n._node||'local'));
+  fn.forEach(n=>ns.add(n.id));
+  const fe=allEdges.filter(e=>ns.has(e.source)&&ns.has(e.target)&&activeRels.has(e.relation));
+  document.getElementById('stats').textContent=`${fn.length} nodes, ${fe.length} edges`;
+
+  if(renderer){renderer.kill();renderer=null;}
+  graph=new graphology.Graph();
+
+  // Degree-aware layout seeding
+  const degMap={};
+  fe.forEach(e=>{degMap[e.source]=(degMap[e.source]||0)+1;degMap[e.target]=(degMap[e.target]||0)+1;});
+
+  fn.forEach((n,i)=>{
+    const a=(i/fn.length)*Math.PI*2;
+    const deg=degMap[n.id]||0;
+    const r=50+Math.max(0,500-deg*3)+Math.random()*100;
+    graph.addNode(n.id,{
+      label:n.name, x:Math.cos(a)*r+(Math.random()-0.5)*30, y:Math.sin(a)*r+(Math.random()-0.5)*30,
+      size:n.type==='event'?8:n.type==='person'?7:n.type==='component'?6:Math.min(4+deg*0.3,12),
+      color:TC[n.type]||'#888', _data:n,
+    });
+  });
+  fe.forEach(e=>{try{graph.addEdge(e.source,e.target,{size:Math.max(0.3,(e.confidence||1)),color:'#292929',_data:e});}catch{}});
+
+  const container=document.getElementById('sigma-container');
+  renderer=new Sigma(graph,container,{
+    renderEdgeLabels:false, labelRenderedSizeThreshold:6, labelColor:{color:'#999'},
+    labelFont:'system-ui', labelSize:11, defaultEdgeType:'arrow', defaultEdgeColor:'#292929',
+    minCameraRatio:0.01, maxCameraRatio:30, stagePadding:30,
+  });
+
+  // Drag support
+  let draggedNode=null, isDragging=false;
+  renderer.on('downNode',(e)=>{isDragging=true;draggedNode=e.node;graph.setNodeAttribute(draggedNode,'highlighted',true);renderer.refresh();});
+  renderer.getMouseCaptor().on('mousemovebody',(e)=>{
+    if(!isDragging||!draggedNode)return;
+    const pos=renderer.viewportToGraph(e);
+    graph.setNodeAttribute(draggedNode,'x',pos.x);
+    graph.setNodeAttribute(draggedNode,'y',pos.y);
+    e.preventSigmaDefault();e.original.preventDefault();e.original.stopPropagation();
+  });
+  renderer.getMouseCaptor().on('mouseup',()=>{if(draggedNode)graph.removeNodeAttribute(draggedNode,'highlighted');draggedNode=null;isDragging=false;});
+  renderer.on('enterNode',()=>{container.style.cursor='grab';});
+  renderer.on('leaveNode',()=>{container.style.cursor='default';});
+  renderer.on('clickNode',({node})=>{if(!isDragging)selectNode(node);});
+  renderer.on('clickStage',()=>{if(!isDragging)selectNode(null);});
+
+  renderer.setSetting('nodeReducer',(node,data)=>{
+    const r={...data};
+    if(selectedId){
+      if(node===selectedId){r.highlighted=true;r.zIndex=10;}
+      else if(graph.hasEdge(selectedId,node)||graph.hasEdge(node,selectedId)){r.highlighted=true;}
+      else{r.color='#181818';r.label='';}
+    }
+    return r;
+  });
+  renderer.setSetting('edgeReducer',(edge,data)=>{
+    const r={...data};
+    if(selectedId){const s=graph.source(edge),t=graph.target(edge);if(s!==selectedId&&t!==selectedId)r.hidden=true;else{r.color='#555';r.size=1.5;}}
+    return r;
+  });
+
+  // ForceAtlas2 layout — computed server-side
+  if(fn.length>0){
+    const iters=fn.length>5000?60:fn.length>1000?100:150;
+    document.getElementById('stats').textContent+=` (computing layout...)`;
+    fetch(`${API}/api/layout`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({nodes:fn.map(n=>({id:n.id,type:n.type})),edges:fe.map(e=>({source:e.source,target:e.target})),iterations:iters})
+    }).then(r=>r.json()).then(d=>{
+      Object.entries(d.positions).forEach(([id,pos])=>{
+        if(graph.hasNode(id)){graph.setNodeAttribute(id,'x',pos.x);graph.setNodeAttribute(id,'y',pos.y);}
+      });
+      if(renderer)renderer.refresh();
+      document.getElementById('stats').textContent=`${fn.length} nodes, ${fe.length} edges (layout: ${d.duration_ms}ms)`;
+    }).catch(()=>{
+      // Fallback to client-side if server layout fails
+      forceLayout(Math.min(50,Math.max(15,2000/fn.length)));
+    });
+  }
+}
+
+function forceLayout(iters){
+  const nodes=graph.nodes(),pos={};
+  nodes.forEach(n=>{pos[n]={x:graph.getNodeAttribute(n,'x'),y:graph.getNodeAttribute(n,'y')};});
+
+  // Barnes-Hut approximation: build grid for repulsion
+  const N=nodes.length;
+  const sampleRate=N>5000?0.05:N>2000?0.15:N>500?0.4:1;
+
+  for(let it=0;it<iters;it++){
+    const sp=2/(1+it*0.1);
+    const repStr=N>3000?800:N>1000?500:300;
+
+    // Repulsion (sampled)
+    for(let i=0;i<N;i++){
+      if(Math.random()>sampleRate&&N>500)continue;
+      const a=pos[nodes[i]];
+      for(let j=i+1;j<N;j++){
+        if(Math.random()>sampleRate&&N>500)continue;
+        const b=pos[nodes[j]];
+        const dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy+1;
+        const f=repStr*sp/d2;
+        const d=Math.sqrt(d2);
+        a.x+=dx/d*f;a.y+=dy/d*f;b.x-=dx/d*f;b.y-=dy/d*f;
+      }
+    }
+
+    // Attraction
+    graph.forEachEdge((e,a,s,t)=>{
+      const pa=pos[s],pb=pos[t];if(!pa||!pb)return;
+      const dx=pb.x-pa.x,dy=pb.y-pa.y,d=Math.sqrt(dx*dx+dy*dy)+0.1;
+      const f=d*0.005*sp;
+      pa.x+=dx/d*f;pa.y+=dy/d*f;pb.x-=dx/d*f;pb.y-=dy/d*f;
+    });
+
+    // Gravity toward center (prevents drift)
+    nodes.forEach(n=>{
+      const p=pos[n];
+      p.x*=0.998;p.y*=0.998;
+    });
+  }
+  nodes.forEach(n=>{graph.setNodeAttribute(n,'x',pos[n].x);graph.setNodeAttribute(n,'y',pos[n].y);});
+  if(renderer)renderer.refresh();
+}
+
+function selectNode(id){selectedId=id;if(renderer)renderer.refresh();showPanel(id);}
+
+function showPanel(id){
+  const p=document.getElementById('panel'),h=document.getElementById('panel-header'),
+    i=document.getElementById('panel-id'),d=document.getElementById('panel-desc'),
+    et=document.getElementById('panel-edges-title'),ed=document.getElementById('panel-edges');
+  if(!id){p.classList.add('empty');h.style.display=i.style.display=d.style.display=et.style.display='none';ed.innerHTML='';return;}
+  p.classList.remove('empty');h.style.display=i.style.display=d.style.display=et.style.display='block';
+  const n=allNodes.find(x=>x.id===id);if(!n)return;
+  document.getElementById('panel-name').textContent=n.name;
+  const bg=document.getElementById('panel-badge');bg.textContent=n.type;bg.style.background=TC[n.type]||'#888';bg.style.color='#000';
+  const db=document.getElementById('panel-domain-badge');db.textContent=n.domain||'';db.style.display=n.domain?'inline-block':'none';
+  i.textContent=n.id;i.onclick=()=>{navigator.clipboard.writeText(n.id);const s=document.createElement('span');s.style.cssText='color:#93c47d;margin-left:6px;font-size:10px;';s.textContent='copied';i.appendChild(s);setTimeout(()=>s.remove(),1500);};
+  d.textContent=n.description||'No description';
+  const out=[],inc=[];
+  allEdges.forEach(e=>{
+    if(e.source===id){const o=allNodes.find(x=>x.id===e.target);out.push({...e,otherName:o?o.name:e.target.split('/').pop(),otherId:e.target});}
+    else if(e.target===id){const o=allNodes.find(x=>x.id===e.source);inc.push({...e,otherName:o?o.name:e.source.split('/').pop(),otherId:e.source});}
+  });
+  let html='';
+  if(out.length){html+=`<div style="padding:6px 16px 2px;color:#666;font-size:10px;text-transform:uppercase">Outgoing (${out.length})</div>`;out.forEach(e=>{html+=`<div class="edge-item" data-t="${e.otherId}"><span class="edge-rel">${e.relation}</span><span class="edge-name">${e.otherName}</span><span class="edge-conf">${e.confidence||''}</span></div>`;});}
+  if(inc.length){html+=`<div style="padding:6px 16px 2px;color:#666;font-size:10px;text-transform:uppercase">Incoming (${inc.length})</div>`;inc.forEach(e=>{html+=`<div class="edge-item" data-t="${e.otherId}"><span class="edge-rel">${e.relation}</span><span class="edge-name">${e.otherName}</span><span class="edge-conf">${e.confidence||''}</span></div>`;});}
+  ed.innerHTML=html;
+  ed.querySelectorAll('.edge-item').forEach(el=>{el.onclick=()=>{
+    const tid=el.dataset.t;selectNode(tid);
+    if(graph.hasNode(tid)&&renderer){const pos=renderer.getNodeDisplayData(tid);if(pos)renderer.getCamera().animate({x:pos.x,y:pos.y,ratio:0.3},{duration:300});}
+  };});
+}
+
+// Search
+const si=document.getElementById('search-input'),sr=document.getElementById('search-results');
+si.addEventListener('input',()=>{
+  const q=si.value.toLowerCase();if(q.length<2){sr.style.display='none';return;}
+  const m=allNodes.filter(n=>n.name.toLowerCase().includes(q)).slice(0,20);
+  if(!m.length){sr.style.display='none';return;}
+  sr.innerHTML=m.map(n=>`<div class="search-item" data-id="${n.id}"><span class="dot" style="background:${TC[n.type]||'#888'}"></span><span class="name">${n.name}</span><span class="dtag">${n.domain||''}</span></div>`).join('');
+  sr.style.display='block';
+  sr.querySelectorAll('.search-item').forEach(el=>{el.onclick=()=>{
+    selectNode(el.dataset.id);sr.style.display='none';si.value='';
+    if(graph.hasNode(el.dataset.id)&&renderer){const pos=renderer.getNodeDisplayData(el.dataset.id);if(pos)renderer.getCamera().animate({x:pos.x,y:pos.y,ratio:0.3},{duration:300});}
+  };});
+});
+si.addEventListener('keydown',e=>{if(e.key==='Escape'){sr.style.display='none';si.value='';}});
+document.addEventListener('click',e=>{if(!e.target.closest('#search'))sr.style.display='none';});
+
+// Ingest
+document.getElementById('ingest-input').addEventListener('keydown',async(e)=>{
+  if(e.key==='Enter'&&e.shiftKey){e.preventDefault();
+    const inp=document.getElementById('ingest-input'),st=document.getElementById('ingest-status'),txt=inp.value.trim();if(!txt)return;
+    const sn=selectedId?allNodes.find(n=>n.id===selectedId):null;
+    st.textContent='Extracting...';st.className='loading';inp.disabled=true;
+    try{const r=await fetch(`${API}/api/ingest`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:txt,selectedNode:sn?{id:sn.id,name:sn.name,description:sn.description}:null})});
+      const d=await r.json();if(r.ok){st.textContent=d.summary;st.className='success';inp.value='';await load();setTimeout(()=>{st.textContent='';st.className='';},5000);}
+      else{st.textContent=d.error||'Failed';st.className='error';}
+    }catch{st.textContent='Network error';st.className='error';}
+    inp.disabled=false;inp.focus();
+  }
+});
+
+load();
+</script>
+</body>
+</html>

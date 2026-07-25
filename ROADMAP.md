@@ -76,7 +76,7 @@ Decision-support knowledge graph for CS research, delivered as remote MCP server
 - [ ] Demo video (30s: ask question → get structured answer)
 
 ### 3.2 Landing Page
-- [ ] enox.dev or similar
+- [ ] example.org or similar
 - [ ] Interactive graph explorer (optional, nice-to-have)
 - [ ] API key signup (Stripe for payments)
 

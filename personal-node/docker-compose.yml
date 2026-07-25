@@ -1,0 +1,27 @@
+# Enox personal node — one-command self-host.
+#
+#   AUTH_TOKEN=$(openssl rand -hex 24) docker compose up --build
+#
+# ...or just `docker compose up` to boot with the default (insecure) token.
+services:
+  enox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3700:3700"
+    volumes:
+      # Your knowledge graph, metadata, snapshots, and share tokens live here.
+      # Keep this directory out of version control (see .gitignore).
+      - ./data:/data
+    environment:
+      PORT: "3700"
+      KUZU_DB_PATH: /data/enox.db
+      SQLITE_PATH: /data/enox-meta.sqlite
+      NODE_MODE: private
+      # Bearer token required for all writes. OVERRIDE THIS before exposing the
+      # node: `AUTH_TOKEN=$(openssl rand -hex 24) docker compose up`.
+      AUTH_TOKEN: ${AUTH_TOKEN:-changeme}
+      # Optional: enables the dedup worker's LLM link-judge (see README).
+      # CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+    restart: unless-stopped

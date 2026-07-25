@@ -1,0 +1,22 @@
+# Dependencies & build output
+node_modules/
+dist/
+
+# Local graph data — NEVER commit (contains your real knowledge graph & share tokens)
+data/
+sessions/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.wal
+
+# Secrets — commit only the template (.env.example)
+.env
+.env.*
+!.env.example
+
+# Editor / OS cruft
+.DS_Store
+.kdl-markers/
