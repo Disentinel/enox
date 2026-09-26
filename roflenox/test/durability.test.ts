@@ -205,10 +205,60 @@ test('killing the engine during an admission leaves the log consistent, refuses 
     // The refused batch can simply be sent again.
     assert.equal((await post(a.url, '/batches', b)).status, 201);
     assert.equal(((await post(a.url, '/ask', { query: 'edge(F, "during", R, T)' })).body.rows as unknown[]).length, 1);
-    // An engine that dies while idle is replaced the same way.
+    // An engine that dies while idle is replaced the same way: the ask that
+    // meets the death (if one does) is refused, never answered plainly.
     process.kill(a.node.enginePid()!, 'SIGKILL');
-    await new Promise((res) => setTimeout(res, 50));
-    assert.equal(((await post(a.url, '/ask', { query: 'edge(F, "during", R, T)' })).body.rows as unknown[]).length, 1);
+    let r2 = await post(a.url, '/ask', { query: 'edge(F, "during", R, T)' });
+    if (r2.status !== 200) {
+      assert.equal(r2.body.error, 'engine_down');
+      r2 = await post(a.url, '/ask', { query: 'edge(F, "during", R, T)' });
+    }
+    assert.equal((r2.body.rows as unknown[]).length, 1);
     assert.equal(((await get(a.url, '/health')).body.engine as { restarts: number }).restarts, 2);
+  } finally { await a.stop(); }
+});
+
+test('killing the engine during an ask never yields a plain answer: the asker gets an error or unknown, and the next ask is answered', async () => {
+  let armed: string | null = null;
+  let node: Running | null = null;
+  const a = node = await start(tmpDir('askkill'), 'alice', {
+    ruleBudget: 2_000_000,
+    fault: (p) => { if (p === armed) { armed = null; process.kill(node!.node.enginePid()!, 'SIGKILL'); } },
+  });
+  try {
+    const rule = (name: string, text: string) => ({ source: name, relation: 'roflenox:rule', target: text, perspective: 'rules', confidence: 1 });
+    const b1 = batch(a.me, [fact('alice', 'knows', 'bob'), rule('base', 'n(0) :- edge(F, S, "knows", T).'), rule('grow', 'n(M) :- n(N), M is N + 1.')], null, iso(a.clock.t));
+    assert.equal((await post(a.url, '/batches', b1)).status, 201);
+    const plain = (r: { status: number; body: Record<string, unknown> }) => r.status === 200 && r.body.unknown === undefined;
+    const answered = async (p: string, body: unknown) => {
+      const r = await post(a.url, p, body);
+      assert.equal(r.status, 200, `the next ask is answered: ${JSON.stringify(r.body)}`);
+      return r;
+    };
+
+    // 1. The main world: killed as the question reaches it.
+    armed = 'engine:ask';
+    const m = await post(a.url, '/ask', { query: 'edge(F, S, R, T)' });
+    assert.ok(!plain(m), `main-world ask under a kill: ${m.status} ${JSON.stringify(m.body)}`);
+    assert.equal(m.body.error, 'engine_down');
+    assert.equal(((await answered('/ask', { query: 'edge(F, S, R, T)' })).body.rows as unknown[]).length, 3);
+
+    // 2. A rule world, killed while it evaluates the runaway rule (the probe).
+    const asking = post(a.url, '/ask', { query: 'n(X)', limit: 5 });
+    await new Promise((r) => setTimeout(r, 400));
+    process.kill(a.node.enginePid()!, 'SIGKILL');
+    const w = await asking;
+    assert.ok(!plain(w), `rule-world ask under a kill: ${w.status} ${JSON.stringify(w.body)}`);
+    const next = await answered('/ask', { query: 'n(X)', limit: 5 });
+    assert.ok((next.body.rows as unknown[]).length > 0);
+
+    // 3. why and whynot.
+    for (const op of ['why', 'whynot'] as const) {
+      armed = 'engine:explain';
+      const e = await post(a.url, `/op/${op}`, { literal: 'n(0)' });
+      assert.ok(!plain(e), `${op} under a kill: ${e.status} ${JSON.stringify(e.body)}`);
+      await answered(`/op/${op}`, { literal: 'n(0)' });
+    }
+    assert.ok(((await get(a.url, '/health')).body.engine as { restarts: number }).restarts >= 4);
   } finally { await a.stop(); }
 });

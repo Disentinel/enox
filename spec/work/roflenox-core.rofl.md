@@ -17,3 +17,7 @@ Declared as facts:
 What roflenox-core reports:
 
 - `roflenox_core` takes `r_engine_crash_recovery`.
+- `roflenox_core` finished `r_engine_crash_recovery` at "81647a8c36ae605b2ffc51a449fb870dcf399d29".
+- `roflenox_core` takes `r_snapshot_is_cache`.
+- `roflenox_core` finished `r_snapshot_is_cache` at "81647a8c36ae605b2ffc51a449fb870dcf399d29".
+- `roflenox_core` takes `r_foreign_rules_opt_in`.

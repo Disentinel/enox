@@ -547,8 +547,10 @@ export class RoflenoxNode {
   }
 
   /** One operation at a time. A dead engine is rebuilt first; an engine that
-   *  dies DURING the operation is rebuilt after it, and then a read is simply
-   *  asked again (`retry`), while a write is refused — it was not admitted. */
+   *  dies DURING the operation is rebuilt after it, and the operation is
+   *  REFUSED (503 engine_down): a write was not admitted, and a read is never
+   *  answered from a world that died under it (r_engine_crash_recovery). The
+   *  next operation is served by the rebuilt engine. */
   private serial<T>(f: () => Promise<T>, retry = false): Promise<T> {
     const run = this.queue.then(async () => {
       if (this.engine.dead) await this.rebuildEngine();
@@ -557,7 +559,7 @@ export class RoflenoxNode {
       } catch (e) {
         if (!this.engine.dead) throw e;
         await this.rebuildEngine();
-        if (retry) return f();
+        void retry;
         throw e instanceof Refusal && e.reason === 'engine_down' ? e
           : new Refusal(503, 'engine_down', 'the engine stopped during this operation; nothing was admitted; the engine is rebuilt from the log — send it again');
       }
@@ -663,6 +665,7 @@ export class RoflenoxNode {
     return this.serial(async () => {
       const scope = await this.scopeFor(requester);
       await this.requireBook(query, requester, scope, false);
+      this.fault('engine:ask');
       const ans: AskAnswer = await this.engine.ask(query, scope, perspective);
       if (perspective !== null) return ans;
       // What the authors' own rules derive, from their rule worlds.
@@ -675,7 +678,10 @@ export class RoflenoxNode {
         if (!w) continue;
         const q = rel === 'answered' ? `answered[${SYSTEM_BOOK}](${roflString(b)}, ${args})` : `${rel}[${b}](${args})`;
         let a;
-        try { a = await w.ask(q); } catch { continue; }
+        try { a = await w.ask(q); } catch (e) {
+          if (this.engine.dead) throw e;       // a death is never an empty answer
+          continue;                            // the relation is not in this world
+        }
         if (ans.vars.length === 0) ans.vars = a.vars;
         for (const r of a.rows) {
           const row = { identity: sc.identity, cells: r.map(decodeCell) };
@@ -703,6 +709,7 @@ export class RoflenoxNode {
   private async explainWith(op: 'why' | 'whynot', query: string, requester: string | null): Promise<Explanation[]> {
     const scope = await this.scopeFor(requester);
     await this.requireBook(query, requester, scope, true);
+    this.fault('engine:explain');
     const out = await (op === 'why' ? this.engine.why(query, scope) : this.engine.whynot(query, scope));
     const { rel, args } = parseLiteral(query);
     for (const e of out) {
@@ -723,25 +730,24 @@ export class RoflenoxNode {
     return new Set((this.userRules.get(author) ?? []).map((r) => /^([a-z][A-Za-z0-9_]*)\[/.exec(r.text)?.[1] ?? ''));
   }
 
-  /** Rules that run for `author` here: those it posted to this node itself,
-   *  and — only if this node's operator trusts the author for rules — those
-   *  that arrived by mirror. Mirrored books bring facts, not code, by default.
-   *  Trust is a fact in the operator's own book:
+  /** Rules that run for `author` here: the operator's own, and another
+   *  identity's only while this node's operator TRUSTS it for rules — whether
+   *  its rules came by mirror or were posted here by the author: a stranger is
+   *  admitted on first contact, and must not get code execution by it
+   *  (r_foreign_rules_opt_in). A book brings its facts, never its code, by
+   *  default. Trust is a fact in the operator's own book:
    *    {source: <author>, relation: "roflenox:trust_rules", target: <anything>}
    *  with a current confidence above 0 (re-asserting it at 0 withdraws it). */
   private async runnableRules(author: string): Promise<string[]> {
-    const all = this.userRules.get(author) ?? [];
-    const own = all.filter((r) => !r.mirrored).map((r) => r.text);
-    if (own.length === all.length) return own;
+    const all = (this.userRules.get(author) ?? []).map((r) => r.text);
+    if (all.length === 0) return all;
     const op = this.identity?.name;
-    let trusted = author === op;
-    if (!trusted && op && this.chains.has(op)) {
-      const b = bookOf(op);
-      const facts = await this.engine.sysRows(`edge[${b}](F, ${roflString(author)}, "roflenox:trust_rules", T)`);
-      const live = new Set((await this.engine.sysRows(`current[${SYSTEM_BOOK}](${roflString(b)}, F, P, C)`)).filter((r) => Number(r[2]) > 0).map((r) => String(r[0])));
-      trusted = facts.some((r) => live.has(String(r[0])));
-    }
-    return trusted ? all.map((r) => r.text) : own;
+    if (author === op) return all;
+    if (!op || !this.chains.has(op)) return [];
+    const b = bookOf(op);
+    const facts = await this.engine.sysRows(`edge[${b}](F, ${roflString(author)}, "roflenox:trust_rules", T)`);
+    const live = new Set((await this.engine.sysRows(`current[${SYSTEM_BOOK}](${roflString(b)}, F, P, C)`)).filter((r) => Number(r[2]) > 0).map((r) => String(r[0])));
+    return facts.some((r) => live.has(String(r[0]))) ? all : [];
   }
 
   /** The author's rule world, rebuilt when anything was admitted since, and
@@ -781,6 +787,7 @@ export class RoflenoxNode {
       await w.session.load(rules.map((r) => `${r}\n`).join(''), author);
       await w.evaluate();
     } catch (e) {
+      if (this.engine.dead) throw e;
       w.partial = true;
       w.holes = [`engine_refused: ${(e as Error).message.slice(0, 200)}`];
     }

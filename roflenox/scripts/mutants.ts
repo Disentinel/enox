@@ -8,7 +8,7 @@
 // moved and the mutant would silently test nothing). Survivors by design are
 // listed with the reason and not run.
 //
-//   npm run mutants                         every mutant, 4 workers
+//   npm run mutants                         every mutant, 2 workers (or cpus/4, if fewer)
 //   npm run mutants -- --only M2,M14        some of them
 //   npm run mutants -- --extra more.json    add mutants (same shape) — the gate's own test uses this
 //   npm run mutants -- --workers 8
@@ -28,7 +28,7 @@ function args(): { only: Set<string> | null; extra: string | null; workers: numb
   const a = process.argv.slice(2);
   const get = (k: string) => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] ?? null : null; };
   const only = get('--only');
-  return { only: only ? new Set(only.split(',')) : null, extra: get('--extra'), workers: Number(get('--workers') ?? 4) };
+  return { only: only ? new Set(only.split(',')) : null, extra: get('--extra'), workers: Number(get('--workers') ?? Math.max(1, Math.min(2, Math.floor(os.cpus().length / 4)))) };
 }
 
 function load(extra: string | null): Mutant[] {

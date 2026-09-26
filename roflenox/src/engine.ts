@@ -78,6 +78,11 @@ export class Engine {
 
   static async fresh(bin = DEFAULT_ROFL_BIN): Promise<Engine> {
     const port = await RoflPort.start(bin);
+    // A write to a dead engine is reported by the port's write callback (and
+    // the port fails every outstanding request); the pipe's own 'error' event
+    // must not also crash this process. The vendored port does not listen for
+    // it, so the engine wrapper does.
+    (port as unknown as { child: { stdin: NodeJS.WritableStream } }).child.stdin.on('error', () => {});
     return new Engine(port, await port.fresh());
   }
 

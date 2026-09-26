@@ -58,7 +58,10 @@ export class Graph {
   static async load(node: RoflenoxNode, caller: string | null): Promise<Graph> {
     const g = new Graph();
     const facts = (await node.ask('edge(F, S, R, T)', caller)).rows as { cells: string[] }[];
-    const seqRows = await node.ask('asserted(F, P, C, S)', caller).catch(() => ({ rows: [] }));
+    const seqRows = await node.ask('asserted(F, P, C, S)', caller).catch((e: unknown) => {
+      if (e instanceof Refusal && e.reason === 'engine_down') throw e;     // never a plain answer from a dead engine
+      return { rows: [] };
+    });
     const seq = new Map<string, number>();
     for (const r of seqRows.rows as { cells: [string, string, number, number] }[]) seq.set(r.cells[0], Math.max(seq.get(r.cells[0]) ?? -1, r.cells[3]));
     const conf = new Map<string, number>();

@@ -1356,12 +1356,12 @@
   },
   {
    "id": "M98",
-   "title": "mirrored rules run without trust",
+   "title": "another identity's rules (posted or mirrored) run without trust",
    "file": "src/node.ts",
    "edits": [
     [
-     "    if (own.length === all.length) return own;",
-     "    return all.map((r) => r.text);"
+     "    if (author === op) return all;\n",
+     "    return all;\n"
     ]
    ],
    "red": [
@@ -1455,6 +1455,34 @@
    ],
    "red": [
     "a node holding 200000 facts reopens from its log within 30 seconds"
+   ]
+  },
+  {
+   "id": "M105",
+   "title": "a rule-world ask swallows the engine's death",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "          if (this.engine.dead) throw e;       // a death is never an empty answer\n",
+     ""
+    ]
+   ],
+   "red": [
+    "killing the engine during an ask never yields a plain answer: the asker gets an error or unknown, and the next ask is answered"
+   ]
+  },
+  {
+   "id": "M106",
+   "title": "a read that meets the engine's death is answered anyway (retried)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        void retry;\n",
+     "        if (retry) return f();\n"
+    ]
+   ],
+   "red": [
+    "killing the engine during an ask never yields a plain answer: the asker gets an error or unknown, and the next ask is answered"
    ]
   }
  ]

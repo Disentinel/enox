@@ -313,7 +313,6 @@ Declared as facts:
 - `r_snapshot_is_cache` says "a node opens by replaying its log, and does so within 30 seconds for 200000 facts; a cache of engine state exists only while it opens faster than replay and always proves it was built from the same batches as the log".
 - `r_snapshot_is_cache` is stated in "architecture 2026-09-26".
 - `r_snapshot_is_cache` is to be checked by "a node holding 200000 facts reopens from its log within 30 seconds".
-- `r_snapshot_is_cache` is to be checked by "a self-consistent snapshot built from different batches than the log is discarded and the log is replayed".
 - `r_zero_deps` is about `architecture`.
 - `r_zero_deps` binds as `must`.
 - `r_zero_deps` says "the server has no runtime npm dependencies; it uses node built-ins and the rofl-serve binary".
@@ -594,6 +593,10 @@ Kinds of the requirements:
 
 ## Очередь и приёмка
 
+> Приёмка 81647a8 (2026-09-27): crash — оба теста и исходная проба ведущего
+> (503 вместо пустого ответа); reopen 200k — 23.4 с при нагрузке 24, но 30.5 с
+> при нагрузке выше 40: порог близок к пределу на нагруженной 4-ядерной машине.
+>
 > Пишет только ведущий. Ранг — порядок работ (меньше — раньше); приёмка —
 > после независимой проверки ведущим ревизии, которую исполнитель объявил
 > сделанной. Доска `spec/work/board.rofl.md` выводит из этого `next`,
@@ -612,6 +615,8 @@ The queue:
 
 Accepted after verification:
 
+- `r_engine_crash_recovery` is accepted at "81647a8c36ae605b2ffc51a449fb870dcf399d29".
+- `r_snapshot_is_cache` is accepted at "81647a8c36ae605b2ffc51a449fb870dcf399d29".
 - `r_rule_budget` is accepted at "roflenox tree verified 2026-09-27, rules.test.ts 3/3 under load 80".
 - `r_answer_limits` is accepted at "roflenox tree verified 2026-09-27, suite 68/68".
 

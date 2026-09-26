@@ -7,6 +7,7 @@ import { batch, DAY, exportRule, fact, grant, identityAt, iso, post, start, T0, 
 import type { LocalIdentity } from '../src/identity.ts';
 
 const rule = (name: string, text: string) => ({ source: name, relation: 'roflenox:rule', target: text, perspective: 'rules', confidence: 1 });
+const trust = (author: string, confidence = 1) => ({ source: author, relation: 'roflenox:trust_rules', target: 'rules', perspective: 'policy', confidence });
 
 /** bob knows where people work and lets alice read it for a day; alice has a rule over it. */
 async function setup(tag: string): Promise<{ n: Running; alice: LocalIdentity; bob: LocalIdentity }> {
@@ -17,6 +18,8 @@ async function setup(tag: string): Promise<{ n: Running; alice: LocalIdentity; b
   await publish(n.url, bob, [fact('ada', 'works_at', 'acme'), fact('grace', 'works_at', 'acme'), fact('linus', 'works_at', 'osdl'),
     grant('alice', iso(T0 + DAY))], () => n.clock.t);
   await publish(n.url, alice, [rule('colleagues', 'colleague(P) :- edge[@bob](F, P, "works_at", "acme").')], () => n.clock.t);
+  // The hub runs alice's rules because its operator trusts her for rules.
+  await publish(n.url, n.me, [trust('alice')], () => n.clock.t);
   return { n, alice, bob };
 }
 
@@ -89,6 +92,7 @@ test('an unbounded rule yields unknown with its budget named, and another identi
   const bob = identityAt(tmpDir('budget-bob'), 'bob');
   const timed = async <T>(f: () => Promise<T>) => { const t = performance.now(); const r = await f(); return [r, performance.now() - t] as const; };
   try {
+    await publish(n.url, n.me, [trust('alice')], () => n.clock.t);
     // Baselines on this machine, now (the suite runs under load): one ordinary admission.
     const [, bobAlone] = await timed(() => publish(n.url, bob, [fact('bob', 'knows', 'dave')], () => n.clock.t));
     // The repro: a rule that counts forever. Its batch is admitted like any other —
@@ -126,7 +130,7 @@ test('a mirrored rule does not run until the reader trusts its author for rules,
   try {
     await publish(a.url, a.me, [fact('ada', 'knows', 'grace'), rule('knowers', 'knower(X) :- edge(F, X, "knows", T).'), exportRule('*', 'public')], () => a.clock.t);
     const knowers = async (url: string) => ((await post(url, '/ask', { query: 'knower(X)' })).body.rows as { cells: string[] }[]).map((r) => r.cells[0]);
-    assert.deepEqual(await knowers(a.url), ['ada'], 'control: at home, posted by its author, the rule runs');
+    assert.deepEqual(await knowers(a.url), ['ada'], 'control: at home, the operator\'s own rule runs');
 
     assert.deepEqual(await mirror(b.url, a.url, 'pubr', undefined, () => b.clock.t), { identity: 'pubr', batches: 1 });
     // The facts came; the code did not run.
@@ -134,11 +138,19 @@ test('a mirrored rule does not run until the reader trusts its author for rules,
     assert.deepEqual(await knowers(b.url), []);
 
     // The reader trusts the author for rules — a fact in its own book — and then it does.
-    const trust = { source: 'pubr', relation: 'roflenox:trust_rules', target: 'rules', perspective: 'policy', confidence: 1 };
-    await publish(b.url, b.me, [trust], () => b.clock.t);
+    await publish(b.url, b.me, [trust('pubr')], () => b.clock.t);
     assert.deepEqual(await knowers(b.url), ['ada']);
     // Withdrawn (re-asserted at confidence 0): inert again.
-    await publish(b.url, b.me, [{ ...trust, confidence: 0 }], () => b.clock.t);
+    await publish(b.url, b.me, [trust('pubr', 0)], () => b.clock.t);
     assert.deepEqual(await knowers(b.url), []);
+
+    // POSTED is no different: a never-seen identity that posts a rule to the
+    // reader is admitted (facts), but its rule does not run until trusted.
+    const stranger = identityAt(tmpDir('trust-s'), 'stranger');
+    await publish(b.url, stranger, [fact('sam', 'knows', 'kim'), rule('knowers', 'knower(X) :- edge(F, X, "knows", T).')], () => b.clock.t);
+    assert.equal(((await post(b.url, '/ask', { query: 'edge(F, "sam", "knows", T)' })).body.rows as unknown[]).length, 1);
+    assert.deepEqual(await knowers(b.url), []);
+    await publish(b.url, b.me, [trust('stranger')], () => b.clock.t);
+    assert.deepEqual(await knowers(b.url), ['sam']);
   } finally { await a.stop(); await b.stop(); }
 });
