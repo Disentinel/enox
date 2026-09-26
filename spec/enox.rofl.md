@@ -28,6 +28,8 @@ Declared as facts:
 - <a id="lives"></a>A check C lives in a file P
 - <a id="planned"></a>A requirement R is to be checked by a text T
 - <a id="kind"></a>A requirement R is of a kind K
+- <a id="queued"></a>A requirement R is queued at a rank N
+- <a id="accepted"></a>A requirement R is accepted at a revision V
 
 > Вид требования, закрытый список: `feature` — что можно делать; `model` — что
 > такое данные; `security` — защита от враждебной стороны; `reliability` —
@@ -87,6 +89,12 @@ Declared as facts:
 - `r_no_silent_reset` says "a store that cannot be read is never replaced by an empty one; the node refuses to start or quarantines the file and reports it".
 - `r_no_silent_reset` is stated in "incident 2026-09-18".
 - `r_no_silent_reset` is to be checked by "a committed log file that cannot be read stops the node instead of an empty start".
+- `r_engine_crash_recovery` is about `durability`.
+- `r_engine_crash_recovery` binds as `must`.
+- `r_engine_crash_recovery` says "when the engine process dies the node loses no admitted batch, refuses the batch in flight as a whole, rebuilds the engine from the log and answers again".
+- `r_engine_crash_recovery` is stated in "import of the real Enox snapshot 2026-09-27: rofl-serve panicked twice at store.rs under fork-per-batch load".
+- `r_engine_crash_recovery` is to be checked by "killing the engine during an admission leaves the log consistent, refuses that batch, and the node answers after it rebuilds".
+- `r_engine_crash_recovery` is to be checked by "killing the engine during an ask never yields a plain answer: the asker gets an error or unknown, and the next ask is answered".
 - `r_atomic_write` is about `durability`.
 - `r_atomic_write` binds as `must`.
 - `r_atomic_write` says "a process killed during any write leaves the previous consistent version readable".
@@ -119,9 +127,9 @@ Declared as facts:
 - `r_session_eviction` leaves open "after how long a session counts as idle".
 - `r_batch_write` is about `operations`.
 - `r_batch_write` binds as `should`.
-- `r_batch_write` says "a batch of assertions is written within a bounded time".
+- `r_batch_write` says "a batch of 2000 facts is admitted within one second while the node already holds 200000 facts".
 - `r_batch_write` is stated in "owner 2026-09-26".
-- `r_batch_write` leaves open "the batch size and the time bound".
+- `r_batch_write` is to be checked by "a batch of 2000 facts is admitted within one second with 200000 facts held".
 - `r_uri_prefix_stable` is about `identity`.
 - `r_uri_prefix_stable` binds as `must_not`.
 - `r_uri_prefix_stable` says "the URI prefix of a node never changes silently, including across upgrades that change defaults".
@@ -178,7 +186,7 @@ Declared as facts:
 - `r_user_rules` is to be checked by "a rule published by alice derives facts in her book from bob's granted facts, and cannot conclude into bob's book".
 - `r_foreign_rules_opt_in` is about `hybrid`.
 - `r_foreign_rules_opt_in` binds as `must`.
-- `r_foreign_rules_opt_in` says "a node runs the rules of another identity only if its operator trusts that identity for rules; a mirrored book brings its facts, never its code, by default".
+- `r_foreign_rules_opt_in` says "a node runs the rules of another identity only if its operator trusts that identity for rules, whether the rules came by mirror or were posted to the node by their author; a book brings its facts, never its code, by default".
 - `r_foreign_rules_opt_in` is stated in "verification 2026-09-26: mirroring a feed loaded its author's rules into the reader's engine".
 - `r_foreign_rules_opt_in` is to be checked by "a mirrored rule does not run until the reader trusts its author for rules, and then it does".
 - `r_rule_budget` is about `hybrid`.
@@ -201,6 +209,7 @@ Declared as facts:
 - `r_agents_as_identities` says "an agent is an identity whose key is delegated by a parent identity until an expiry; agents of a swarm write only to their own books and see each other through grants; the node needs nothing agent-specific".
 - `r_agents_as_identities` is stated in "owner 2026-09-26: swarms of agents over a federation on the same primitives".
 - `r_agents_as_identities` is to be checked by "a delegated agent key publishes until its expiry and is refused after it".
+- `r_agents_as_identities` is to be checked by "a sub-agent is refused as soon as any identity above it in the delegation chain is".
 - `r_follow` is about `hybrid`.
 - `r_follow` binds as `must`.
 - `r_follow` says "a node follows another identity's feed and keeps its mirror current, live or static, with the same checks as a single pull".
@@ -233,7 +242,7 @@ Declared as facts:
 - `r_enox_compat` is to be checked by "the tool calls an Enox client made on 2026-09-26 run unchanged against a node and get answers of the same shape".
 - `r_minimal_parts` is about `architecture`.
 - `r_minimal_parts` binds as `must`.
-- `r_minimal_parts` says "a node is one process with one log, one engine, one wire format which is the signed batch, and one proof of who which is an identity signature; its transports are stdio and HTTP; every use from one local agent to a federated swarm composes these and nothing else".
+- `r_minimal_parts` says "a node is one process with one log, one engine, one wire format which is the signed batch, and one proof of who which is an identity signature; the one declared exception is an operator bearer token that acts only as the node's own identity, for MCP clients that cannot sign requests; its transports are stdio and HTTP; every use from one local agent to a federated swarm composes these and nothing else".
 - `r_minimal_parts` is stated in "owner 2026-09-26: as few moving parts as possible".
 - `r_minimal_parts` is to be checked by "a census of the source finds no second store, queue, wire format or proof of who".
 - `r_interface_parity` is about `architecture`.
@@ -300,9 +309,9 @@ Declared as facts:
 - `r_log_is_truth` is to be checked by "delete everything except the log, restart, and every ask returns the same answers".
 - `r_snapshot_is_cache` is about `architecture`.
 - `r_snapshot_is_cache` binds as `must`.
-- `r_snapshot_is_cache` says "an engine snapshot is used only if the set of batches it was built from, read back from the engine itself, equals the set in the log; otherwise it is discarded and the log is replayed".
+- `r_snapshot_is_cache` says "a node opens by replaying its log, and does so within 30 seconds for 200000 facts; a cache of engine state exists only while it opens faster than replay and always proves it was built from the same batches as the log".
 - `r_snapshot_is_cache` is stated in "architecture 2026-09-26".
-- `r_snapshot_is_cache` is to be checked by "a snapshot from an older log head is ignored and the answers still match".
+- `r_snapshot_is_cache` is to be checked by "a node holding 200000 facts reopens from its log within 30 seconds".
 - `r_snapshot_is_cache` is to be checked by "a self-consistent snapshot built from different batches than the log is discarded and the log is replayed".
 - `r_zero_deps` is about `architecture`.
 - `r_zero_deps` binds as `must`.
@@ -550,6 +559,7 @@ Kinds of the requirements:
 - `r_session_eviction` is of `reliability`.
 - `r_batch_write` is of `reliability`.
 - `r_no_silent_reset` is of `reliability`.
+- `r_engine_crash_recovery` is of `reliability`.
 - `r_atomic_write` is of `reliability`.
 - `r_derived_rebuildable` is of `reliability`.
 - `r_log_is_truth` is of `constraint`.
@@ -566,6 +576,44 @@ Kinds of the requirements:
 - `r_confidence` is of `model`.
 - `r_perspective` is of `model`.
 
+> Решение 2026-09-27 по реальным данным (импорт 22371 сущности, 162245
+> фактов): снапшот движка открывается за 74–80 с, повтор журнала — за 15.5 с,
+> поэтому снапшоты убираются как лишняя движущаяся часть; допуск форком с
+> полным пересчётом стоит около 3.4 с на батч из 2000 фактов — нужен
+> инкрементальный пересчёт; rofl-serve (ветка spat-rust, ee6aaac) дважды
+> падал с паникой в store.rs на пути форк-на-батч — дефект движка, у узла
+> своя защита.
+
+> Решение 2026-09-27 (перепись частей): токен оператора остаётся как
+> единственное объявленное исключение из «одного доказательства кто» —
+> коннекторы claude.ai не подписывают запросы по RFC 9421. Он действует
+> только от имени идентичности узла. Направление: выразить его через
+> делегирование — токен выбирает делегированного агента, чей ключ держит
+> узел, и исключение исчезает.
+
+## Очередь и приёмка
+
+> Пишет только ведущий. Ранг — порядок работ (меньше — раньше); приёмка —
+> после независимой проверки ведущим ревизии, которую исполнитель объявил
+> сделанной. Доска `spec/work/board.rofl.md` выводит из этого `next`,
+> `in progress` и `awaits review`.
+
+The queue:
+
+- `r_engine_crash_recovery` is queued at 10.
+- `r_foreign_rules_opt_in` is queued at 20.
+- `r_snapshot_is_cache` is queued at 30.
+- `r_batch_write` is queued at 40.
+- `r_semantic_search` is queued at 50.
+- `r_uc_observability` is queued at 60.
+- `r_rule_budget` is queued at 5.
+- `r_answer_limits` is queued at 6.
+
+Accepted after verification:
+
+- `r_rule_budget` is accepted at "roflenox tree verified 2026-09-27, rules.test.ts 3/3 under load 80".
+- `r_answer_limits` is accepted at "roflenox tree verified 2026-09-27, suite 68/68".
+
 ## Проверки
 
 > Проверки, которые реально есть: тесты `personal-node` на `origin/master` и тесты `roflenox/test`, привязанные по точному совпадению названия с `is to be checked by`. Проверка головы журнала в снапшоте — фильтр-оптимизация, не защита: её перекрывает сверка набора батчей (мутант M6 выживает).
@@ -573,6 +621,22 @@ Kinds of the requirements:
 
 The checks that exist:
 
+- "why names the facts and the rule an answer stands on, and whynot names the missing premise" guards `r_ask_explain`.
+- "why names the facts and the rule an answer stands on, and whynot names the missing premise" lives in "roflenox/test/rules.test.ts".
+- "an intent derived by a rule is answered by an executor and why of the result reaches the rule" guards `r_intent_loop`.
+- "an intent derived by a rule is answered by an executor and why of the result reaches the rule" lives in "roflenox/test/executor.test.ts".
+- "a delegated agent key publishes until its expiry and is refused after it" guards `r_agents_as_identities`.
+- "a delegated agent key publishes until its expiry and is refused after it" lives in "roflenox/test/agents.test.ts".
+- "the same data directory answers the same over stdio and over HTTP" guards `r_local_stdio`.
+- "the same data directory answers the same over stdio and over HTTP" lives in "roflenox/test/stdio.test.ts".
+- "importing an Enox snapshot twice gives the same log head and every imported assertion answers by ask with its original author" guards `r_import`.
+- "importing an Enox snapshot twice gives the same log head and every imported assertion answers by ask with its original author" lives in "roflenox/test/import.test.ts".
+- "the tool calls an Enox client made on 2026-09-26 run unchanged against a node and get answers of the same shape" guards `r_enox_compat`.
+- "the tool calls an Enox client made on 2026-09-26 run unchanged against a node and get answers of the same shape" lives in "roflenox/test/enox.test.ts".
+- "a census of the source finds no second store, queue, wire format or proof of who" guards `r_minimal_parts`.
+- "a census of the source finds no second store, queue, wire format or proof of who" lives in "roflenox/test/census.test.ts".
+- "every operation in the table is reachable with the same name and schema over MCP, CLI and HTTP, and nothing outside the table is" guards `r_interface_parity`.
+- "every operation in the table is reachable with the same name and schema over MCP, CLI and HTTP, and nothing outside the table is" lives in "roflenox/test/parity.test.ts".
 - "re-asserting a fact with a new confidence leaves exactly one confidence for that identity, the latest" guards `r_confidence`.
 - "re-asserting a fact with a new confidence leaves exactly one confidence for that identity, the latest" lives in "roflenox/test/model.test.ts".
 - "a question restricted to one perspective sees only the facts asserted under it" guards `r_perspective`.

@@ -89,7 +89,7 @@ const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // A template literal with ${...} becomes a pattern where each substitution matches any text.
 export function testNames(code) {
   const out = [];
-  const re = /\b(?:test|it)(?:\.(?:only|skip|todo))?\(\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"|`((?:[^`\\]|\\.)*)`)/g;
+  const re = /(?<![.\w])(?:test|it)(?:\.(?:only|skip|todo))?\(\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"|`((?:[^`\\]|\\.)*)`)/g;
   let m;
   while ((m = re.exec(code))) {
     if (m[3] !== undefined && m[3].includes('${')) {
