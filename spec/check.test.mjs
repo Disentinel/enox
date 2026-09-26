@@ -18,10 +18,17 @@ const ROOT = resolve(HERE, '..');
 const SPEC = join(HERE, 'enox.rofl.md');
 const CHECK = join(HERE, 'check.mjs');
 
-function runCheck(specPath) {
+// ROFL_DIR is required (a rofl checkout on origin/main); the gate has no default for it.
+//   ROFL_DIR=~/src/rofl node --test spec/check.test.mjs
+const ROFL_DIR = process.env.ROFL_DIR;
+
+// ROFL_DIR is passed explicitly; env values of null remove the variable for the child.
+function runCheck(specPath, env = {}) {
+  const full = { ...process.env, SPEC_ROOT: ROOT, ROFL_DIR, ...env };
+  for (const k of Object.keys(full)) if (full[k] == null) delete full[k];
   return new Promise((res) => {
     execFile(process.execPath, [CHECK, specPath], {
-      env: { ...process.env, SPEC_ROOT: ROOT }, timeout: 60_000, maxBuffer: 16 << 20,
+      env: full, timeout: 60_000, maxBuffer: 16 << 20,
     }, (err, stdout, stderr) => res({ code: err ? (err.code ?? -1) : 0, out: stdout + stderr }));
   });
 }
@@ -39,6 +46,12 @@ async function withDefect(mutate) {
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+// The real spec's own gate run, shared: a planted defect must make things WORSE than this,
+// otherwise a check that already fails on the real spec would "pass" a defect test for free.
+let baselineRun;
+const baseline = () => (baselineRun ??= runCheck(SPEC));
+const brokenGuards = (out) => Number((checkLine(out, 4).match(/broken (\d+)\)/) ?? [])[1]);
 
 const checkLine = (out, n) => out.split('\n').find((l) => new RegExp(`^(PASS|FAIL) ${n} `).test(l)) ?? '';
 
@@ -81,8 +94,19 @@ function flipUntil(src, from, to, stop) {
 }
 
 describe('spec gate', { concurrency: true }, () => {
+  test('ROFL_DIR is set for this test run', () => {
+    assert.ok(ROFL_DIR, 'set ROFL_DIR to a rofl checkout on origin/main to run these tests');
+  });
+
+  test('without ROFL_DIR the gate fails and says where to point it', async () => {
+    const { code, out } = await runCheck(SPEC, { ROFL_DIR: null });
+    assert.equal(code, 2, out);
+    assert.match(out, /set ROFL_DIR to a rofl checkout on origin\/main/);
+    assert.doesNotMatch(out, /^PASS /m, 'no check may run without ROFL_DIR');
+  });
+
   test('the real spec passes', async () => {
-    const { code, out } = await runCheck(SPEC);
+    const { code, out } = await baseline();
     assert.equal(code, 0, out);
     for (const n of [1, 2, 3, 4, 5]) assert.match(checkLine(out, n), /^PASS /, out);
   });
@@ -90,7 +114,7 @@ describe('spec gate', { concurrency: true }, () => {
   test('a requirement with its `is of` line removed fails typing, in ROFL and textually', async () => {
     const { code, out } = await withDefect((s) => dropLine(s, /^- `r_zero_deps` is of `\w+`\.$/));
     assert.notEqual(code, 0);
-    assert.match(checkLine(out, 2), /^FAIL 2 typing: .* ROFL untyped 1, textual defects 1/);
+    assert.match(checkLine(out, 2), /^FAIL 2 typing: .* ROFL untyped 1, textual defects 1/, out);
     assert.match(out, /ROFL untyped: `r_zero_deps` is untyped/);
     assert.match(out, /textual: r_zero_deps \(line \d+\) has no `is of` line/);
   });
@@ -141,13 +165,16 @@ describe('spec gate', { concurrency: true }, () => {
     assert.notEqual(code, 0);
     assert.match(checkLine(out, 4), /^FAIL 4 links/);
     assert.ok(out.includes(`"${ghost}" is not a test in "roflenox/test/hermetic.test.ts"`), out);
+    assert.equal(brokenGuards(out), brokenGuards((await baseline()).out) + 1, out);
   });
 
   test('a guard with no `lives in` fact fails links', async () => {
     const ghost = 'a homeless check zq8';
     const { code, out } = await withDefect((s) => afterFirstGuard(s, [`- "${ghost}" guards \`r_zero_deps\`.`]));
     assert.notEqual(code, 0);
+    assert.match(checkLine(out, 4), /^FAIL 4 links/);
     assert.ok(out.includes(`"${ghost}" has no \`lives in\` fact`), out);
+    assert.equal(brokenGuards(out), brokenGuards((await baseline()).out) + 1, out);
   });
 
   // The REPL exits 0 and prints "error: ..." for a question it cannot read; that must
@@ -157,6 +184,31 @@ describe('spec gate', { concurrency: true }, () => {
     assert.notEqual(code, 0);
     assert.match(checkLine(out, 5), /^FAIL 5 status: ready 0,/);
     assert.match(out, /ROFL \? R is ready errored: error: no sentence in the vocabulary reads: R is ready/);
+  });
+
+  // A REPL that never loaded the world answers "(empty)" to everything — which reads exactly
+  // like a clean spec. The positive control (`? R is of K` before and after) must catch it.
+  test('a REPL that answers empty to everything is not trusted', async () => {
+    const fake = mkdtempSync(join(tmpdir(), 'fake-rofl-'));
+    try {
+      writeFileSync(join(fake, 'package.json'), JSON.stringify({
+        name: 'fake-rofl', type: 'module', scripts: { read: 'node read.mjs', repl: 'node repl.mjs' },
+      }));
+      writeFileSync(join(fake, 'read.mjs'),
+        "console.log('used with nowhere to link (0): \\nambiguities (0):\\n\\nunparsed (0):')");
+      writeFileSync(join(fake, 'repl.mjs'), [
+        "let n = 0; process.stdin.on('data', (d) => { n += String(d).split('\\n').filter(Boolean).length; });",
+        "process.stdin.on('end', () => { process.stdout.write('rofl> (empty)\\n'.repeat(n) + 'rofl> '); });",
+      ].join('\n'));
+      const { code, out } = await runCheck(SPEC, { ROFL_DIR: fake });
+      assert.notEqual(code, 0);
+      assert.match(checkLine(out, 1), /^PASS 1 /, out);
+      assert.match(checkLine(out, 2), /^FAIL 2 typing: .* ROFL untyped 0, textual defects 0/, out);
+      assert.match(out, /positive control \? R is of K: 0 rows, text has \d+ — ROFL answers not trusted/);
+      assert.match(checkLine(out, 5), /^FAIL 5 status: ready 0, unchecked 0, underspecified 0/);
+    } finally {
+      rmSync(fake, { recursive: true, force: true });
+    }
   });
 
   test('a sentence the reader cannot parse fails the reader', async () => {

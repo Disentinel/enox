@@ -176,6 +176,21 @@ Declared as facts:
 - `r_user_rules` says "an identity publishes rules as ordinary signed content into its own book; the engine runs them over that book and over books it is granted; a rule never concludes into another identity's book".
 - `r_user_rules` is stated in "owner 2026-09-26: a hybrid where rofl programs do something".
 - `r_user_rules` is to be checked by "a rule published by alice derives facts in her book from bob's granted facts, and cannot conclude into bob's book".
+- `r_foreign_rules_opt_in` is about `hybrid`.
+- `r_foreign_rules_opt_in` binds as `must`.
+- `r_foreign_rules_opt_in` says "a node runs the rules of another identity only if its operator trusts that identity for rules; a mirrored book brings its facts, never its code, by default".
+- `r_foreign_rules_opt_in` is stated in "verification 2026-09-26: mirroring a feed loaded its author's rules into the reader's engine".
+- `r_foreign_rules_opt_in` is to be checked by "a mirrored rule does not run until the reader trusts its author for rules, and then it does".
+- `r_rule_budget` is about `hybrid`.
+- `r_rule_budget` binds as `must`.
+- `r_rule_budget` says "each author's rules run under that author's own derivation budget; an exhausted budget makes the affected answers unknown with the reason, never a silently truncated answer, and never slows another author's admissions".
+- `r_rule_budget` is stated in "verification 2026-09-26: an unbounded rule returned exactly 500000 rows as a normal answer and held the admission queue for seconds".
+- `r_rule_budget` is to be checked by "an unbounded rule yields unknown with its budget named, and another identity's batch is admitted meanwhile without delay".
+- `r_answer_limits` is about `operations`.
+- `r_answer_limits` binds as `must`.
+- `r_answer_limits` says "an answer carries at most a stated number of rows and says when it was cut, with a way to fetch the rest".
+- `r_answer_limits` is stated in "verification 2026-09-26: a 500000-row answer came back in one response with no mark".
+- `r_answer_limits` is to be checked by "an answer longer than the limit is marked cut and the rest is fetched page by page to the same total".
 - `r_intent_loop` is about `hybrid`.
 - `r_intent_loop` binds as `must`.
 - `r_intent_loop` says "a rule derives an intent addressed to an identity; that identity's executor reads its intents like any reader, does the work outside the node, and publishes the result as a signed batch citing the intent, so why crosses from the result back to the rule that asked".
@@ -206,6 +221,16 @@ Declared as facts:
 - `r_uc_observability` says "hosts publish facts about themselves as feeds; a reader derives fleet invariants with rules and explains each finding; a silent feed gives unknown, never all-clear".
 - `r_uc_observability` is stated in "owner 2026-09-26: the first use case".
 - `r_uc_observability` is to be checked by "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why".
+- `r_import` is about `hybrid`.
+- `r_import` binds as `must`.
+- `r_import` says "an existing Enox node's graph, with entities, assertions, confidence, perspective and provenance, is imported into the log as signed batches of the importing identity, each original author kept as a fact about the fact; the import is repeatable and gives the same log for the same input".
+- `r_import` is stated in "owner 2026-09-26: fix Enox in the right direction at once".
+- `r_import` is to be checked by "importing an Enox snapshot twice gives the same log head and every imported assertion answers by ask with its original author".
+- `r_enox_compat` is about `hybrid`.
+- `r_enox_compat` binds as `must`.
+- `r_enox_compat` says "the MCP tools that current Enox clients call, such as remember, recall, semantic_search, add_assertion, batch_assertions, query_graph, explore and graph_stats, are rows of the operation table mapped onto ask, assert and executors, so a client moves by changing its URL".
+- `r_enox_compat` is stated in "owner 2026-09-26; the twenty tools of the Enox MCP server in use".
+- `r_enox_compat` is to be checked by "the tool calls an Enox client made on 2026-09-26 run unchanged against a node and get answers of the same shape".
 - `r_minimal_parts` is about `architecture`.
 - `r_minimal_parts` binds as `must`.
 - `r_minimal_parts` says "a node is one process with one log, one engine, one wire format which is the signed batch, and one proof of who which is an identity signature; its transports are stdio and HTTP; every use from one local agent to a federated swarm composes these and nothing else".
@@ -359,15 +384,10 @@ Declared as facts:
 - `r_static_feed` is stated in "verification 2026-09-26: only the home node can attest, which contradicts static nodes being first-class".
 - `r_static_feed` leaves open "the checkpoint window".
 - `r_static_feed` is to be checked by "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one".
-- `r_challenge_bounded` is about `operations`.
-- `r_challenge_bounded` binds as `must`.
-- `r_challenge_bounded` says "outstanding challenges are capped; past the cap a request gets 429 and memory does not grow".
-- `r_challenge_bounded` is stated in "verification 2026-09-26: the challenge table had no bound and POST /challenges needs no auth".
-- `r_challenge_bounded` is to be checked by "a flood of challenge requests past the cap is refused and the table stays at the cap".
 - `r_challenge_stateless` is about `operations`.
-- `r_challenge_stateless` binds as `should`.
+- `r_challenge_stateless` binds as `must`.
 - `r_challenge_stateless` says "a challenge is a nonce with its expiry authenticated by the node's own key, so issuing one stores nothing; only nonces consumed by a verified feed are remembered until they expire, and a flood of requests denies nobody else".
-- `r_challenge_stateless` is stated in "verification 2026-09-26: a global cap turns the memory attack into denial of service for honest mirrors".
+- `r_challenge_stateless` is stated in "verification 2026-09-26: a global cap turns the memory attack into denial of service for honest mirrors; it replaces the capped table".
 - `r_challenge_stateless` is to be checked by "a flood of challenge requests neither grows memory nor stops an honest mirror".
 
 Требования раздела:
@@ -507,6 +527,11 @@ Kinds of the requirements:
 - `r_local_stdio` is of `feature`.
 - `r_semantic_search` is of `feature`.
 - `r_uc_observability` is of `feature`.
+- `r_foreign_rules_opt_in` is of `security`.
+- `r_rule_budget` is of `reliability`.
+- `r_answer_limits` is of `reliability`.
+- `r_import` is of `feature`.
+- `r_enox_compat` is of `feature`.
 - `r_signed_batch` is of `security`.
 - `r_chain` is of `security`.
 - `r_admit_by_signer` is of `security`.
@@ -516,7 +541,6 @@ Kinds of the requirements:
 - `r_key_change_loud` is of `security`.
 - `r_default_deny` is of `security`.
 - `r_withheld_unguessable` is of `security`.
-- `r_challenge_bounded` is of `security`.
 - `r_challenge_stateless` is of `security`.
 - `r_uri_prefix_stable` is of `reliability`.
 - `r_snapshot_is_cache` is of `reliability`.
@@ -549,6 +573,22 @@ Kinds of the requirements:
 
 The checks that exist:
 
+- "re-asserting a fact with a new confidence leaves exactly one confidence for that identity, the latest" guards `r_confidence`.
+- "re-asserting a fact with a new confidence leaves exactly one confidence for that identity, the latest" lives in "roflenox/test/model.test.ts".
+- "a question restricted to one perspective sees only the facts asserted under it" guards `r_perspective`.
+- "a question restricted to one perspective sees only the facts asserted under it" lives in "roflenox/test/model.test.ts".
+- "a committed log file that cannot be read stops the node instead of an empty start" guards `r_no_silent_reset`.
+- "a committed log file that cannot be read stops the node instead of an empty start" lives in "roflenox/test/durability.test.ts".
+- "a node rebuilt from its latest backup answers every question the same as the node up to that backup" guards `r_backup`.
+- "a node rebuilt from its latest backup answers every question the same as the node up to that backup" lives in "roflenox/test/durability.test.ts".
+- "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one" guards `r_substrate_independent`.
+- "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one" lives in "roflenox/test/freshness.test.ts".
+- "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one" guards `r_verify_without_author`.
+- "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one" lives in "roflenox/test/freshness.test.ts".
+- "an ask answers within one second while an executor saturates its CPU budget" guards `r_executors_off_read_path`.
+- "an ask answers within one second while an executor saturates its CPU budget" lives in "roflenox/test/executor.test.ts".
+- "a flood of challenge requests neither grows memory nor stops an honest mirror" guards `r_challenge_stateless`.
+- "a flood of challenge requests neither grows memory nor stops an honest mirror" lives in "roflenox/test/freshness.test.ts".
 - "killed at index:half-written: the node restarts at the previous state and stays writable" guards `r_atomic_write`.
 - "killed at index:half-written: the node restarts at the previous state and stays writable" lives in "roflenox/test/durability.test.ts".
 - "killed at manifest:temp-written: the node restarts at the previous state and stays writable" guards `r_atomic_write`.
@@ -557,8 +597,6 @@ The checks that exist:
 - "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused" lives in "roflenox/test/freshness.test.ts".
 - "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one" guards `r_static_feed`.
 - "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one" lives in "roflenox/test/freshness.test.ts".
-- "a flood of challenge requests past the cap is refused and the table stays at the cap" guards `r_challenge_bounded`.
-- "a flood of challenge requests past the cap is refused and the table stays at the cap" lives in "roflenox/test/freshness.test.ts".
 - "a fresh install that publishes a signed batch with no manual key step" guards `r_keys_automatic`.
 - "a fresh install that publishes a signed batch with no manual key step" lives in "roflenox/test/keys.test.ts".
 - "a re-attested batch keeps its digest and gains a second, fresh signature" guards `r_reattest`.

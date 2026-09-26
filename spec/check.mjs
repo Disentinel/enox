@@ -3,7 +3,8 @@
 //
 //   node spec/check.mjs [path/to/spec.rofl.md]
 //
-// Exits 0 only if every check passes; prints one line per check.
+// Exits 0 only if every check passes, 1 if a check fails, 2 if ROFL_DIR is unset or not a
+// rofl checkout; prints one line per check.
 //
 //   1. reader    ROFL reader report: unparsed (0), ambiguities (0), used with nowhere to link (0)
 //   2. typing    r_typed: ROFL `? R is untyped` is empty, AND textually every requirement that
@@ -18,7 +19,8 @@
 //   5. status    counts of ROFL `? R is ready`, `? R is unchecked`, `? R is underspecified`
 //                (reported, never failed — unless the query itself errors).
 //
-// Env: ROFL_DIR   — a checkout of the rofl repo (needs `npm run read` and `npm run repl`)
+// Env: ROFL_DIR   — required: a checkout of the rofl repo on origin/main (needs `npm run read`
+//                   and `npm run repl`); there is no default
 //      SPEC_ROOT  — repository root that guard paths and roflenox/test resolve against
 //                   (default: the parent of this script's directory)
 
@@ -29,8 +31,6 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_ROFL_DIR =
-  '/private/tmp/claude-501/-Users-vadimr-grafema-cloud/62c8c921-0297-4023-bf2d-83a5161694ea/scratchpad/rofl';
 
 export const KINDS = ['feature', 'model', 'security', 'reliability', 'constraint', 'gate'];
 export const RESTRICTING = ['security', 'reliability', 'constraint', 'gate'];
@@ -106,22 +106,26 @@ export function testNames(code) {
 
 // ---------- ROFL tooling ----------
 
+// Each call gets a private TMPDIR: rofl's repl compiles X.rofl.md to $TMPDIR/rofl-md/X.rofl,
+// keyed by basename only, so two concurrent runs on same-named files read each other's world.
 function runRofl(roflDir, args, input) {
+  const tmp = mkdtempSync(join(tmpdir(), 'spec-check-'));
   try {
-    const stdout = execFileSync('npm', ['run', '-s', ...args], {
+    const stdout = execFileSync('npm', ['run', '-s', ...args.map((a) => (a.startsWith('$TMP/') ? join(tmp, a.slice(5)) : a))], {
       cwd: roflDir, input: input ?? '', encoding: 'utf8', timeout: 45_000,
-      stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 64 << 20,
+      stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 64 << 20, env: { ...process.env, TMPDIR: tmp },
     });
     return { code: 0, out: stdout };
   } catch (e) {
     return { code: e.status ?? -1, out: `${e.stdout ?? ''}${e.stderr ?? ''}`, err: e.message };
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
   }
 }
 
 export function readerReport(roflDir, specPath) {
-  const tmp = mkdtempSync(join(tmpdir(), 'spec-check-'));
-  try {
-    const r = runRofl(roflDir, ['read', '--', specPath, '--out', join(tmp, 'out.rofl')]);
+  const r = runRofl(roflDir, ['read', '--', specPath, '--out', join('$TMP', 'out.rofl')]);
+  {
     const num = (label) => {
       const m = r.out.match(new RegExp(`^${escRe(label)} \\((\\d+)\\):`, 'm'));
       return m ? Number(m[1]) : null;
@@ -135,8 +139,6 @@ export function readerReport(roflDir, specPath) {
       unparsed: num('unparsed'), ambiguities: num('ambiguities'), nowhere: num('used with nowhere to link'),
       unparsedLines: section('unparsed'), raw: r.out,
     };
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
   }
 }
 
@@ -162,7 +164,7 @@ export function replAsk(roflDir, specPath, queries) {
 // ---------- the checks ----------
 
 export function check(specPath, { roflDir, root } = {}) {
-  roflDir = roflDir ?? process.env.ROFL_DIR ?? DEFAULT_ROFL_DIR;
+  roflDir = roflDir ?? process.env.ROFL_DIR;
   root = root ?? process.env.SPEC_ROOT ?? resolve(HERE, '..');
   const lines = [];
   const results = [];
@@ -172,9 +174,13 @@ export function check(specPath, { roflDir, root } = {}) {
     for (const d of details) lines.push(`     ${d}`);
   };
 
+  if (!roflDir) {
+    lines.push('FAIL rofl: ROFL_DIR is not set — set ROFL_DIR to a rofl checkout on origin/main, e.g. ROFL_DIR=~/src/rofl node spec/check.mjs');
+    return { ok: false, lines, usage: true };
+  }
   if (!existsSync(join(roflDir, 'package.json'))) {
-    lines.push(`FAIL rofl: ROFL_DIR=${roflDir} is not a rofl checkout`);
-    return { ok: false, lines };
+    lines.push(`FAIL rofl: ROFL_DIR=${roflDir} is not a rofl checkout — set ROFL_DIR to a rofl checkout on origin/main`);
+    return { ok: false, lines, usage: true };
   }
   const src = readFileSync(specPath, 'utf8');
   const spec = parseSpec(src);
@@ -191,13 +197,18 @@ export function check(specPath, { roflDir, root } = {}) {
     record(ok, `1 reader: unparsed ${rd.unparsed}, ambiguities ${rd.ambiguities}, used with nowhere to link ${rd.nowhere}`, det);
   }
 
-  // One REPL session for checks 2 and 5.
-  const [untyped, ready, unchecked, underspec] =
-    replAsk(roflDir, specPath, ['R is untyped', 'R is ready', 'R is unchecked', 'R is underspecified']);
+  // One REPL session for checks 2 and 5, bracketed by a positive control: `? R is of K` must
+  // return exactly the kind facts the text has, before and after. An empty answer from a REPL
+  // that never loaded the world looks the same as a clean one; the control tells them apart.
+  const expectedKinds = new Set([...spec.kinds].flatMap(([id, ks]) => ks.map((k) => `${id}/${k.kind}`))).size;
+  const [pre, untyped, ready, unchecked, underspec, post] = replAsk(roflDir, specPath,
+    ['R is of K', 'R is untyped', 'R is ready', 'R is unchecked', 'R is underspecified', 'R is of K']);
+  const controlBad = [pre, post].filter((c) => c.error || c.rows.length !== expectedKinds || expectedKinds === 0)
+    .map((c) => `positive control ? R is of K: ${c.error ? `errored: ${c.error}` : `${c.rows.length} rows, text has ${expectedKinds}`} — ROFL answers not trusted`);
 
   // 2. typing
   {
-    const det = [];
+    const det = [...controlBad];
     if (untyped.error) det.push(`ROFL ? R is untyped errored: ${untyped.error}`);
     for (const row of untyped.rows) det.push(`ROFL untyped: ${row.replace(/ {2}\[.*$/, '')}`);
     const textual = [];
@@ -210,7 +221,7 @@ export function check(specPath, { roflDir, root } = {}) {
     for (const [id, ks] of spec.kinds) if (!spec.says.has(id)) textual.push(`${id} has a kind (line ${ks[0].n}) but no requirement says anything`);
     for (const b of spec.badKindLines) textual.push(`${b.id} \`is of\` line ${b.n} is not of the form \`kind\`: ${b.text}`);
     det.push(...textual.map((t) => `textual: ${t}`));
-    const ok = !untyped.error && untyped.rows.length === 0 && textual.length === 0;
+    const ok = controlBad.length === 0 && !untyped.error && untyped.rows.length === 0 && textual.length === 0;
     record(ok, `2 typing: ${spec.says.size} requirements, ROFL untyped ${untyped.error ? 'ERROR' : untyped.rows.length}, textual defects ${textual.length}`, det);
   }
 
@@ -252,17 +263,20 @@ export function check(specPath, { roflDir, root } = {}) {
       }
       return cache.get(file);
     };
+    // Counted once per guard fact: a guard is verified when its requirement exists, it has at
+    // least one `lives in`, and every file it lives in exists and has a test of exactly that name.
     let broken = 0, good = 0;
     for (const g of spec.guards) {
-      const homes = spec.lives.get(g.test) ?? [];
-      if (!spec.says.has(g.id)) { broken++; det.push(`guard line ${g.n} names unknown requirement ${g.id}`); }
-      if (homes.length === 0) { broken++; det.push(`guard line ${g.n} "${g.test}" has no \`lives in\` fact`); continue; }
-      for (const h of homes) {
-        const names = namesIn(h.file);
-        if (names === null) { broken++; det.push(`"${g.test}" lives in "${h.file}" which does not exist (line ${h.n})`); }
-        else if (!names.some((t) => t.match(g.test))) { broken++; det.push(`"${g.test}" is not a test in "${h.file}" (guard line ${g.n}) — guard names a test that does not exist`); }
-        else good++;
+      const problems = [];
+      const homes = [...new Set((spec.lives.get(g.test) ?? []).map((h) => h.file))];
+      if (!spec.says.has(g.id)) problems.push(`guard line ${g.n} names unknown requirement ${g.id}`);
+      if (homes.length === 0) problems.push(`guard line ${g.n} "${g.test}" has no \`lives in\` fact`);
+      for (const file of homes) {
+        const names = namesIn(file);
+        if (names === null) problems.push(`"${g.test}" lives in "${file}" which does not exist (guard line ${g.n})`);
+        else if (!names.some((t) => t.match(g.test))) problems.push(`"${g.test}" is not a test in "${file}" (guard line ${g.n}) — guard names a test that does not exist`);
       }
+      if (problems.length) { broken++; det.push(...problems); } else good++;
     }
     record(broken === 0 && suite.length > 0,
       `4 links: plans ${spec.plans.length} (linked ${linked.length}, unlinked ${unlinked.length}); guards ${spec.guards.length} (verified ${good}, broken ${broken}); suite tests ${suite.length}`, det);
@@ -271,9 +285,9 @@ export function check(specPath, { roflDir, root } = {}) {
   // 5. status
   {
     const errs = [ready, unchecked, underspec].filter((a) => a.error);
-    record(errs.length === 0,
-      `5 status: ready ${ready.rows.length}, unchecked ${unchecked.rows.length}, underspecified ${underspec.rows.length}`,
-      errs.map((a) => `ROFL ? ${a.query} errored: ${a.error}`));
+    record(errs.length === 0 && controlBad.length === 0,
+      `5 status: ready ${ready.rows.length}, unchecked ${unchecked.rows.length}, underspecified ${underspec.rows.length} (control: ${pre.rows.length}/${post.rows.length} of ${expectedKinds} kind facts)`,
+      [...controlBad, ...errs.map((a) => `ROFL ? ${a.query} errored: ${a.error}`)]);
   }
 
   return { ok: results.every(Boolean) && results.length === 5, lines };
@@ -282,8 +296,9 @@ export function check(specPath, { roflDir, root } = {}) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const t0 = Date.now();
   const specPath = resolve(process.argv[2] ?? join(HERE, 'enox.rofl.md'));
-  const { ok, lines } = check(specPath);
+  const { ok, lines, usage } = check(specPath);
   for (const l of lines) console.log(l);
   console.log(`${ok ? 'OK' : 'FAILED'} ${specPath} in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
-  process.exit(ok ? 0 : 1);
+  // 0 all checks pass, 1 a check failed, 2 the gate could not run (no usable ROFL_DIR)
+  process.exit(ok ? 0 : usage ? 2 : 1);
 }
