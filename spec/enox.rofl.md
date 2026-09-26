@@ -615,6 +615,7 @@ The queue:
 
 Accepted after verification:
 
+- `r_batch_write` is accepted at "f8d14237e81c0e829d003203764242f18727e336".
 - `r_foreign_rules_opt_in` is accepted at "092801d551b6840886541f5d5d2249e5c2fae1eb".
 - `r_engine_crash_recovery` is accepted at "81647a8c36ae605b2ffc51a449fb870dcf399d29".
 - `r_snapshot_is_cache` is accepted at "81647a8c36ae605b2ffc51a449fb870dcf399d29".
