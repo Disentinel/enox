@@ -56,6 +56,7 @@ Declared as facts:
 - `r_relation_primary` binds as `must`.
 - `r_relation_primary` says "the primary unit of data is a directed typed relation between two entities, not a document".
 - `r_relation_primary` is stated in "PROTOCOL.md#1.0".
+- `r_relation_primary` is to be checked by "a batch line that is not a relation between two entities is refused".
 - `r_asserted_by` is about `data_model`.
 - `r_asserted_by` binds as `must`.
 - `r_asserted_by` says "every assertion carries asserted_by; an assertion without it is rejected".
@@ -109,7 +110,7 @@ Declared as facts:
 - `r_derived_rebuildable` binds as `must`.
 - `r_derived_rebuildable` says "derived data such as embeddings can be rebuilt from primary data alone, and losing it never loses knowledge".
 - `r_derived_rebuildable` is stated in "incident 2026-09-18".
-- `r_derived_rebuildable` leaves open "which embedding model the public node uses by default".
+- `r_derived_rebuildable` is to be checked by "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent".
 
 ### Ресурсы и доступность
 
@@ -119,12 +120,12 @@ Declared as facts:
 - `r_bounded_memory` binds as `must`.
 - `r_bounded_memory` says "a node runs within a declared memory budget and never grows past it under idle load".
 - `r_bounded_memory` is stated in "incident 2026-09-18".
-- `r_bounded_memory` leaves open "the budget for the reference host".
+- `r_bounded_memory` is to be checked by "a node holding 200000 facts stays under 1.5 GB of resident memory while idle".
 - `r_session_eviction` is about `operations`.
 - `r_session_eviction` binds as `must`.
 - `r_session_eviction` says "an MCP session that stays idle is closed and its memory released".
 - `r_session_eviction` is stated in "incident 2026-09-18".
-- `r_session_eviction` leaves open "after how long a session counts as idle".
+- `r_session_eviction` is to be checked by "the MCP endpoint issues no session id and keeps no state per client".
 - `r_batch_write` is about `operations`.
 - `r_batch_write` binds as `should`.
 - `r_batch_write` says "a batch of 2000 facts is admitted within one second while the node already holds 200000 facts".
@@ -134,6 +135,7 @@ Declared as facts:
 - `r_uri_prefix_stable` binds as `must_not`.
 - `r_uri_prefix_stable` says "the URI prefix of a node never changes silently, including across upgrades that change defaults".
 - `r_uri_prefix_stable` is stated in "audit 2026-09-26".
+- `r_uri_prefix_stable` is to be checked by "a node whose imported ids sit under another URI prefix says so at startup".
 
 ### Перенос знания
 
@@ -158,11 +160,6 @@ Declared as facts:
 
 Требования раздела:
 
-- `r_readonly_scope` is about `access`.
-- `r_readonly_scope` binds as `should`.
-- `r_readonly_scope` says "a read-only token can be limited to chosen artifact domains".
-- `r_readonly_scope` is stated in "prod ADR-0001 and ADR-0002".
-- `r_readonly_scope` leaves open "whether this belongs in the public node or stays a private overlay".
 
 ### Возможности гибрида (решения 2026-09-26)
 
@@ -255,12 +252,12 @@ Declared as facts:
 - `r_typed` binds as `must`.
 - `r_typed` says "every requirement is of exactly one kind from the closed list".
 - `r_typed` is stated in "owner 2026-09-26".
-- `r_typed` is to be checked by "a requirement without a kind is reported by the spec itself".
+- `r_typed` is to be checked by "a requirement with an unknown kind fails typing".
 - `r_balanced` is about `spec`.
 - `r_balanced` binds as `must`.
 - `r_balanced` says "the restricting kinds, security, reliability, constraint and gate, and the enabling kinds, feature and model, stay within a factor of one and a half of each other, and no kind is empty; a skew fails the spec check".
 - `r_balanced` is stated in "owner 2026-09-26: a skew must be caught at once".
-- `r_balanced` is to be checked by "the spec check fails when the ratio leaves the band or a kind is empty".
+- `r_balanced` is to be checked by "flipping features to security past 3/2 fails balance".
 
 ### Архитектура ROFLENOX (решения 2026-09-26)
 
@@ -521,7 +518,6 @@ Kinds of the requirements:
 - `r_recovery` is of `feature`.
 - `r_offline_admission` is of `feature`.
 - `r_mcp_adapter` is of `feature`.
-- `r_readonly_scope` is of `feature`.
 - `r_grants` is of `feature`.
 - `r_encrypt_private` is of `feature`.
 - `r_backup` is of `feature`.
@@ -604,6 +600,11 @@ Kinds of the requirements:
 
 The queue:
 
+- `r_session_eviction` is queued at 45.
+- `r_bounded_memory` is queued at 47.
+- `r_relation_primary` is queued at 48.
+- `r_derived_rebuildable` is queued at 51.
+- `r_uri_prefix_stable` is queued at 44.
 - `r_engine_crash_recovery` is queued at 10.
 - `r_foreign_rules_opt_in` is queued at 20.
 - `r_snapshot_is_cache` is queued at 30.
@@ -643,6 +644,36 @@ Accepted after verification:
 
 The checks that exist:
 
+- "a node whose imported ids sit under another URI prefix says so at startup" guards `r_uri_prefix_stable`.
+- "a node whose imported ids sit under another URI prefix says so at startup" lives in "roflenox/test/import.test.ts".
+- "a requirement with an unknown kind fails typing" guards `r_typed`.
+- "a requirement with an unknown kind fails typing" lives in "spec/check.test.mjs".
+- "flipping features to security past 3/2 fails balance" guards `r_balanced`.
+- "flipping features to security past 3/2 fails balance" lives in "spec/check.test.mjs".
+- "killing the engine during an admission leaves the log consistent, refuses that batch, and the node answers after it rebuilds" guards `r_engine_crash_recovery`.
+- "killing the engine during an admission leaves the log consistent, refuses that batch, and the node answers after it rebuilds" lives in "roflenox/test/durability.test.ts".
+- "killing the engine during an ask never yields a plain answer: the asker gets an error or unknown, and the next ask is answered" guards `r_engine_crash_recovery`.
+- "killing the engine during an ask never yields a plain answer: the asker gets an error or unknown, and the next ask is answered" lives in "roflenox/test/durability.test.ts".
+- "a batch of 2000 facts is admitted within one second with 200000 facts held" guards `r_batch_write`.
+- "a batch of 2000 facts is admitted within one second with 200000 facts held" lives in "roflenox/test/perf/write.test.ts".
+- "a rule published by alice derives facts in her book from bob's granted facts, and cannot conclude into bob's book" guards `r_user_rules`.
+- "a rule published by alice derives facts in her book from bob's granted facts, and cannot conclude into bob's book" lives in "roflenox/test/rules.test.ts".
+- "a mirrored rule does not run until the reader trusts its author for rules, and then it does" guards `r_foreign_rules_opt_in`.
+- "a mirrored rule does not run until the reader trusts its author for rules, and then it does" lives in "roflenox/test/rules.test.ts".
+- "an unbounded rule yields unknown with its budget named, and another identity's batch is admitted meanwhile without delay" guards `r_rule_budget`.
+- "an unbounded rule yields unknown with its budget named, and another identity's batch is admitted meanwhile without delay" lives in "roflenox/test/rules.test.ts".
+- "an answer longer than the limit is marked cut and the rest is fetched page by page to the same total" guards `r_answer_limits`.
+- "an answer longer than the limit is marked cut and the rest is fetched page by page to the same total" lives in "roflenox/test/limits.test.ts".
+- "a sub-agent is refused as soon as any identity above it in the delegation chain is" guards `r_agents_as_identities`.
+- "a sub-agent is refused as soon as any identity above it in the delegation chain is" lives in "roflenox/test/agents.test.ts".
+- "a follower converges to the publisher's head after new batches without a manual pull" guards `r_follow`.
+- "a follower converges to the publisher's head after new batches without a manual pull" lives in "roflenox/test/follow.test.ts".
+- "an Enox read right after a write answers within one second with 200000 facts held" guards `r_enox_compat`.
+- "an Enox read right after a write answers within one second with 200000 facts held" lives in "roflenox/test/perf/write.test.ts".
+- "a node holding 200000 facts reopens from its log within 30 seconds" guards `r_snapshot_is_cache`.
+- "a node holding 200000 facts reopens from its log within 30 seconds" lives in "roflenox/test/perf/reopen.test.ts".
+- "an MCP client lists the tools, asserts a fact, and asks it back with why, all under the node's access rules" guards `r_mcp_adapter`.
+- "an MCP client lists the tools, asserts a fact, and asks it back with why, all under the node's access rules" lives in "roflenox/test/mcp.test.ts".
 - "why names the facts and the rule an answer stands on, and whynot names the missing premise" guards `r_ask_explain`.
 - "why names the facts and the rule an answer stands on, and whynot names the missing premise" lives in "roflenox/test/rules.test.ts".
 - "an intent derived by a rule is answered by an executor and why of the result reaches the rule" guards `r_intent_loop`.
