@@ -615,6 +615,7 @@ The queue:
 
 Accepted after verification:
 
+- `r_foreign_rules_opt_in` is accepted at "092801d551b6840886541f5d5d2249e5c2fae1eb".
 - `r_engine_crash_recovery` is accepted at "81647a8c36ae605b2ffc51a449fb870dcf399d29".
 - `r_snapshot_is_cache` is accepted at "81647a8c36ae605b2ffc51a449fb870dcf399d29".
 - `r_rule_budget` is accepted at "roflenox tree verified 2026-09-27, rules.test.ts 3/3 under load 80".
