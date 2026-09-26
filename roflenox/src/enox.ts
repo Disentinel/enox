@@ -54,6 +54,14 @@ export interface Edge { F: string; fact_id: string; source: string; target: stri
 export class Graph {
   nodes = new Map<string, Node>();
   edges: Edge[] = [];
+  // The raw state the view is derived from: every visible fact, its current
+  // confidence (permille) and chain position. Kept so a write is APPLIED
+  // (r_enox_compat, r_batch_write) instead of rebuilding the view from asks —
+  // 8.3 s at 200 000 facts. Re-deriving nodes/edges from it is plain JS.
+  private readonly raw = new Map<string, { S: string; R: string; T: string }>();
+  private readonly conf = new Map<string, number>();
+  private readonly seq = new Map<string, number>();
+  private dirty = true;
 
   static async load(node: RoflenoxNode, caller: string | null): Promise<Graph> {
     const g = new Graph();
@@ -62,24 +70,49 @@ export class Graph {
       if (e instanceof Refusal && e.reason === 'engine_down') throw e;     // never a plain answer from a dead engine
       return { rows: [] };
     });
-    const seq = new Map<string, number>();
-    for (const r of seqRows.rows as { cells: [string, string, number, number] }[]) seq.set(r.cells[0], Math.max(seq.get(r.cells[0]) ?? -1, r.cells[3]));
-    const conf = new Map<string, number>();
-    for (const r of (await node.ask('conf(F, C)', caller)).rows as { cells: [string, number] }[]) conf.set(r.cells[0], r.cells[1]);
+    for (const r of seqRows.rows as { cells: [string, string, number, number] }[]) g.seq.set(r.cells[0], Math.max(g.seq.get(r.cells[0]) ?? -1, r.cells[3]));
+    for (const r of (await node.ask('conf(F, C)', caller)).rows as { cells: [string, number] }[]) g.conf.set(r.cells[0], r.cells[1]);
+    for (const { cells: [F, S, R, T] } of facts) g.raw.set(F!, { S: S!, R: R!, T: T! });
+    g.derive();
+    return g;
+  }
+
+  /** Apply an admitted batch (its facts, at its chain position). */
+  apply(facts: { source: string; relation: string; target: string; confidence: number }[], seq: number): void {
+    for (const f of facts) {
+      const F = factId(f);
+      this.raw.set(F, { S: f.source, R: f.relation, T: f.target });
+      this.conf.set(F, Math.round(f.confidence * 1000));
+      this.seq.set(F, seq);
+    }
+    this.dirty = true;
+  }
+
+  /** Re-derive nodes and edges if anything was applied since. */
+  ensure(): this {
+    if (this.dirty) this.derive();
+    return this;
+  }
+
+  private derive(): void {
+    this.nodes = new Map();
+    this.edges = [];
+    const { seq, conf } = this;
     // attribute (subject, attr) → [seq, value]; multi-valued aliases apart
     const single = new Map<string, [number, string]>();
     const aliases = new Map<string, string[]>();
     const assertions: { F: string; S: string; R: string; T: string }[] = [];
-    for (const { cells: [F, S, R, T] } of facts) {
-      if (R!.startsWith('enox:')) {
-        const a = R!.slice(5);
-        if (a === 'alias') { aliases.set(S!, [...(aliases.get(S!) ?? []), T!]); continue; }
+    for (const [F, { S, R, T }] of this.raw) {
+      if ((conf.get(F) ?? 1) === 0) continue;                          // retired (confidence 0)
+      if (R.startsWith('enox:')) {
+        const a = R.slice(5);
+        if (a === 'alias') { aliases.set(S, [...(aliases.get(S) ?? []), T]); continue; }
         const key = `${S}\u0000${a}`;
-        const s = seq.get(F!) ?? 0;
+        const s = seq.get(F) ?? 0;
         const cur = single.get(key);
-        if (!cur || s >= cur[0]) single.set(key, [s, T!]);
-      } else if (!R!.startsWith('roflenox:')) {
-        assertions.push({ F: F!, S: S!, R: R!, T: T! });
+        if (!cur || s >= cur[0]) single.set(key, [s, T]);
+      } else if (!R.startsWith('roflenox:')) {
+        assertions.push({ F, S, R, T });
       }
     }
     const attr = (s: string, a: string) => single.get(`${s}\u0000${a}`)?.[1];
@@ -87,7 +120,7 @@ export class Graph {
     for (const k of single.keys()) { const [s, a] = k.split('\u0000'); if (a === 'label' || a === 'type') subjects.add(s!); }
     for (const id of subjects) {
       const listed = attr(id, 'aliases');
-      g.nodes.set(id, {
+      this.nodes.set(id, {
         id, type: attr(id, 'type') ?? 'concept', domain: attr(id, 'domain') ?? '', name: attr(id, 'label') ?? '',
         description: attr(id, 'description') ?? '', aliases: listed !== undefined ? JSON.parse(listed) as string[] : [...new Set(aliases.get(id) ?? [])].sort(),
         source_ref: attr(id, 'source_ref') ?? '', created_at: attr(id, 'created_at') ?? null, updated_at: attr(id, 'updated_at') ?? null,
@@ -97,14 +130,14 @@ export class Graph {
     for (const a of assertions) {
       const c = conf.get(a.F);
       if (c === undefined || c === 0) continue;                        // deleted (or not visible)
-      if (!g.nodes.has(a.S) || !g.nodes.has(a.T)) continue;
-      g.edges.push({
+      if (!this.nodes.has(a.S) || !this.nodes.has(a.T)) continue;
+      this.edges.push({
         F: a.F, fact_id: attr(a.F, 'fact_id') ?? enoxFactId(a.S, a.R, a.T), source: a.S, target: a.T, relation: a.R,
         confidence: c / 1000, asserted_by: attr(a.F, 'asserted_by') ?? null, context: attr(a.F, 'context') ?? '',
         proof_depth: Number(attr(a.F, 'proof_depth') ?? 0), created_at: attr(a.F, 'created_at') ?? null, updated_at: attr(a.F, 'updated_at') ?? null,
       });
     }
-    return g;
+    this.dirty = false;
   }
 
   record(n: Node) {

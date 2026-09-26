@@ -44,6 +44,8 @@ test('re-asserting a fact with a new confidence leaves exactly one confidence fo
     // Another identity's assertion of the same fact is its own, and does not replace node-a's.
     await publish(a.url, b, [fact('alice', 'knows', 'bob', 0.2)], now);
     assert.deepEqual(await conf(), [['node-a', 700], ['node-b', 200]]);
+    // The engine holds only the CURRENT assertion of each (identity, fact).
+    assert.equal(((await post(a.url, '/ask', { query: 'asserted(F, P, C, S)' })).body.rows as unknown[]).length, 2);
     // The fact itself is one edge per identity, however often it was asserted.
     assert.equal(((await post(a.url, '/ask', { query: 'edge(F, S, R, T)' })).body.rows as unknown[]).length, 2);
     // And the answer survives a rebuild from the log.

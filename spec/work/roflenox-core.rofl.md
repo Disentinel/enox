@@ -21,3 +21,5 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_snapshot_is_cache`.
 - `roflenox_core` finished `r_snapshot_is_cache` at "81647a8c36ae605b2ffc51a449fb870dcf399d29".
 - `roflenox_core` takes `r_foreign_rules_opt_in`.
+- `roflenox_core` finished `r_foreign_rules_opt_in` at "092801d551b6840886541f5d5d2249e5c2fae1eb".
+- `roflenox_core` takes `r_batch_write`.

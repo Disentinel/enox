@@ -64,6 +64,9 @@ function run(tree: string, names: string[]): Promise<{ failed: Set<string>; pass
     const env = { ...process.env };
     delete env.NODE_TEST_CONTEXT;
     const c = spawn(process.execPath, argv, { cwd: tree, env });
+    // A run that does not finish is cut off: its tests count as not run.
+    const wall = setTimeout(() => c.kill('SIGKILL'), 240_000);
+    c.on('exit', () => clearTimeout(wall));
     let out = '';
     c.stdout.on('data', (d) => { out += d; });
     c.stderr.on('data', (d) => { out += d; });

@@ -282,20 +282,6 @@
    ]
   },
   {
-   "id": "M22",
-   "title": "grant expiry not judged",
-   "file": "src/engine.ts",
-   "edits": [
-    [
-     "grant[${book}](R, U), clock[${SYSTEM_BOOK}](T), T < U.`",
-     "grant[${book}](R, U), clock[${SYSTEM_BOOK}](T).`"
-    ]
-   ],
-   "red": [
-    "a request signed by an identity with no grant is refused and whynot names the missing grant"
-   ]
-  },
-  {
    "id": "M23",
    "title": "every signed requester reads every book whole",
    "file": "src/node.ts",
@@ -831,11 +817,11 @@
   {
    "id": "M61",
    "title": "perspective not bound in the view",
-   "file": "src/engine.ts",
+   "file": "src/node.ts",
    "edits": [
     [
-     "placed = [...a, roflString(perspective), 'RoflenoxC'];",
-     "placed = [...a, 'RoflenoxP2', 'RoflenoxC'];"
+     "          if (F !== null && cur.get(F)?.P === perspective) rows.push(row);",
+     "          if (F !== null) rows.push(row);"
     ]
    ],
    "red": [
@@ -848,26 +834,12 @@
    "file": "src/engine.ts",
    "edits": [
     [
-     "      if (sc.only !== null && !sc.only.has(f)) continue;\n",
+     "        if (sc.only !== null && !sc.only.has(String(cells[0]))) continue;\n",
      ""
     ]
    ],
    "red": [
     "a question restricted to one perspective sees only the facts asserted under it"
-   ]
-  },
-  {
-   "id": "M63",
-   "title": "every assertion current (no supersession)",
-   "file": "src/engine.ts",
-   "edits": [
-    [
-     ", not superseded[${SYSTEM_BOOK}](${b}, F, S).`",
-     ".`"
-    ]
-   ],
-   "red": [
-    "re-asserting a fact with a new confidence leaves exactly one confidence for that identity, the latest"
    ]
   },
   {
@@ -1135,8 +1107,8 @@
    "file": "src/enox-ops.ts",
    "edits": [
     [
-     "cache = { key, g: await Graph.load(node(ctx), ctx.caller) };",
-     "cache = { key, g: await Graph.load(node(ctx), node(ctx).identity?.name ?? null) };"
+     "  const g = await Graph.load(n, ctx.caller);",
+     "  const g = await Graph.load(n, n.identity?.name ?? null);"
     ]
    ],
    "red": [
@@ -1201,20 +1173,6 @@
    ]
   },
   {
-   "id": "M87",
-   "title": "delegation expiry not judged",
-   "file": "src/engine.ts",
-   "edits": [
-    [
-     "`delegated[${SYSTEM_BOOK}](A, ${roflString(owner)}) :- delegate[${book}](A, U), clock[${SYSTEM_BOOK}](T), T < U.`",
-     "`delegated[${SYSTEM_BOOK}](A, ${roflString(owner)}) :- delegate[${book}](A, U).`"
-    ]
-   ],
-   "red": [
-    "a delegated agent key publishes until its expiry and is refused after it"
-   ]
-  },
-  {
    "id": "M88",
    "title": "follow facts derive no intent",
    "file": "src/engine.ts",
@@ -1262,8 +1220,8 @@
    "file": "src/enox-ops.ts",
    "edits": [
     [
-     "  if (cache?.key !== key) cache = { key, g: await Graph.load(node(ctx), ctx.caller) };",
-     "  if (cache?.key !== key) cache = { key, g: await Graph.load(node(ctx), ctx.caller) };\n  (await import('node:fs')).writeFileSync('/tmp/roflenox-graph-cache.json', String(cache.g.nodes.size));"
+     "  const g = await Graph.load(n, ctx.caller);\n",
+     "  const g = await Graph.load(n, ctx.caller);\n  (await import('node:fs')).writeFileSync('/tmp/roflenox-graph-cache.json', String(g.nodes.size));\n"
     ]
    ],
    "red": [
@@ -1332,8 +1290,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "  return toRofl(v.facts, bookOf(v.manifest.identity), seq);\n}",
-     "  return toRofl(v.facts, bookOf(v.manifest.identity), seq) + v.rules.map((r) => `${r}\\n`).join('');\n}"
+     "  return toRofl(v.facts, bookOf(v.manifest.identity), seq, false);\n}",
+     "  return toRofl(v.facts, bookOf(v.manifest.identity), seq, false) + v.rules.map((r) => `${r}\\n`).join('');\n}"
     ]
    ],
    "red": [
@@ -1374,8 +1332,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     ".filter((r) => Number(r[2]) > 0).map((r) => String(r[0])));",
-     ".map((r) => String(r[0])));"
+     "    return facts.some((r) => (cur.get(String(r[0]))?.C ?? 0) > 0) ? all : [];",
+     "    void cur;\n    return facts.length > 0 ? all : [];"
     ]
    ],
    "red": [
@@ -1483,6 +1441,90 @@
    ],
    "red": [
     "killing the engine during an ask never yields a plain answer: the asker gets an error or unknown, and the next ask is answered"
+   ]
+  },
+  {
+   "id": "M107",
+   "title": "A: admission evaluates the whole world again",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "      beforeLoad();\n      await this.session.load(rofl, who);\n",
+     "      beforeLoad();\n      await this.session.load(rofl, who);\n      await this.session.evaluate();\n"
+    ]
+   ],
+   "red": [
+    "a batch of 2000 facts is admitted within one second with 200000 facts held"
+   ]
+  },
+  {
+   "id": "M108",
+   "title": "B: a replaced assertion's engine row is kept",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      await this.engine.retract(plan.retract);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "re-asserting a fact with a new confidence leaves exactly one confidence for that identity, the latest"
+   ]
+  },
+  {
+   "id": "M109",
+   "title": "B: the current assertion is not recorded",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "apply: () => { for (const [F, c] of next) m.set(F, c); } };",
+     "apply: () => {} };"
+    ]
+   ],
+   "red": [
+    "re-asserting a fact with a new confidence leaves exactly one confidence for that identity, the latest"
+   ]
+  },
+  {
+   "id": "M110",
+   "title": "C: grant expiry ignored",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        .filter((r) => now < Number(r[1])).map((r) => String(r[0])));",
+     ".map((r) => String(r[0])));"
+    ]
+   ],
+   "red": [
+    "a request signed by an identity with no grant is refused and whynot names the missing grant"
+   ]
+  },
+  {
+   "id": "M111",
+   "title": "C: delegation expiry ignored",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        if (!until.some((u) => at < u)) {",
+     "        if (until.length === 0) {"
+    ]
+   ],
+   "red": [
+    "a delegated agent key publishes until its expiry and is refused after it"
+   ]
+  },
+  {
+   "id": "M112",
+   "title": "D: the Enox view is rebuilt on every write",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "    const since = n.admittedSince(cached.version);",
+     "    const since = null as ReturnType<typeof n.admittedSince>;"
+    ]
+   ],
+   "red": [
+    "an Enox read right after a write answers within one second with 200000 facts held"
    ]
   }
  ]

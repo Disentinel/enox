@@ -27,12 +27,14 @@ import {
 } from './identity.ts';
 import { Log, writeFileAtomic, type Fault, type Receipt } from './log.ts';
 import {
-  answeredRule, bookRules, DEFAULT_ROFL_BIN, Engine, mayReadRules, parseLiteral, resultRule, SYSTEM_BOOK,
+  answeredRule, bookRules, DEFAULT_ROFL_BIN, Engine, mayReadRules, parseLiteral, resultRule, splitArgs, SYSTEM_BOOK,
   type AskAnswer, type BookScope, type Explanation, type World,
 } from './engine.ts';
 import { verifyRequest } from './httpsig.ts';
 import { compileRule, RULE } from './rules.ts';
 import { RESULT } from './executor.ts';
+import { Assertions, match } from './assertions.ts';
+import { whyNotDelegated, whyNotReadable } from './expiry.ts';
 import { open as openSealed, type Envelope } from './seal.ts';
 
 export const DEFAULT_FRESHNESS_SEC = 300;
@@ -107,10 +109,13 @@ interface Verified {
 /** The ROFL program a verified batch loads into the MAIN world: its facts.
  *  Its user rules run only in its author's rule world (r_rule_budget). */
 function programOf(v: Verified, seq: number): string {
-  return toRofl(v.facts, bookOf(v.manifest.identity), seq);
+  // The asserted[] rows are not here: they are the CURRENT assertions, kept by
+  // src/assertions.ts (it replaces the superseded/current/view rules).
+  return toRofl(v.facts, bookOf(v.manifest.identity), seq, false);
 }
 
 export const DEFAULT_RULE_BUDGET = 50_000;
+const RECENT = 1000;
 
 export class RoflenoxNode {
   readonly dataDir: string;
@@ -146,7 +151,11 @@ export class RoflenoxNode {
   private readonly results = new Map<string, string[]>();       // identity → its roflenox:result fact lines
   private readonly userRules = new Map<string, { text: string; mirrored: boolean }[]>();  // author → compiled rules
   private readonly worlds = new Map<string, { w: World; version: number; clock: number }>();
+  /** The current assertion of every fact, per identity (src/assertions.ts). */
+  private readonly assertions = new Assertions();
   private version = 0;
+  /** The last admissions, for views that apply writes instead of rebuilding. */
+  private readonly recent: { version: number; identity: string; facts: Fact[]; seq: number }[] = [];
   /** RFC 9421 nonces seen on signed requests: nonce → expiry (ms). */
   private readonly requestNonces = new Map<string, number>();
 
@@ -215,7 +224,8 @@ export class RoflenoxNode {
         throw new Error(`the key file for ${n.identity.name} is not a key this identity has published under; refusing to start`);
       }
     }
-    await n.engine.replay(batches.map(({ v, rules, seq }) => ({ rofl: programOf(v, seq), who: v.manifest.identity, rules })));
+    await n.engine.replay([...batches.map(({ v, rules, seq }) => ({ rofl: programOf(v, seq), who: v.manifest.identity, rules })),
+      ...[...n.chains.keys()].map((id) => ({ rofl: n.assertions.lines(id, bookOf(id)), who: id, rules: null }))]);
     await n.checkUriPrefix();
     return n;
   }
@@ -365,18 +375,35 @@ export class RoflenoxNode {
 
   /** `mirrored`: the batch came by a feed or an envelope, not from its author
    *  posting here — its rules are inert until trusted (r_foreign_rules_opt_in). */
-  private record(v: Verified, mirrored = false, seq = (this.chains.get(v.manifest.identity)?.length ?? 0)): void {
+  private record(v: Verified, mirrored = false, seq = (this.chains.get(v.manifest.identity)?.length ?? 0),
+    plan = this.assertions.plan(v.manifest.identity, bookOf(v.manifest.identity), v.facts, seq)): void {
     const id = v.manifest.identity;
+    plan.apply();
     this.programs.set(id, [...(this.programs.get(id) ?? []), programOf(v, seq)]);
     const res = v.facts.filter((f) => f.relation === RESULT);
     if (res.length) this.results.set(id, [...(this.results.get(id) ?? []), toRofl(res, bookOf(id), seq)]);
     if (v.rules.length) this.userRules.set(id, [...(this.userRules.get(id) ?? []), ...v.rules.map((text) => ({ text, mirrored }))]);
     this.version++;
+    this.recent.push({ version: this.version, identity: id, facts: v.facts, seq });
+    if (this.recent.length > RECENT) this.recent.shift();
     if (v.pin) this.idDocs.set(id, [v.pin]);
     const chain = this.chains.get(id) ?? [];
     chain.push(v.manifest.digest);
     this.chains.set(id, chain);
     this.factCount += v.facts.length;
+  }
+
+  /** A counter that moves with every admission. */
+  logVersion(): number {
+    return this.version;
+  }
+
+  /** The batches admitted after `version`, oldest first — or null if they
+   *  are no longer all remembered (the caller rebuilds). */
+  admittedSince(version: number): { identity: string; facts: Fact[]; seq: number }[] | null {
+    if (version === this.version) return [];
+    const i = this.recent.findIndex((r) => r.version === version + 1);
+    return i < 0 ? null : this.recent.slice(i);
   }
 
   /** An identity's chain of batch digests (public: every feed shows them). */
@@ -400,14 +427,15 @@ export class RoflenoxNode {
     const seen = new Set<string>();
     let agent = m.identity;
     let parent = (this.current(agent) ?? pending)?.doc.delegated_by;
-    if (mode === 'post' && parent !== undefined) await this.engine.setClock(Math.floor(Date.parse(receivedAt) / 1000));
+    const at = Math.floor(Date.parse(receivedAt) / 1000);
     while (parent !== undefined) {
       if (seen.has(agent)) throw new Refusal(422, 'not_delegated', `the delegation chain of ${m.identity} loops at ${agent}`);
       seen.add(agent);
       const A = roflString(agent), P = roflString(parent);
       if (mode === 'post') {
-        if ((await this.engine.sysRows(`delegated[${SYSTEM_BOOK}](${A}, ${P})`)).length === 0) {
-          const whynot = await this.engine.sysWhynot(`delegated[${SYSTEM_BOOK}](${A}, ${P})`);
+        const until = (await this.engine.sysRows(`delegated_until[${SYSTEM_BOOK}](${A}, ${P}, U)`)).map((r) => Number(r[0]));
+        if (!until.some((u) => at < u)) {
+          const whynot = await whyNotDelegated(this.engine, agent, parent, bookOf(parent), at);
           throw new Refusal(422, 'not_delegated', `${m.identity} acts only while every identity above it does; ${agent} has no live delegation from ${parent}`, { whynot });
         }
       } else {
@@ -553,7 +581,7 @@ export class RoflenoxNode {
    *  next operation is served by the rebuilt engine. */
   private serial<T>(f: () => Promise<T>, retry = false): Promise<T> {
     const run = this.queue.then(async () => {
-      if (this.engine.dead) await this.rebuildEngine();
+      if (this.engine.dead || this.engine.stale) await this.rebuildEngine();
       try {
         return await f();
       } catch (e) {
@@ -576,8 +604,15 @@ export class RoflenoxNode {
     await this.checkDelegation(v.manifest, receivedAt, mode, pending);
     const id = v.manifest.identity;
     const rules = this.chains.has(id) ? null : bookRules(bookOf(id), id);
-    const staged = await this.engine.stage(programOf(v, this.chains.get(id)?.length ?? 0), id, rules,
-      () => this.fault('engine:staged'));
+    const seq = this.chains.get(id)?.length ?? 0;
+    const plan = this.assertions.plan(id, bookOf(id), v.facts, seq);
+    const staged = await this.engine.stage(programOf(v, seq) + plan.load, id, rules, () => this.fault('engine:staged'));
+    try {
+      await this.engine.retract(plan.retract);
+    } catch (e) {
+      await staged.abort();
+      throw e;
+    }
     let receipt: Receipt;
     try {
       receipt = this.log.append(v.manifest, v.withheld ? null : body.jsonl as string, receivedAt, v.pin, {
@@ -590,7 +625,7 @@ export class RoflenoxNode {
       throw e;
     }
     await staged.commit();
-    this.record(v, mode !== 'post');
+    this.record(v, mode !== 'post', seq, plan);
     return receipt;
   }
 
@@ -606,6 +641,7 @@ export class RoflenoxNode {
     const entries: Parameters<Engine['replay']>[0] = [];
     for (const [id, progs] of this.programs) {
       progs.forEach((rofl, i) => entries.push({ rofl, who: id, rules: i === 0 ? bookRules(bookOf(id), id) : null }));
+      entries.push({ rofl: this.assertions.lines(id, bookOf(id)), who: id, rules: null });
     }
     await e.replay(entries);
     this.engine = e;
@@ -629,9 +665,10 @@ export class RoflenoxNode {
       for (const [b, id] of books) scope.set(b, { identity: id, only: null });
       return scope;
     }
-    await this.engine.setClock(Math.floor(this.now() / 1000));
+    const now = Math.floor(this.now() / 1000);
     const whole = new Set(requester === null ? [] :
-      (await this.engine.sysRows(`may_read[${SYSTEM_BOOK}](${roflString(requester)}, B)`)).map((r) => String(r[0])));
+      (await this.engine.sysRows(`readable_until[${SYSTEM_BOOK}](${roflString(requester)}, B, U)`))
+        .filter((r) => now < Number(r[1])).map((r) => String(r[0])));
     const exported = new Map<string, Set<string>>();
     for (const [b, f, a] of await this.engine.sysRows(`exported[${SYSTEM_BOOK}](B, F, A)`)) {
       if (a !== 'public' && a !== requester) continue;
@@ -657,7 +694,7 @@ export class RoflenoxNode {
     if (requester === null) {
       throw new Refusal(401, 'unsigned', `${owner}'s book is not public; sign the request as an identity it grants`);
     }
-    const whynot = await this.engine.sysWhynot(`may_read[${SYSTEM_BOOK}](${roflString(requester)}, ${roflString(book)})`);
+    const whynot = await whyNotReadable(this.engine, requester, book, owner, Math.floor(this.now() / 1000));
     throw new Refusal(403, 'no_grant', `${requester} has no live grant to read ${owner}'s book`, { whynot });
   }
 
@@ -666,10 +703,10 @@ export class RoflenoxNode {
       const scope = await this.scopeFor(requester);
       await this.requireBook(query, requester, scope, false);
       this.fault('engine:ask');
-      const ans: AskAnswer = await this.engine.ask(query, scope, perspective);
-      if (perspective !== null) return ans;
-      // What the authors' own rules derive, from their rule worlds.
       const { rel, book, args } = parseLiteral(query);
+      if (perspective !== null || rel === 'conf' || rel === 'persp') return this.askAssertions(rel, book, args, scope, perspective);
+      const ans: AskAnswer = rel === 'answered' ? { vars: [], rows: [] } : await this.engine.ask(query, scope);
+      // What the authors' own rules derive, from their rule worlds.
       const seen = new Set(ans.rows.map((r) => JSON.stringify([r.identity, r.cells])));
       const unknown: NonNullable<AskAnswer['unknown']> = [];
       for (const [b, sc] of scope) {
@@ -696,6 +733,41 @@ export class RoflenoxNode {
     }, true);
   }
 
+  /** conf(F, C), persp(F, P), and edge(F, S, R, T) restricted to a
+   *  perspective — from the current assertions admission keeps
+   *  (src/assertions.ts), within the reader's scope. */
+  private async askAssertions(rel: string, book: string | null, args: string, scope: Map<string, BookScope>, perspective: string | null): Promise<AskAnswer> {
+    const a = splitArgs(args);
+    const books = [...scope].filter(([b]) => book === null || b === book);
+    if (book !== null && books.length === 0) throw new Refusal(404, 'unknown_book', `no visible book ${book}`);
+    const rows: AskAnswer['rows'] = [];
+    let vars = a.filter((x, i) => x === '_' || (/^[A-Z_]/.test(x) && a.indexOf(x) === i));
+    if (perspective !== null) {
+      if (rel !== 'edge' || a.length !== 4) throw new Refusal(400, 'bad_query', 'a perspective restricts edge(F, S, R, T) questions');
+      for (const [b, sc] of books) {
+        const r = await this.engine.ask(`edge[${b}](${args})`, new Map([[b, sc]]));
+        vars = r.vars;
+        const cur = this.assertions.of(sc.identity);
+        const fAt = /^[A-Z_]/.test(a[0]!) && a[0] !== '_' ? r.vars.indexOf(a[0]!) : -1;
+        for (const row of r.rows) {
+          const F = fAt >= 0 ? String(row.cells[fAt]) : a[0] === '_' ? null : String(JSON.parse(a[0]!));
+          if (F !== null && cur.get(F)?.P === perspective) rows.push(row);
+        }
+      }
+    } else {
+      if (a.length !== 2) throw new Refusal(400, 'bad_query', `${rel} takes 2 arguments`);
+      for (const [, sc] of books) {
+        for (const [F, c] of this.assertions.of(sc.identity)) {
+          if (sc.only !== null && !sc.only.has(F)) continue;
+          const m = match(a, [F, rel === 'conf' ? c.C : c.P]);
+          if (m) rows.push({ identity: sc.identity, cells: m.cells });
+        }
+      }
+    }
+    rows.sort((x, y) => { const p = JSON.stringify([x.identity, x.cells]), q = JSON.stringify([y.identity, y.cells]); return p < q ? -1 : p > q ? 1 : 0; });
+    return { vars, rows };
+  }
+
   why(query: string, requester: string | null = null): Promise<Explanation[]> {
     return this.serial(async () => this.explainWith('why', query, requester), true);
   }
@@ -710,8 +782,10 @@ export class RoflenoxNode {
     const scope = await this.scopeFor(requester);
     await this.requireBook(query, requester, scope, true);
     this.fault('engine:explain');
-    const out = await (op === 'why' ? this.engine.why(query, scope) : this.engine.whynot(query, scope));
-    const { rel, args } = parseLiteral(query);
+    const { rel, book, args } = parseLiteral(query);
+    const out = rel === 'answered'
+      ? [...scope].filter(([b, sc]) => sc.only === null && (book === null || b === book)).map(([, sc]) => ({ identity: sc.identity, holds: false, text: `whynot answered: ${sc.identity} has no rules here` }))
+      : await (op === 'why' ? this.engine.why(query, scope) : this.engine.whynot(query, scope));
     for (const e of out) {
       if (!this.headsOf(e.identity).has(rel) && rel !== 'answered') continue;
       const w = await this.ruleWorld(e.identity);
@@ -746,8 +820,8 @@ export class RoflenoxNode {
     if (!op || !this.chains.has(op)) return [];
     const b = bookOf(op);
     const facts = await this.engine.sysRows(`edge[${b}](F, ${roflString(author)}, "roflenox:trust_rules", T)`);
-    const live = new Set((await this.engine.sysRows(`current[${SYSTEM_BOOK}](${roflString(b)}, F, P, C)`)).filter((r) => Number(r[2]) > 0).map((r) => String(r[0])));
-    return facts.some((r) => live.has(String(r[0]))) ? all : [];
+    const cur = this.assertions.of(op);
+    return facts.some((r) => (cur.get(String(r[0]))?.C ?? 0) > 0) ? all : [];
   }
 
   /** The author's rule world, rebuilt when anything was admitted since, and
@@ -774,7 +848,7 @@ export class RoflenoxNode {
     for (const b of [own, ...foreign]) {
       const id = owners.get(b);
       if (!id) continue;
-      const text = (this.programs.get(id) ?? []).join('');
+      const text = (this.programs.get(id) ?? []).join('') + this.assertions.lines(id, b);
       if (text) await w.session.load(text, id);
       if (b !== own) await w.session.load(mayReadRules(b, id), 'roflenox');
     }
@@ -994,8 +1068,9 @@ export class RoflenoxNode {
     if (out.length === 0 || (reader !== null && reader === this.identity?.name)) return;
     const book = bookOf(identity);
     if (reader !== null) {
-      const whole = await this.engine.sysRows(`may_read[${SYSTEM_BOOK}](${roflString(reader)}, ${roflString(book)})`);
-      if (whole.length > 0) return;
+      const now = Math.floor(this.now() / 1000);
+      const whole = await this.engine.sysRows(`readable_until[${SYSTEM_BOOK}](${roflString(reader)}, ${roflString(book)}, U)`);
+      if (whole.some((r) => now < Number(r[0]))) return;
     }
     const audiences = reader === null ? ['public'] : ['public', reader];
     const ok = new Set<string>();

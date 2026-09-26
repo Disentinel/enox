@@ -20,42 +20,35 @@ const LITERAL = /^\s*([a-z][A-Za-z0-9_]*)\s*(?:\[([^\]]*)\])?\s*\(([\s\S]*)\)\s*
 export interface BookScope { identity: string; only: Set<string> | null }
 const FACT_KEYED = new Set(['edge']);
 
-// Relations a question may name that are VIEWS in sys_roflenox, derived per
-// book by bookRules: the current assertion of each fact, and the fact joined
-// with it. They are asked with the book as their first column.
-//   conf(F, C)    ← current[sys](Book, F, _, C)
-//   persp(F, P)   ← current[sys](Book, F, P, _)
-//   edge(F,S,R,T) with a perspective P ← view[sys](Book, F, S, R, T, P, _)
-const VIEWS: Record<string, { rel: string; arity: number; place: (a: string[]) => string[]; whole?: true }> = {
-  conf: { rel: 'current', arity: 2, place: (a) => [a[0]!, 'RoflenoxP', a[1]!] },
-  // answered(Key, Executor, Value): an intent of this book with its result.
-  // Not fact-keyed, so only a reader of the WHOLE book sees it.
-  answered: { rel: 'answered', arity: 3, place: (a) => a, whole: true },
-  persp: { rel: 'current', arity: 2, place: (a) => [a[0]!, a[1]!, 'RoflenoxC'] },
-};
+// conf(F, C), persp(F, P), an edge question restricted to a perspective, and
+// answered(K, E, V) are answered by the NODE (src/assertions.ts; rule worlds),
+// not by rules in this world.
 
 /** The system rules for one book: its owner reads it, a live grant lets its
  *  recipient read it, an export rule lets a fact of it leave to an audience.
  *  Written by the node into sys_roflenox, reading only the book they name. */
+/** "Forever", in the same unit as grant expiries (Unix seconds): 2100-01-01. */
+export const FOREVER = 4102444800;
+
 export function bookRules(book: string, owner: string): string {
   const b = roflString(book);
   return [
-    // The current assertion of a fact by this identity: the one latest in its
-    // chain (r_confidence) — a ROFL rule over the chain position, not a fix-up.
-    `superseded[${SYSTEM_BOOK}](${b}, F, S1) :- asserted[${book}](F, P1, C1, S1), asserted[${book}](F, P2, C2, S2), S1 < S2.`,
-    `current[${SYSTEM_BOOK}](${b}, F, P, C) :- asserted[${book}](F, P, C, S), not superseded[${SYSTEM_BOOK}](${b}, F, S).`,
-    // The fact joined with its current perspective and confidence (r_perspective).
-    `view[${SYSTEM_BOOK}](${b}, F, S, R, T, P, C) :- edge[${book}](F, S, R, T), current[${SYSTEM_BOOK}](${b}, F, P, C).`,
+    // (superseded/current/view — the current assertion of a fact — moved out
+    // of the rules into admission: src/assertions.ts, r_batch_write.)
     // A follow (r_follow) is a fact of the follower's: {source: <publisher>,
     // relation: "roflenox:follow", target: <where its feed is>}. It is an
     // intent addressed to the follower itself — its own executor keeps the
     // mirror current; there is no second scheduler.
     `intent[${book}](P, ${roflString(owner)}, "follow", U) :- edge[${book}](F, P, "roflenox:follow", U).`,
-    `may_read[${SYSTEM_BOOK}](${roflString(owner)}, ${b}).`,
-    // Agents (r_agents_as_identities): an identity whose document names a
-    // parent acts only while the parent's live delegation says so.
-    `delegated[${SYSTEM_BOOK}](A, ${roflString(owner)}) :- delegate[${book}](A, U), clock[${SYSTEM_BOOK}](T), T < U.`,
-    `may_read[${SYSTEM_BOOK}](R, ${b}) :- grant[${book}](R, U), clock[${SYSTEM_BOOK}](T), T < U.`,
+    // Who may read this book, and until when (r_grants); who acts for its
+    // owner, and until when (r_agents_as_identities). The expiry is a COLUMN,
+    // compared with the node's clock when a decision is made (src/expiry.ts):
+    // a clock fact in this world would re-derive everything on every tick —
+    // a WORKAROUND for a non-incremental engine; with an incremental evaluate
+    // the clock premise (T < U) comes back into these rules.
+    `readable_until[${SYSTEM_BOOK}](${roflString(owner)}, ${b}, ${FOREVER}).`,
+    `readable_until[${SYSTEM_BOOK}](R, ${b}, U) :- grant[${book}](R, U).`,
+    `delegated_until[${SYSTEM_BOOK}](A, ${roflString(owner)}, U) :- delegate[${book}](A, U).`,
     `exported[${SYSTEM_BOOK}](${b}, F, A) :- edge[${book}](F, S, Rel, T), export[${book}](Rel, A).`,
     `exported[${SYSTEM_BOOK}](${b}, F, A) :- edge[${book}](F, S, Rel, T), export[${book}]("*", A).`,
     '',
@@ -93,33 +86,48 @@ export class Engine {
     return (this.port as unknown as { dead: Error | null }).dead !== null;
   }
 
-  /** The engine process id (tests kill it to prove the node survives). */
+  /** The engine process id (tests kill it to prove the node survives) —
+   *  undefined once it has died, so a stale id is never handed out (the OS
+   *  may already have given it to another process). */
   pid(): number | undefined {
-    return (this.port as unknown as { child: { pid?: number } }).child.pid;
+    if (this.dead) return undefined;
+    const c = (this.port as unknown as { child: { pid?: number; exitCode: number | null; signalCode: string | null } }).child;
+    return c.exitCode === null && c.signalCode === null ? c.pid : undefined;
   }
 
+  /** ADMISSION INTO THE ENGINE, without a fork and without an evaluation
+   *  (r_batch_write). The main world holds facts and system rules only — no
+   *  author's rules — and a load is atomic (a refused program leaves the world
+   *  as it was), so there is nothing a fork would protect. The world is left
+   *  DIRTY; the next read settles it once (ensure), however many batches came
+   *  in between. `abort` cannot unload: it marks the engine stale, and the
+   *  node rebuilds it from the log before the next operation.
+   *
+   *  WORKAROUND FOR A NON-INCREMENTAL ENGINE: rofl-serve re-derives every
+   *  fact on each evaluate (Eval::run → clear_derived). With an incremental
+   *  evaluate this would go back to evaluate-per-admission. */
   async stage(rofl: string, who: string, rules: string | null = null,
-    beforeEvaluate: () => void = () => {}): Promise<{ commit: () => Promise<void>; abort: () => Promise<void> }> {
-    const work = await this.session.fork().catch((e: Error) => { throw this.down(e); });
+    beforeLoad: () => void = () => {}): Promise<{ commit: () => Promise<void>; abort: () => Promise<void> }> {
     try {
-      if (rules) await work.load(rules, SYSTEM_WHO);
-      await work.load(rofl, who);
-      beforeEvaluate();
-      await work.evaluate();
+      if (rules) await this.session.load(rules, SYSTEM_WHO);
+      beforeLoad();
+      await this.session.load(rofl, who);
     } catch (e) {
       if (this.dead) throw this.down(e as Error);
-      await work.close();
       throw new Refusal(422, 'engine_refused', `the engine refused the batch: ${(e as Error).message}`);
     }
-    return {
-      commit: async () => {
-        const old = this.session;
-        this.session = work;
-        await old.close();
-      },
-      abort: async () => { await work.close(); },
-    };
+    return { commit: async () => {}, abort: async () => { this.stale = true; } };
   }
+
+  /** Set when the world holds something the log does not (an aborted admission). */
+  stale = false;
+
+  /** Settle a dirty world before reading it: a no-op if nothing changed. */
+  async ensure(): Promise<void> {
+    const r = await this.port.send({ op: 'ensure', session: this.session.id });
+    if (r.strat) throw new Refusal(422, 'engine_refused', `the world does not stratify: ${String(r.message)}`);
+  }
+
 
 
 
@@ -139,13 +147,28 @@ export class Engine {
     await this.session.evaluate();
   }
 
-  /** Set the engine's clock (whole seconds) that grant expiry is judged on. */
-  async setClock(sec: number): Promise<void> {
-    const a = await this.session.ask(`clock[${SYSTEM_BOOK}](T)`);
-    if (a.rows.length === 1 && Number(a.rows[0]![0]) === sec) return;
-    for (const r of a.rows) await this.port.send({ op: 'retract', session: this.session.id, query: `clock[${SYSTEM_BOOK}](${r[0]})` });
-    await this.session.assert(`clock[${SYSTEM_BOOK}](${sec}).`);
-    await this.session.evaluate();
+
+
+  /** Retract base rows (ground literals without the full stop). */
+  async retract(rows: string[]): Promise<void> {
+    for (const q of rows) {
+      const r = await this.port.send({ op: 'retract', session: this.session.id, query: q });
+      if (r.okay === false) throw new Error(`retract refused: ${JSON.stringify(r.diagnostics)}`);
+    }
+  }
+
+  /** The whynot of `query` in a small, fresh world holding only `rofl` —
+   *  explanations of time-judged decisions (src/expiry.ts). */
+  async explainAlone(rofl: string, query: string): Promise<string> {
+    const w = await this.port.fresh(1_000_000);
+    try {
+      await w.load(rofl, SYSTEM_WHO);
+      await w.evaluate();
+      const r = await this.port.send({ op: 'whynot', session: w.id, query });
+      return r.text as string;
+    } finally {
+      await w.close();
+    }
   }
 
   /** A fresh world with `budget` steps per evaluation (rule worlds). */
@@ -171,19 +194,21 @@ export class Engine {
 
   /** Rows of a system question, decoded. */
   async sysRows(query: string): Promise<(string | number)[][]> {
+    await this.ensure();
     return (await this.session.ask(query)).rows.map((r) => r.map(decodeCell));
   }
 
   /** The engine's own explanation of why a system fact does not hold. */
   async sysWhynot(query: string): Promise<string> {
+    await this.ensure();
     const r = await this.port.send({ op: 'whynot', session: this.session.id, query });
     return r.text as string;
   }
 
   async ask(query: string, scope: Map<string, BookScope>, perspective: string | null = null): Promise<AskAnswer> {
+    await this.ensure();
+    void perspective;
     const { rel, book, args } = parseLiteral(query);
-    const view = perspective !== null ? 'view' : VIEWS[rel] ? rel : null;
-    if (view !== null) return this.askView(rel, book, args, scope, perspective);
     let vars: string[] = [];
     const rows: AskRow[] = [];
     for (const [b, sc] of targets(book, scope)) {
@@ -200,45 +225,6 @@ export class Engine {
     return { vars, rows };
   }
 
-  /** A question through a sys view: ONE ask over every book at once, the book
-   *  a column, then kept to the reader's scope. Hidden helper variables
-   *  (Roflenox*) are asked and dropped. */
-  private async askView(rel: string, book: string | null, args: string, scope: Map<string, BookScope>, perspective: string | null): Promise<AskAnswer> {
-    const a = splitArgs(args);
-    let target: string;
-    let placed: string[];
-    if (perspective !== null) {
-      if (rel !== 'edge' || a.length !== 4) throw new Refusal(400, 'bad_query', 'a perspective restricts edge(F, S, R, T) questions');
-      target = 'view';
-      placed = [...a, roflString(perspective), 'RoflenoxC'];
-    } else {
-      const v = VIEWS[rel]!;
-      if (a.length !== v.arity) throw new Refusal(400, 'bad_query', `${rel} takes ${v.arity} arguments`);
-      target = v.rel;
-      placed = v.place(a);
-    }
-    if (placed[0] === '_') placed[0] = 'RoflenoxF';
-    if (book !== null && !scope.has(book)) throw new Refusal(404, 'unknown_book', `no visible book ${book}`);
-    const bookArg = book !== null ? roflString(book) : 'RoflenoxB';
-    const ans = await engineCall(() => this.session.ask(`${target}[${SYSTEM_BOOK}](${[bookArg, ...placed].join(', ')})`));
-    const keep = ans.vars.map((v, i) => [v, i] as const).filter(([v]) => !v.startsWith('Roflenox'));
-    const bi = ans.vars.indexOf('RoflenoxB');
-    const fi = ans.vars.indexOf(placed[0]!);
-    const rows: AskRow[] = [];
-    for (const r of ans.rows) {
-      const cells = r.map(decodeCell);
-      const b = bi >= 0 ? String(cells[bi]) : book!;
-      const sc = scope.get(b);
-      if (!sc) continue;
-      if (perspective === null && VIEWS[rel]!.whole && sc.only !== null) continue;
-      const f = fi >= 0 ? String(cells[fi]) : String(decodeCell(placed[0]!));
-      if (sc.only !== null && !sc.only.has(f)) continue;
-      rows.push({ identity: sc.identity, cells: keep.map(([, i]) => cells[i]!) });
-    }
-    rows.sort((x, y) => cmp(JSON.stringify([x.identity, x.cells]), JSON.stringify([y.identity, y.cells])));
-    return { vars: keep.map(([v]) => v), rows };
-  }
-
   /** `why` for a ground literal, over the books the reader sees WHOLE only:
    *  an explanation walks premises, and premises are not all exported. */
   async why(query: string, scope: Map<string, BookScope>): Promise<Explanation[]> {
@@ -250,18 +236,12 @@ export class Engine {
   }
 
   private async explain(op: 'why' | 'whynot', query: string, scope: Map<string, BookScope>): Promise<Explanation[]> {
+    await this.ensure();
     const { rel, book, args } = parseLiteral(query);
     const out: Explanation[] = [];
-    // A view explains through its sys relation, the book a constant: why of an
-    // answer walks from the executor's result back to the rule that asked.
-    const v = VIEWS[rel];
-    const a = splitArgs(args);
-    if (v && (a.length !== v.arity || v.place(a).some((x) => x.startsWith('Roflenox')))) {
-      throw new Refusal(400, 'bad_query', `why/whynot of ${rel} takes ${v.arity} ground arguments`);
-    }
     for (const [b, sc] of targets(book, scope)) {
       if (sc.only !== null) continue;
-      const q = v ? `${v.rel}[${SYSTEM_BOOK}](${[roflString(b), ...v.place(a)].join(', ')})` : `${rel}[${b}](${args})`;
+      const q = `${rel}[${b}](${args})`;
       const r = await engineCall(() => this.port.send({ op, session: this.session.id, query: q }));
       out.push({ identity: sc.identity, holds: (op === 'why' ? r.okay : r.holds) as boolean, text: r.text as string });
     }
@@ -290,7 +270,7 @@ async function engineCall<T>(f: () => Promise<T>): Promise<T> {
 function cmp(a: string, b: string): number { return a < b ? -1 : a > b ? 1 : 0; }
 
 /** Split a literal's arguments at top-level commas (strings may hold commas). */
-function splitArgs(args: string): string[] {
+export function splitArgs(args: string): string[] {
   const out: string[] = [];
   let cur = '', inStr = false, depth = 0;
   for (let i = 0; i < args.length; i++) {

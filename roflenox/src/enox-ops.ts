@@ -23,11 +23,27 @@ function node(ctx: Ctx): RoflenoxNode {
   return ctx.node;
 }
 
-let cache: { key: string; g: Graph } | null = null;
+/** The Enox view, per caller. For the node's OWN identity (what Enox clients
+ *  reach with the operator token) a write is APPLIED to the cached view from
+ *  the node's record of recent admissions — no rebuild (r_batch_write). Any
+ *  other caller's view depends on grants and exports, and is rebuilt when the
+ *  log moves. */
+const views = new Map<string | null, { g: Graph; version: number }>();
 async function graph(ctx: Ctx): Promise<Graph> {
-  const key = `${(node(ctx).health() as { log_head: string }).log_head}|${ctx.caller}`;
-  if (cache?.key !== key) cache = { key, g: await Graph.load(node(ctx), ctx.caller) };
-  return cache.g;
+  const n = node(ctx);
+  const cached = views.get(ctx.caller);
+  if (cached && cached.version === n.logVersion()) return cached.g.ensure();
+  if (cached && ctx.caller !== null && ctx.caller === n.identity?.name) {
+    const since = n.admittedSince(cached.version);
+    if (since) {
+      for (const b of since) cached.g.apply(b.facts, b.seq);
+      cached.version = n.logVersion();
+      return cached.g.ensure();
+    }
+  }
+  const g = await Graph.load(n, ctx.caller);
+  views.set(ctx.caller, { g, version: n.logVersion() });
+  return g;
 }
 
 const agent = () => process.env.ENOX_AGENT_IDENTITY?.trim() || 'agent:unknown';

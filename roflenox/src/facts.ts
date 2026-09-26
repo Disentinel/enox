@@ -155,13 +155,13 @@ export function permille(c: number): number {
  *  every node. Each assertion is kept as asserted[book](F, Perspective,
  *  Permille, Seq); which one is CURRENT is a rule over seq (engine.bookRules),
  *  so a re-assertion replaces the earlier one (r_confidence). */
-export function toRofl(facts: Fact[], book: string, seq: number): string {
+export function toRofl(facts: Fact[], book: string, seq: number, withAsserted = true): string {
   if (!/^b_[0-9a-f]{16}$/.test(book)) throw new Error(`not a book atom: ${book}`);
   const out: string[] = [];
   for (const f of facts) {
     const id = roflString(factId(f));
     out.push(`edge[${book}](${id}, ${roflString(f.source)}, ${roflString(f.relation)}, ${roflString(f.target)}).`);
-    out.push(`asserted[${book}](${id}, ${roflString(f.perspective)}, ${permille(f.confidence)}, ${seq}).`);
+    if (withAsserted) out.push(`asserted[${book}](${id}, ${roflString(f.perspective)}, ${permille(f.confidence)}, ${seq}).`);
     if (f.relation === GRANT) out.push(`grant[${book}](${roflString(f.source)}, ${Math.floor(Date.parse(f.target) / 1000)}).`);
     if (f.relation === DELEGATE) out.push(`delegate[${book}](${roflString(f.source)}, ${Math.floor(Date.parse(f.target) / 1000)}).`);
     if (f.relation === EXPORT) out.push(`export[${book}](${roflString(f.source)}, ${roflString(f.target)}).`);

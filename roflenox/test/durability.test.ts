@@ -25,6 +25,14 @@ async function populate(a: Running, tag: string): Promise<LocalIdentity> {
   return reader;
 }
 
+/** SIGKILL the node's engine — only a live one: a dead engine's pid may
+ *  already belong to some other process. */
+function killEngine(r: Running): void {
+  const pid = r.node.enginePid();
+  if (pid === undefined) throw new Error('the engine is not running — refusing to kill a stale pid');
+  process.kill(pid, 'SIGKILL');
+}
+
 function onlyLog(dir: string): void {
   for (const e of fs.readdirSync(dir)) if (e !== 'log') fs.rmSync(path.join(dir, e), { recursive: true });
 }
@@ -181,7 +189,7 @@ test('killing the engine during an admission leaves the log consistent, refuses 
   let armed = false;
   let node: Running | null = null;
   const a = node = await start(dir, 'node-a', {
-    fault: (p) => { if (p === 'engine:staged' && armed) { armed = false; process.kill(node!.node.enginePid()!, 'SIGKILL'); } },
+    fault: (p) => { if (p === 'engine:staged' && armed) { armed = false; killEngine(node!); } },
   });
   try {
     const reader = await populate(a, 'enginekill');
@@ -207,7 +215,7 @@ test('killing the engine during an admission leaves the log consistent, refuses 
     assert.equal(((await post(a.url, '/ask', { query: 'edge(F, "during", R, T)' })).body.rows as unknown[]).length, 1);
     // An engine that dies while idle is replaced the same way: the ask that
     // meets the death (if one does) is refused, never answered plainly.
-    process.kill(a.node.enginePid()!, 'SIGKILL');
+    killEngine(a);
     let r2 = await post(a.url, '/ask', { query: 'edge(F, "during", R, T)' });
     if (r2.status !== 200) {
       assert.equal(r2.body.error, 'engine_down');
@@ -223,7 +231,7 @@ test('killing the engine during an ask never yields a plain answer: the asker ge
   let node: Running | null = null;
   const a = node = await start(tmpDir('askkill'), 'alice', {
     ruleBudget: 2_000_000,
-    fault: (p) => { if (p === armed) { armed = null; process.kill(node!.node.enginePid()!, 'SIGKILL'); } },
+    fault: (p) => { if (p === armed) { armed = null; killEngine(node!); } },
   });
   try {
     const rule = (name: string, text: string) => ({ source: name, relation: 'roflenox:rule', target: text, perspective: 'rules', confidence: 1 });
@@ -246,7 +254,7 @@ test('killing the engine during an ask never yields a plain answer: the asker ge
     // 2. A rule world, killed while it evaluates the runaway rule (the probe).
     const asking = post(a.url, '/ask', { query: 'n(X)', limit: 5 });
     await new Promise((r) => setTimeout(r, 400));
-    process.kill(a.node.enginePid()!, 'SIGKILL');
+    killEngine(a);
     const w = await asking;
     assert.ok(!plain(w), `rule-world ask under a kill: ${w.status} ${JSON.stringify(w.body)}`);
     const next = await answered('/ask', { query: 'n(X)', limit: 5 });
