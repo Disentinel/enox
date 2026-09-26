@@ -1,9 +1,16 @@
-// HTTP surface (spec item 7). JSON in, JSON out; a refusal is
-// {error: <reason>, message} with the refusal's status.
-import * as http from 'node:http';
+// HTTP, GENERATED from the operation table (src/ops.ts): POST /op/<name> for
+// every operation that is not local-only, each op's wire alias, and the MCP
+// transport at /mcp. There is no other route. JSON in, JSON out; a refusal is
+// {error: <reason>, message, ...detail} with the refusal's status.
+//
+// Who is calling: an RFC 9421 signature (any identity), or the operator's
+// bearer token (the node's own identity), or nobody. A credential that is
+// present but wrong is a 401, never an anonymous call.
 import * as crypto from 'node:crypto';
+import * as http from 'node:http';
 import { Refusal } from './facts.ts';
 import { handleRpc } from './mcp.ts';
+import { callOp, isLocal, OPS, type Ctx, type Op } from './ops.ts';
 import type { RoflenoxNode } from './node.ts';
 
 const MAX_BODY = 16 * 1024 * 1024;
@@ -12,14 +19,6 @@ function send(res: http.ServerResponse, status: number, body: unknown): void {
   const text = JSON.stringify(body);
   res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(text) });
   res.end(text);
-}
-
-function readBody(req: http.IncomingMessage): Promise<unknown> {
-  return readRaw(req).then((raw) => {
-    try { return JSON.parse(raw.toString('utf8')); } catch {
-      throw new Refusal(400, 'malformed_body', 'the body is not JSON');
-    }
-  });
 }
 
 function readRaw(req: http.IncomingMessage): Promise<Buffer> {
@@ -36,10 +35,13 @@ function readRaw(req: http.IncomingMessage): Promise<Buffer> {
   });
 }
 
-/** Who is calling the MCP endpoint: the operator by bearer token (constant-
- *  time compare), an identity by RFC 9421 signature, or nobody. A bearer that
- *  is present but wrong is a 401, never an anonymous call. */
-function mcpCaller(node: RoflenoxNode, target: string, headers: http.IncomingHttpHeaders, raw: Buffer): string | null {
+function json(raw: Buffer): unknown {
+  if (raw.length === 0) return {};
+  try { return JSON.parse(raw.toString('utf8')); } catch { throw new Refusal(400, 'malformed_body', 'the body is not JSON'); }
+}
+
+/** Who is calling. */
+export function callerOf(node: RoflenoxNode, method: string, target: string, headers: http.IncomingHttpHeaders, raw: Buffer | null): string | null {
   const auth = headers.authorization;
   if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
     const given = Buffer.from(auth.slice('Bearer '.length).trim());
@@ -49,67 +51,71 @@ function mcpCaller(node: RoflenoxNode, target: string, headers: http.IncomingHtt
     }
     return node.identity.name;
   }
-  return node.authenticate('POST', target, headers, raw);
+  return node.authenticate(method, target, headers, raw);
+}
+
+/** Match an op's alias path; `:x` segments become args. */
+function matchAlias(op: Op, method: string, path: string): Record<string, string> | null {
+  if (!op.http || op.http.method !== method) return null;
+  const want = op.http.path.split('/');
+  const got = path.split('/');
+  if (want.length !== got.length) return null;
+  const args: Record<string, string> = {};
+  for (let i = 0; i < want.length; i++) {
+    if (want[i]!.startsWith(':')) args[want[i]!.slice(1)] = decodeURIComponent(got[i]!);
+    else if (want[i] !== got[i]) return null;
+  }
+  return args;
 }
 
 export function createServer(node: RoflenoxNode): http.Server {
+  const network = OPS.filter((o) => !isLocal(o));
   return http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? '/', 'http://local');
       const p = url.pathname;
+      const method = req.method ?? 'GET';
       // The URI the client signed (RFC 9421 @target-uri): the configured public
       // origin plus the path — never the scheme or Host a proxy hands us.
       const target = `${node.publicUrl ?? `http://${req.headers.host}`}${req.url}`;
-      if (req.method === 'GET' && p === '/.well-known/roflenox/identity') {
-        if (!node.identity) return send(res, 404, { error: 'no_identity', message: 'this node has no identity; run init' });
-        return send(res, 200, node.identity.identityChain());
-      }
-      if (req.method === 'GET' && p === '/health') return send(res, 200, node.health());
-      if (req.method === 'POST' && p === '/batches') {
-        const r = await node.admit((await readBody(req)) as never);
-        return send(res, 201, { admitted: true, receipt: r });
-      }
-      if (req.method === 'GET' && p === '/intents') {
-        const who = node.authenticate('GET', target, req.headers, null);
-        return send(res, 200, await node.intents(url.searchParams.get('kind') ?? '', who, Math.min(1000, Number(url.searchParams.get('limit') ?? 100))));
-      }
-      if (req.method === 'POST' && p === '/sealed') return send(res, 201, { admitted: true, receipt: await node.admitSealed(await readBody(req)) });
-      if (req.method === 'POST' && p === '/challenges') return send(res, 201, { nonce: node.issueChallenge() });
-      if (req.method === 'POST' && p === '/feeds/admit') {
-        return send(res, 201, await node.admitFeed((await readBody(req)) as never));
-      }
-      if (req.method === 'POST' && p === '/identities') return send(res, 200, await node.introduce(await readBody(req)));
-      if (req.method === 'GET' && p.startsWith('/identities/')) {
-        return send(res, 200, node.identityChain(decodeURIComponent(p.slice('/identities/'.length))));
-      }
-      if (req.method === 'GET' && p.startsWith('/feeds/')) {
-        const id = decodeURIComponent(p.slice('/feeds/'.length));
-        const reader = node.authenticate('GET', target, req.headers, null);
-        return send(res, 200, await node.feed(id, url.searchParams.get('after'), url.searchParams.get('challenge'), reader));
-      }
+      const raw = method === 'POST' ? await readRaw(req) : null;
+      const ctx = (caller: string | null): Ctx => ({
+        node, caller, dataDir: null, now: () => Date.now(),
+        call: (op, args) => callOp(op, args, ctx(caller), 'network'),
+      });
+
       if (p === '/mcp') {
-        if (req.method !== 'POST') return send(res, 405, { error: 'method_not_allowed', message: 'POST JSON-RPC; no SSE stream is offered' });
-        const raw = await readRaw(req);
-        const caller = mcpCaller(node, target, req.headers, raw);
+        if (method !== 'POST') return send(res, 405, { error: 'method_not_allowed', message: 'POST JSON-RPC; no SSE stream is offered' });
+        const caller = callerOf(node, method, target, req.headers, raw);
         let msg: unknown;
-        try { msg = JSON.parse(raw.toString('utf8')); } catch {
+        try { msg = JSON.parse(raw!.toString('utf8')); } catch {
           return send(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } });
         }
-        const replies = (await Promise.all((Array.isArray(msg) ? msg : [msg]).map((m) => handleRpc(node, m, caller)))).filter((r) => r !== null);
+        const replies = (await Promise.all((Array.isArray(msg) ? msg : [msg]).map((m) => handleRpc(ctx(caller), m, 'network')))).filter((r) => r !== null);
         if (replies.length === 0) { res.writeHead(202).end(); return; }
         return send(res, 200, Array.isArray(msg) ? replies : replies[0]);
       }
-      if (req.method === 'POST' && p === '/ask') {
-        const raw = await readRaw(req);
-        const who = node.authenticate('POST', target, req.headers, raw);
-        let b: { query?: string; why?: string; whynot?: string; perspective?: string };
-        try { b = JSON.parse(raw.toString('utf8')); } catch { throw new Refusal(400, 'malformed_body', 'the body is not JSON'); }
-        if (typeof b.why === 'string') return send(res, 200, { why: await node.why(b.why, who) });
-        if (typeof b.whynot === 'string') return send(res, 200, { whynot: await node.whynot(b.whynot, who) });
-        if (typeof b.query === 'string') return send(res, 200, await node.ask(b.query, who, typeof b.perspective === 'string' ? b.perspective : null));
-        return send(res, 400, { error: 'bad_query', message: 'the body is {query} or {why} or {whynot}' });
+
+      let op: Op | undefined;
+      let args: Record<string, unknown> = {};
+      if (method === 'POST' && p.startsWith('/op/')) {
+        op = network.find((o) => o.name === p.slice('/op/'.length));
+        if (op) args = json(raw!) as Record<string, unknown>;
+      } else {
+        for (const o of network) {
+          const m = matchAlias(o, method, p);
+          if (!m) continue;
+          op = o;
+          if (method === 'GET') for (const [k, v] of url.searchParams) args[k] = v;
+          const body = raw && raw.length ? json(raw) : {};
+          args = { ...(o.http!.body ? { [o.http!.body]: body } : body as Record<string, unknown>), ...args, ...m };
+          break;
+        }
       }
-      return send(res, 404, { error: 'not_found', message: `${req.method} ${p}` });
+      if (!op) return send(res, 404, { error: 'not_found', message: `${method} ${p}` });
+      const caller = callerOf(node, method, target, req.headers, raw);
+      const result = await callOp(op.name, args, ctx(caller), 'network');
+      return send(res, op.http && !p.startsWith('/op/') ? op.http.status ?? 200 : 200, result);
     } catch (e) {
       if (e instanceof Refusal) return send(res, e.status, { error: e.reason, message: e.message, ...e.detail });
       return send(res, 500, { error: 'internal', message: (e as Error).message });

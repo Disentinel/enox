@@ -19,7 +19,7 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { canonicalize } from './jcs.ts';
-import { batchDigest, factId, isSalt, newSalt, parseJsonl, Refusal, roflString, sha256hex, toJsonl, toRofl, type Fact } from './facts.ts';
+import { batchDigest, decodeCell, factId, isSalt, newSalt, parseJsonl, Refusal, roflString, sha256hex, toJsonl, toRofl, type Fact } from './facts.ts';
 import {
   bookOf, CHECKPOINT_CONTEXT, checkIdentityDoc, checkManifest, docHash, docSignedBy, FEED_CONTEXT, isTime, keyValidAt, LocalIdentity,
   REATTEST_CONTEXT, verifyIdentityDoc, verifyManifestSig, verifySigned,
@@ -27,13 +27,29 @@ import {
 } from './identity.ts';
 import { Log, writeFileAtomic, type Fault, type Receipt } from './log.ts';
 import {
-  bookRules, DEFAULT_ROFL_BIN, discardSnapshot, Engine, parseLiteral, snapshotPaths, SYSTEM_BOOK, usableSnapshot,
-  type AskAnswer, type BookScope, type Explanation,
+  answeredRule, bookRules, DEFAULT_ROFL_BIN, Engine, mayReadRules, parseLiteral, resultRule, SYSTEM_BOOK,
+  type AskAnswer, type BookScope, type Explanation, type World,
 } from './engine.ts';
 import { verifyRequest } from './httpsig.ts';
+import { compileRule, RULE } from './rules.ts';
+import { RESULT } from './executor.ts';
 import { open as openSealed, type Envelope } from './seal.ts';
 
 export const DEFAULT_FRESHNESS_SEC = 300;
+
+/** The operator's bearer token: 32 random bytes in key/operator-token (0600),
+ *  created on first use. It stands for the node's OWN identity and nothing else. */
+export function operatorTokenOf(dataDir: string): string {
+  const p = path.join(dataDir, 'key', 'operator-token');
+  if (!fs.existsSync(p)) {
+    fs.mkdirSync(path.dirname(p), { recursive: true, mode: 0o700 });
+    const tmp = `${p}.tmp-${process.pid}`;
+    const fd = fs.openSync(tmp, 'wx', 0o600);
+    try { fs.writeSync(fd, crypto.randomBytes(32).toString('base64url')); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    fs.renameSync(tmp, p);
+  }
+  return fs.readFileSync(p, 'utf8').trim();
+}
 
 // Whether the next version of an identity document is accepted is a ROFL
 // rule, so a refusal is explained by the engine (r_key_change_loud). The
@@ -62,6 +78,8 @@ export interface NodeOptions {
    *  signed requests are checked against THIS scheme and authority instead
    *  (r_sig_behind_proxy). Unset: taken from the request, for direct use. */
   publicUrl?: string;
+  /** Steps an author's rules may take per evaluation of its rule world. */
+  ruleBudget?: number;
   /** How old a static feed's checkpoint may be (default 24 h). */
   checkpointWindowSec?: number;
 }
@@ -80,7 +98,19 @@ export interface FeedEntry { manifest: Manifest; jsonl?: string; salt?: string; 
  *  from our own log, received_at taken from the receipt. */
 type Mode = 'post' | 'feed' | 'offline' | 'replay';
 
-interface Verified { manifest: Manifest; facts: Fact[]; pin: IdentityDoc | null; reattest: Attestation | null; withheld: boolean }
+interface Verified {
+  manifest: Manifest; facts: Fact[]; pin: IdentityDoc | null; reattest: Attestation | null; withheld: boolean;
+  /** The batch's user rules, compiled to its author's book (src/rules.ts). */
+  rules: string[];
+}
+
+/** The ROFL program a verified batch loads into the MAIN world: its facts.
+ *  Its user rules run only in its author's rule world (r_rule_budget). */
+function programOf(v: Verified, seq: number): string {
+  return toRofl(v.facts, bookOf(v.manifest.identity), seq);
+}
+
+export const DEFAULT_RULE_BUDGET = 50_000;
 
 export class RoflenoxNode {
   readonly dataDir: string;
@@ -88,6 +118,9 @@ export class RoflenoxNode {
   readonly log: Log;
   private engine!: Engine;
   private readonly now: () => number;
+  private readonly fault: Fault;
+  private readonly bin: string;
+  private engineRestarts = 0;
   private readonly freshnessMs: number;
   readonly publicUrl: string | null;
   /** The key challenges are authenticated with: random per process, so a
@@ -101,27 +134,44 @@ export class RoflenoxNode {
   private queue: Promise<unknown> = Promise.resolve();
   /** Challenges this node issued as a reader: nonce → expiry (ms). One use each. */
   private readonly consumed = new Map<string, number>();
+  // ---- rule worlds (r_rule_budget) -----------------------------------------
+  // The MAIN world holds every fact and the system rules, and is what
+  // admission evaluates. An author's own rules run in that author's RULE
+  // WORLD: a separate world with its own step budget, holding the author's
+  // book, the books its rules read, every executor result, and its rules. A
+  // rule that never terminates exhausts only its author's budget; its answers
+  // come back unknown, naming the budget; nobody else's admission waits on it.
+  private readonly ruleBudget: number;
+  private readonly programs = new Map<string, string[]>();      // identity → its batches' fact programs
+  private readonly results = new Map<string, string[]>();       // identity → its roflenox:result fact lines
+  private readonly userRules = new Map<string, { text: string; mirrored: boolean }[]>();  // author → compiled rules
+  private readonly worlds = new Map<string, { w: World; version: number; clock: number }>();
+  private version = 0;
   /** RFC 9421 nonces seen on signed requests: nonce → expiry (ms). */
   private readonly requestNonces = new Map<string, number>();
 
   private constructor(o: NodeOptions) {
     this.dataDir = o.dataDir;
     this.log = new Log(o.dataDir, o.fault);
+    this.fault = o.fault ?? (() => {});
+    this.bin = o.bin ?? DEFAULT_ROFL_BIN;
     this.now = o.now ?? Date.now;
     this.freshnessMs = (o.freshnessSec ?? DEFAULT_FRESHNESS_SEC) * 1000;
     this.publicUrl = o.publicUrl ? new URL(o.publicUrl).origin : null;
+    this.ruleBudget = o.ruleBudget ?? DEFAULT_RULE_BUDGET;
     this.checkpointWindowMs = (o.checkpointWindowSec ?? DEFAULT_CHECKPOINT_WINDOW_SEC) * 1000;
   }
 
   /** Open a node: read the log, re-verify every batch in it, and build the
-   *  engine — from a snapshot only if it names the current log head. */
+   *  engine by replaying it. There is no snapshot: the log is the only store,
+   *  and replay is the only way to the engine (r_snapshot_is_cache —
+   *  measured, a snapshot opened 5× slower than a replay at 162k facts). */
   static async open(o: NodeOptions): Promise<RoflenoxNode> {
     const n = new RoflenoxNode(o);
     n.log.open();
     const bin = o.bin ?? DEFAULT_ROFL_BIN;
     // A fresh engine first: identity decisions are made in throwaway forks of
-    // it while the log is re-verified, and it is the replay target if no
-    // snapshot fits.
+    // it while the log is re-verified, and then the log is replayed into it.
     n.engine = await Engine.fresh(bin);
     const batches: { v: Verified; rules: string | null; seq: number }[] = [];
     const receipts = n.log.receipts;
@@ -147,7 +197,7 @@ export class RoflenoxNode {
       }
       const rules = n.chains.has(r.identity) ? null : bookRules(bookOf(r.identity), r.identity);
       const seq = n.chains.get(r.identity)?.length ?? 0;
-      n.record(v);
+      n.record(v, r.via !== undefined);
       batches.push({ v, rules, seq });
     }
     if (n.identity && n.idDocs.has(n.identity.name)) {
@@ -165,28 +215,30 @@ export class RoflenoxNode {
         throw new Error(`the key file for ${n.identity.name} is not a key this identity has published under; refusing to start`);
       }
     }
-    const seed = usableSnapshot(o.dataDir, n.log.head());
-    if (seed) {
-      // The sidecar only binds the seed to itself. What binds it to the LOG is
-      // the set of batches the world says it was built from: it must be
-      // exactly the set of receipts, or the snapshot is someone else's world.
-      const e = await Engine.fromSnapshot(seed, bin);
-      const want = new Set(n.log.receipts.filter((r) => r.kind !== 'identity').map((r) => `${r.identity} ${r.digest}`));
-      const have = await e.loadedBatches().catch(() => null);
-      if (have && have.size === want.size && [...want].every((k) => have.has(k))) {
-        await n.engine.stop();
-        n.engine = e;
-        return n;
-      }
-      await e.stop();
-      discardSnapshot(o.dataDir);
-      n.log.recovered.push('a snapshot whose batches did not match the log was discarded; the log was replayed');
-    }
-    for (const { v, rules, seq } of batches) {
-      const s = await n.engine.stage(toRofl(v.facts, bookOf(v.manifest.identity), seq), v.manifest.identity, v.manifest, rules);
-      await s.commit();
-    }
+    await n.engine.replay(batches.map(({ v, rules, seq }) => ({ rofl: programOf(v, seq), who: v.manifest.identity, rules })));
+    await n.checkUriPrefix();
     return n;
+  }
+
+  /** Loud startup findings that are not errors (health.warnings; the CLI
+   *  prints them). */
+  readonly warnings: string[] = [];
+
+  /** r_uri_prefix_stable: the Enox entity ids in this node's own book were
+   *  minted under some prefix; if it is not the configured one, new ids would
+   *  silently land elsewhere — so say it, once, at startup. */
+  private async checkUriPrefix(): Promise<void> {
+    const me = this.identity?.name;
+    if (!me || !this.chains.has(me)) return;
+    const { uriPrefix } = await import('./enox.ts');
+    const want = uriPrefix();
+    const rows = (await this.engine.sysRows(`edge[${bookOf(me)}](F, S, "enox:type", T)`)).map((r) => String(r[1]));
+    const foreign = rows.filter((id) => id.startsWith('enox://') && !id.startsWith(`${want}/`));
+    if (foreign.length === 0) return;
+    // An Enox id is <prefix>/<domain>/<slug>: the prefix is all but the last two segments.
+    const seen = [...new Set(foreign.map((id) => id.split('/').slice(0, -2).join('/')))].slice(0, 3);
+    this.warnings.push(`URI PREFIX MISMATCH: ${foreign.length} of ${rows.length} entity ids in ${me}'s book are not under the configured prefix `
+      + `${want} (e.g. ${seen.join(', ')}); new entities would be minted under a different prefix. Set NODE_URI_PREFIX to the prefix these ids use.`);
   }
 
   /** This node's own identity, re-read when the key file changes (a rotation
@@ -311,8 +363,15 @@ export class RoflenoxNode {
     });
   }
 
-  private record(v: Verified): void {
+  /** `mirrored`: the batch came by a feed or an envelope, not from its author
+   *  posting here — its rules are inert until trusted (r_foreign_rules_opt_in). */
+  private record(v: Verified, mirrored = false, seq = (this.chains.get(v.manifest.identity)?.length ?? 0)): void {
     const id = v.manifest.identity;
+    this.programs.set(id, [...(this.programs.get(id) ?? []), programOf(v, seq)]);
+    const res = v.facts.filter((f) => f.relation === RESULT);
+    if (res.length) this.results.set(id, [...(this.results.get(id) ?? []), toRofl(res, bookOf(id), seq)]);
+    if (v.rules.length) this.userRules.set(id, [...(this.userRules.get(id) ?? []), ...v.rules.map((text) => ({ text, mirrored }))]);
+    this.version++;
     if (v.pin) this.idDocs.set(id, [v.pin]);
     const chain = this.chains.get(id) ?? [];
     chain.push(v.manifest.digest);
@@ -320,9 +379,46 @@ export class RoflenoxNode {
     this.factCount += v.facts.length;
   }
 
+  /** An identity's chain of batch digests (public: every feed shows them). */
+  chainOf(identity: string): string[] {
+    return [...(this.chains.get(identity) ?? [])];
+  }
+
   head(identity: string): string | null {
     const c = this.chains.get(identity);
     return c ? c[c.length - 1]! : null;
+  }
+
+  /** An agent acts only under a live delegation from its parent — and only
+   *  while EVERY identity above it in the chain still does: an expiring agent
+   *  cannot outlive itself by minting a longer-lived heir. Each link is the
+   *  engine's rule (delegated[sys]); a refusal names the first link that
+   *  fails, with the engine's whynot. Live posts are judged at receipt, feed
+   *  and offline batches at claimed_at, like key validity. Nothing else about
+   *  agents exists in the node. */
+  private async checkDelegation(m: Manifest, receivedAt: string, mode: Mode, pending: IdentityDoc | null): Promise<void> {
+    const seen = new Set<string>();
+    let agent = m.identity;
+    let parent = (this.current(agent) ?? pending)?.doc.delegated_by;
+    if (mode === 'post' && parent !== undefined) await this.engine.setClock(Math.floor(Date.parse(receivedAt) / 1000));
+    while (parent !== undefined) {
+      if (seen.has(agent)) throw new Refusal(422, 'not_delegated', `the delegation chain of ${m.identity} loops at ${agent}`);
+      seen.add(agent);
+      const A = roflString(agent), P = roflString(parent);
+      if (mode === 'post') {
+        if ((await this.engine.sysRows(`delegated[${SYSTEM_BOOK}](${A}, ${P})`)).length === 0) {
+          const whynot = await this.engine.sysWhynot(`delegated[${SYSTEM_BOOK}](${A}, ${P})`);
+          throw new Refusal(422, 'not_delegated', `${m.identity} acts only while every identity above it does; ${agent} has no live delegation from ${parent}`, { whynot });
+        }
+      } else {
+        const until = (await this.engine.sysRows(`delegate[${bookOf(parent)}](${A}, U)`)).map((r) => Number(r[0]) * 1000);
+        if (!until.some((u) => Date.parse(m.claimed_at) < u)) {
+          throw new Refusal(422, 'not_delegated', `${agent} had no live delegation from ${parent} at ${m.claimed_at}, so ${m.identity} could not act`);
+        }
+      }
+      agent = parent;
+      parent = this.current(agent)?.doc.delegated_by;
+    }
   }
 
   /** Whose keys: the current document, or — on first contact — the one
@@ -439,7 +535,10 @@ export class RoflenoxNode {
           're-attestation requested: the publisher signs the same digest again with a current claimed_at');
       }
     }
-    return { manifest: m, facts, pin, reattest, withheld };
+    // User rules are checked here, with the batch: a rule that would conclude
+    // outside its author's book refuses the whole batch.
+    const rules = facts.filter((f) => f.relation === RULE).map((f) => compileRule(f.target, m.identity));
+    return { manifest: m, facts, pin, reattest, withheld, rules };
   }
 
   /** Admit one batch, serialised against every other admission. */
@@ -447,8 +546,22 @@ export class RoflenoxNode {
     return this.serial(() => this.admitNow(body, 'post', new Date(this.now()).toISOString()));
   }
 
-  private serial<T>(f: () => Promise<T>): Promise<T> {
-    const run = this.queue.then(f);
+  /** One operation at a time. A dead engine is rebuilt first; an engine that
+   *  dies DURING the operation is rebuilt after it, and then a read is simply
+   *  asked again (`retry`), while a write is refused — it was not admitted. */
+  private serial<T>(f: () => Promise<T>, retry = false): Promise<T> {
+    const run = this.queue.then(async () => {
+      if (this.engine.dead) await this.rebuildEngine();
+      try {
+        return await f();
+      } catch (e) {
+        if (!this.engine.dead) throw e;
+        await this.rebuildEngine();
+        if (retry) return f();
+        throw e instanceof Refusal && e.reason === 'engine_down' ? e
+          : new Refusal(503, 'engine_down', 'the engine stopped during this operation; nothing was admitted; the engine is rebuilt from the log — send it again');
+      }
+    });
     this.queue = run.catch(() => undefined);
     return run;
   }
@@ -458,9 +571,11 @@ export class RoflenoxNode {
     const pending = body?.identity !== undefined && typeof ident === 'string'
       ? await this.applyChain(ident, body.identity, receivedAt, true) : null;
     const v = this.verify(body, receivedAt, mode, pending, upcoming);
+    await this.checkDelegation(v.manifest, receivedAt, mode, pending);
     const id = v.manifest.identity;
     const rules = this.chains.has(id) ? null : bookRules(bookOf(id), id);
-    const staged = await this.engine.stage(toRofl(v.facts, bookOf(id), this.chains.get(id)?.length ?? 0), id, v.manifest, rules);
+    const staged = await this.engine.stage(programOf(v, this.chains.get(id)?.length ?? 0), id, rules,
+      () => this.fault('engine:staged'));
     let receipt: Receipt;
     try {
       receipt = this.log.append(v.manifest, v.withheld ? null : body.jsonl as string, receivedAt, v.pin, {
@@ -473,8 +588,31 @@ export class RoflenoxNode {
       throw e;
     }
     await staged.commit();
-    this.record(v);
+    this.record(v, mode !== 'post');
     return receipt;
+  }
+
+  /** ENGINE CRASH RECOVERY (r_engine_crash_recovery): the engine is derived
+   *  data. When its process dies, the next operation starts a fresh one and
+   *  replays what this node holds — the same facts, in the same chain order,
+   *  that replay from the log gives. Rule worlds lived in the dead process and
+   *  are rebuilt lazily. The log was never touched by the crash: an admission
+   *  commits to the log only after the engine has taken the batch. */
+  private async rebuildEngine(): Promise<void> {
+    this.worlds.clear();
+    const e = await Engine.fresh(this.bin);
+    const entries: Parameters<Engine['replay']>[0] = [];
+    for (const [id, progs] of this.programs) {
+      progs.forEach((rofl, i) => entries.push({ rofl, who: id, rules: i === 0 ? bookRules(bookOf(id), id) : null }));
+    }
+    await e.replay(entries);
+    this.engine = e;
+    this.engineRestarts++;
+  }
+
+  /** The engine process id — for tests that kill it. */
+  enginePid(): number | undefined {
+    return this.engine.pid();
   }
 
   /** What `requester` may see, book by book. The node's own identity sees
@@ -525,24 +663,129 @@ export class RoflenoxNode {
     return this.serial(async () => {
       const scope = await this.scopeFor(requester);
       await this.requireBook(query, requester, scope, false);
-      return this.engine.ask(query, scope, perspective);
-    });
+      const ans: AskAnswer = await this.engine.ask(query, scope, perspective);
+      if (perspective !== null) return ans;
+      // What the authors' own rules derive, from their rule worlds.
+      const { rel, book, args } = parseLiteral(query);
+      const seen = new Set(ans.rows.map((r) => JSON.stringify([r.identity, r.cells])));
+      const unknown: NonNullable<AskAnswer['unknown']> = [];
+      for (const [b, sc] of scope) {
+        if (sc.only !== null || (book !== null && book !== b)) continue;
+        const w = await this.ruleWorld(sc.identity);
+        if (!w) continue;
+        const q = rel === 'answered' ? `answered[${SYSTEM_BOOK}](${roflString(b)}, ${args})` : `${rel}[${b}](${args})`;
+        let a;
+        try { a = await w.ask(q); } catch { continue; }
+        if (ans.vars.length === 0) ans.vars = a.vars;
+        for (const r of a.rows) {
+          const row = { identity: sc.identity, cells: r.map(decodeCell) };
+          const k = JSON.stringify([row.identity, row.cells]);
+          if (!seen.has(k)) { seen.add(k); ans.rows.push(row); }
+        }
+        if (w.partial) unknown.push({ identity: sc.identity, reason: w.holes.join('; '), budget: this.ruleBudget, unit: 'steps' });
+      }
+      if (unknown.length) ans.unknown = unknown;
+      ans.rows.sort((x, y) => { const p = JSON.stringify([x.identity, x.cells]), q = JSON.stringify([y.identity, y.cells]); return p < q ? -1 : p > q ? 1 : 0; });
+      return ans;
+    }, true);
   }
 
   why(query: string, requester: string | null = null): Promise<Explanation[]> {
-    return this.serial(async () => {
-      const scope = await this.scopeFor(requester);
-      await this.requireBook(query, requester, scope, true);
-      return this.engine.why(query, scope);
-    });
+    return this.serial(async () => this.explainWith('why', query, requester), true);
   }
 
   whynot(query: string, requester: string | null = null): Promise<Explanation[]> {
-    return this.serial(async () => {
-      const scope = await this.scopeFor(requester);
-      await this.requireBook(query, requester, scope, true);
-      return this.engine.whynot(query, scope);
-    });
+    return this.serial(async () => this.explainWith('whynot', query, requester), true);
+  }
+
+  /** Explanations, each from the world that derives the literal: an author's
+   *  rule world for what its rules conclude (and answered), else main. */
+  private async explainWith(op: 'why' | 'whynot', query: string, requester: string | null): Promise<Explanation[]> {
+    const scope = await this.scopeFor(requester);
+    await this.requireBook(query, requester, scope, true);
+    const out = await (op === 'why' ? this.engine.why(query, scope) : this.engine.whynot(query, scope));
+    const { rel, args } = parseLiteral(query);
+    for (const e of out) {
+      if (!this.headsOf(e.identity).has(rel) && rel !== 'answered') continue;
+      const w = await this.ruleWorld(e.identity);
+      if (!w) continue;
+      const b = bookOf(e.identity);
+      const q = rel === 'answered' ? `answered[${SYSTEM_BOOK}](${roflString(b)}, ${args})` : `${rel}[${b}](${args})`;
+      const r = await w.explain(op, q);
+      e.holds = r.holds;
+      e.text = r.text;
+      if (w.partial) e.unknown = { reason: w.holes.join('; '), budget: this.ruleBudget, unit: 'steps' };
+    }
+    return out;
+  }
+
+  private headsOf(author: string): Set<string> {
+    return new Set((this.userRules.get(author) ?? []).map((r) => /^([a-z][A-Za-z0-9_]*)\[/.exec(r.text)?.[1] ?? ''));
+  }
+
+  /** Rules that run for `author` here: those it posted to this node itself,
+   *  and — only if this node's operator trusts the author for rules — those
+   *  that arrived by mirror. Mirrored books bring facts, not code, by default.
+   *  Trust is a fact in the operator's own book:
+   *    {source: <author>, relation: "roflenox:trust_rules", target: <anything>}
+   *  with a current confidence above 0 (re-asserting it at 0 withdraws it). */
+  private async runnableRules(author: string): Promise<string[]> {
+    const all = this.userRules.get(author) ?? [];
+    const own = all.filter((r) => !r.mirrored).map((r) => r.text);
+    if (own.length === all.length) return own;
+    const op = this.identity?.name;
+    let trusted = author === op;
+    if (!trusted && op && this.chains.has(op)) {
+      const b = bookOf(op);
+      const facts = await this.engine.sysRows(`edge[${b}](F, ${roflString(author)}, "roflenox:trust_rules", T)`);
+      const live = new Set((await this.engine.sysRows(`current[${SYSTEM_BOOK}](${roflString(b)}, F, P, C)`)).filter((r) => Number(r[2]) > 0).map((r) => String(r[0])));
+      trusted = facts.some((r) => live.has(String(r[0])));
+    }
+    return trusted ? all.map((r) => r.text) : own;
+  }
+
+  /** The author's rule world, rebuilt when anything was admitted since, and
+   *  re-evaluated when the clock (grant expiry) moved. */
+  private async ruleWorld(author: string): Promise<World | null> {
+    const rules = await this.runnableRules(author);
+    if (!rules.length) {
+      const stale = this.worlds.get(author);
+      if (stale) { await stale.w.close(); this.worlds.delete(author); }
+      return null;
+    }
+    const clock = Math.floor(this.now() / 1000);
+    const cached = this.worlds.get(author);
+    if (cached && cached.version === this.version) {
+      if (cached.clock !== clock) { await cached.w.setClock(clock); cached.clock = clock; }
+      return cached.w;
+    }
+    if (cached) { await cached.w.close(); this.worlds.delete(author); }
+    const own = bookOf(author);
+    const owners = new Map([...this.chains.keys()].map((id) => [bookOf(id), id]));
+    const foreign = [...new Set([...rules.join('\n').matchAll(/\[(b_[0-9a-f]{16})\]/g)].map((m) => m[1]!))].filter((b) => b !== own);
+    const w = await this.engine.world(this.ruleBudget);
+    await w.session.load(`clock[${SYSTEM_BOOK}](${clock}).\n`, 'roflenox');
+    for (const b of [own, ...foreign]) {
+      const id = owners.get(b);
+      if (!id) continue;
+      const text = (this.programs.get(id) ?? []).join('');
+      if (text) await w.session.load(text, id);
+      if (b !== own) await w.session.load(mayReadRules(b, id), 'roflenox');
+    }
+    for (const [id, lines] of this.results) {
+      if (id !== author && !foreign.includes(bookOf(id))) await w.session.load(lines.join(''), id);
+      await w.session.load(resultRule(bookOf(id), id), 'roflenox');
+    }
+    await w.session.load(answeredRule(own), 'roflenox');
+    try {
+      await w.session.load(rules.map((r) => `${r}\n`).join(''), author);
+      await w.evaluate();
+    } catch (e) {
+      w.partial = true;
+      w.holes = [`engine_refused: ${(e as Error).message.slice(0, 200)}`];
+    }
+    this.worlds.set(author, { w, version: this.version, clock });
+    return w;
   }
 
   /** OFFLINE ADMISSION (r_offline_admission): a sealed envelope addressed to
@@ -575,37 +818,9 @@ export class RoflenoxNode {
     });
   }
 
-  /** The operator's bearer token for the MCP endpoint: 32 random bytes in
-   *  key/operator-token (0600), created on first use. It stands for this
-   *  node's OWN identity and nothing else. */
+  /** The operator's bearer token (see operatorTokenOf). */
   operatorToken(): string {
-    const p = path.join(this.dataDir, 'key', 'operator-token');
-    if (!fs.existsSync(p)) {
-      fs.mkdirSync(path.dirname(p), { recursive: true, mode: 0o700 });
-      const tmp = `${p}.tmp-${process.pid}`;
-      const fd = fs.openSync(tmp, 'wx', 0o600);
-      try { fs.writeSync(fd, crypto.randomBytes(32).toString('base64url')); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-      fs.renameSync(tmp, p);
-    }
-    return fs.readFileSync(p, 'utf8').trim();
-  }
-
-  /** Executor intents the requester may work on: facts in books it reads
-   *  WHOLE that a rule says still need something. Derived, never stored. */
-  intents(kind: string, requester: string | null, limit: number): Promise<{ identity: string; fact_id: string; text: string }[]> {
-    return this.serial(async () => {
-      if (kind !== 'needs_embedding') throw new Refusal(400, 'unknown_intent', 'the one intent kind is needs_embedding');
-      if (requester === null) throw new Refusal(401, 'unsigned', 'an executor signs its requests');
-      const scope = await this.scopeFor(requester);
-      const out: { identity: string; fact_id: string; text: string }[] = [];
-      for (const [b, f, t] of await this.engine.sysRows(`needs_embedding[${SYSTEM_BOOK}](B, F, S)`)) {
-        const sc = scope.get(String(b));
-        if (!sc || sc.only !== null) continue;
-        out.push({ identity: sc.identity, fact_id: String(f), text: String(t) });
-        if (out.length >= limit) break;
-      }
-      return out;
-    });
+    return operatorTokenOf(this.dataDir);
   }
 
   /** A one-time challenge for pulling a feed (this node as the READER),
@@ -796,25 +1011,16 @@ export class RoflenoxNode {
       facts: this.factCount,
       batches: this.log.receipts.filter((r) => r.kind !== 'identity').length,
       log_head: this.log.head(),
-      engine: { up: true, built_from: this.engine.source },
+      engine: { up: !this.engine.dead, restarts: this.engineRestarts },
+      warnings: this.warnings,
       recovered: this.log.recovered,
       challenges_remembered: this.consumed.size,
     };
   }
 
-  /** Write a snapshot of the engine named by the current log head. */
-  async snapshot(): Promise<void> {
-    const p = snapshotPaths(this.dataDir);
-    fs.mkdirSync(`${this.dataDir}/cache`, { recursive: true });
-    const tmp = `${p.seed}.tmp-${process.pid}`;
-    await this.engine.save(tmp);
-    fs.renameSync(tmp, p.seed);
-    writeFileAtomic(p.meta, JSON.stringify({ log_head: this.log.head(), seed_sha256: sha256hex(fs.readFileSync(p.seed)) }));
-  }
-
-  async close({ snapshot = false } = {}): Promise<void> {
+  async close(): Promise<void> {
     await this.queue;
-    if (snapshot) await this.snapshot();
+    for (const { w } of this.worlds.values()) await w.close().catch(() => {});
     await this.engine.stop();
   }
 }

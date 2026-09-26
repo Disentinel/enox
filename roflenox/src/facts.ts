@@ -25,6 +25,9 @@ const FIELDS = ['confidence', 'perspective', 'relation', 'source', 'target'];
 //   {source: <relation or "*">, relation: "roflenox:export", target: "public" | <identity>}
 //     — facts of that relation may leave this node to that audience.
 export const GRANT = 'roflenox:grant';
+/** {source: <agent identity>, relation: "roflenox:delegate", target: <until>}
+ *  — the parent lets that identity act as its agent until then. */
+export const DELEGATE = 'roflenox:delegate';
 export const EXPORT = 'roflenox:export';
 const TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
@@ -83,7 +86,7 @@ export function checkFact(o: unknown, line: number): Fact {
       throw new Refusal(400, 'malformed_fact', `${at}: ${k} must be a non-empty string`);
     }
   }
-  if (f.relation === GRANT && (!TIME.test(f.target as string) || Number.isNaN(Date.parse(f.target as string)))) {
+  if ((f.relation === GRANT || f.relation === DELEGATE) && (!TIME.test(f.target as string) || Number.isNaN(Date.parse(f.target as string)))) {
     throw new Refusal(400, 'malformed_fact', `${at}: a grant's target is its expiry, RFC 3339 UTC with milliseconds`);
   }
   const c = f.confidence;
@@ -160,6 +163,7 @@ export function toRofl(facts: Fact[], book: string, seq: number): string {
     out.push(`edge[${book}](${id}, ${roflString(f.source)}, ${roflString(f.relation)}, ${roflString(f.target)}).`);
     out.push(`asserted[${book}](${id}, ${roflString(f.perspective)}, ${permille(f.confidence)}, ${seq}).`);
     if (f.relation === GRANT) out.push(`grant[${book}](${roflString(f.source)}, ${Math.floor(Date.parse(f.target) / 1000)}).`);
+    if (f.relation === DELEGATE) out.push(`delegate[${book}](${roflString(f.source)}, ${Math.floor(Date.parse(f.target) / 1000)}).`);
     if (f.relation === EXPORT) out.push(`export[${book}](${roflString(f.source)}, ${roflString(f.target)}).`);
   }
   return `${out.join('\n')}\n`;

@@ -133,5 +133,4 @@ test('an end-to-end pull between two nodes whose transcript contains no key mate
       await exited;
     }
   }
-  assert.ok(fs.existsSync(path.join(da, 'cache', 'snapshot.seed')), 'a graceful stop leaves a snapshot');
 });

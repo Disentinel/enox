@@ -57,7 +57,6 @@ export async function backup(dataDir: string, toDir: string,
     if (head !== sha256hex(index) || batches !== receipts.filter((r) => r.kind !== 'identity').length) {
       throw new Error('the backup did not rebuild to the log it was copied from');
     }
-    fs.rmSync(path.join(staging, 'cache'), { recursive: true, force: true });
     const result: BackupResult = { dir: path.join(toDir, 'latest'), receipts: receipts.length, log_head: head, at: new Date(now()).toISOString() };
     fs.writeFileSync(path.join(staging, 'backup.json'), JSON.stringify(result));
 

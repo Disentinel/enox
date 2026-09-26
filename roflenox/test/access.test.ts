@@ -32,7 +32,7 @@ test('a request signed by an identity with no grant is refused and whynot names 
     assert.match(whynot, /^whynot may_read\[sys_roflenox\]\("carol","b_[0-9a-f]{16}"\):/);
     assert.ok(whynot.includes(`failed premise: grant[${BOOK_A}]("carol",`), whynot);
     assert.match(whynot, /no rule concludes 'grant' and no matching base fact exists/);
-    const ex = (await post(a.url, '/ask', { whynot: `edge("f", "a", "r", "b")` }, { as: carol })).body.whynot as { identity: string }[];
+    const ex = (await post(a.url, '/op/whynot', { literal: `edge("f", "a", "r", "b")` }, { as: carol })).body as unknown as { identity: string }[];
     assert.deepEqual(ex.map((e) => e.identity), ['node-b'], 'carol gets explanations only of the book she was granted');
 
     // The recipient reads; a bookless question simply shows carol nothing of node-a.

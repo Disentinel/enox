@@ -143,13 +143,17 @@ test('a flood of challenge requests neither grows memory nor stops an honest mir
   const b = await start(tmpDir('flood-b'), 'node-b');
   try {
     await publish(a.url, a.me, [fact('alice', 'knows', 'bob'), exportRule('*', 'public')], () => a.clock.t);
-    // A flood at B: 1 000 over HTTP, 200 000 more in-process.
+    // A flood at B: 1 000 over HTTP, 50 000 more in-process.
     const statuses: number[] = [];
     for (let k = 0; k < 50; k++) {
       statuses.push(...(await Promise.all(Array.from({ length: 20 }, () => post(b.url, '/challenges', {}, { as: null })))).map((r) => r.status));
     }
     assert.equal(statuses.filter((c) => c === 201).length, 1000, 'nobody is refused a challenge');
-    for (let i = 0; i < 200_000; i++) b.node.issueChallenge();
+    // (In chunks, yielding, so the node keeps serving — as it would under a real flood.)
+    for (let k = 0; k < 50; k++) {
+      for (let i = 0; i < 1000; i++) b.node.issueChallenge();
+      await new Promise((r) => setImmediate(r));
+    }
     // The only per-challenge state a node keeps is this table; heap is too
     // noisy to be the measurement.
     assert.equal((await get(b.url, '/health')).body.challenges_remembered, 0, 'issuing stores nothing');

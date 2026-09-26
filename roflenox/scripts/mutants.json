@@ -84,18 +84,6 @@
    ]
   },
   {
-   "id": "M6",
-   "title": "snapshot used without head check",
-   "file": "src/engine.ts",
-   "edits": [
-    [
-     "meta.log_head === logHead && ",
-     ""
-    ]
-   ],
-   "survivor": "Subsumed by design: the batch-set check (r_snapshot_is_cache) rejects every snapshot the head check would; the head check stays only as a cheap pre-filter that avoids starting an engine for a stale seed (team lead, 2026-09-26). No input can tell the two apart."
-  },
-  {
    "id": "M7",
    "title": "no digest check of JSONL",
    "file": "src/node.ts",
@@ -180,35 +168,6 @@
    ]
   },
   {
-   "id": "M12",
-   "title": "snapshot batch set not compared with the log",
-   "file": "src/node.ts",
-   "edits": [
-    [
-     "if (have && have.size === want.size && [...want].every((k) => have.has(k))) {",
-     "if (true) {"
-    ]
-   ],
-   "red": [
-    "a self-consistent snapshot built from different batches than the log is discarded and the log is replayed"
-   ]
-  },
-  {
-   "id": "M13",
-   "title": "loaded batches not recorded in the engine",
-   "file": "src/engine.ts",
-   "edits": [
-    [
-     "      await work.load(`${LOADED}[${SYSTEM_BOOK}](${roflString(batch.identity)}, ${roflString(batch.digest)}).\\n`, SYSTEM_WHO);\n",
-     ""
-    ]
-   ],
-   "red": [
-    "a snapshot from an older log head is ignored and the answers still match",
-    "a self-consistent snapshot built from different batches than the log is discarded and the log is replayed"
-   ]
-  },
-  {
    "id": "M14",
    "title": "feed challenge not required",
    "file": "src/node.ts",
@@ -270,8 +229,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "if (mode === 'post') {",
-     "if (mode !== 'replay') {"
+     "    if (mode === 'post') {\n      if (reattest) {",
+     "    if (mode !== 'replay') {\n      if (reattest) {"
     ]
    ],
    "red": [
@@ -328,8 +287,8 @@
    "file": "src/engine.ts",
    "edits": [
     [
-     "clock[${SYSTEM_BOOK}](T), T < U.`",
-     "clock[${SYSTEM_BOOK}](T).`"
+     "grant[${book}](R, U), clock[${SYSTEM_BOOK}](T), T < U.`",
+     "grant[${book}](R, U), clock[${SYSTEM_BOOK}](T).`"
     ]
    ],
    "red": [
@@ -819,8 +778,8 @@
    "file": "scripts/mutants.ts",
    "edits": [
     [
-     "    if (n !== 1) return { id: m.id, ok: false,",
-     "    if (false) return { id: m.id, ok: false,"
+     "      if (n !== 1) {\n",
+     "      if (false) {\n"
     ]
    ],
    "red": [
@@ -829,12 +788,12 @@
   },
   {
    "id": "M58",
-   "title": "MCP assert open to any caller",
-   "file": "src/mcp.ts",
+   "title": "operator-only operations open to any caller",
+   "file": "src/ops.ts",
    "edits": [
     [
-     "if (caller === null || caller !== node.identity?.name) {",
-     "if (false) {"
+     "  if (op.access === 'operator' && (ctx.caller === null || ctx.caller !== ctx.node?.identity?.name)) {",
+     "  if (false) {"
     ]
    ],
    "red": [
@@ -857,12 +816,12 @@
   },
   {
    "id": "M60",
-   "title": "MCP ask runs as the operator, not the caller",
-   "file": "src/mcp.ts",
+   "title": "ask runs as the operator, not the caller",
+   "file": "src/ops.ts",
    "edits": [
     [
-     "node.ask(a.query, caller,",
-     "node.ask(a.query, node.identity?.name ?? null,"
+     "needNode(ctx).ask(a.query as string, ctx.caller,",
+     "needNode(ctx).ask(a.query as string, ctx.node?.identity?.name ?? null,"
     ]
    ],
    "red": [
@@ -919,20 +878,6 @@
     [
      "`ulimit -t ${cpu}; exec \"$0\" \"$@\"`",
      "`exec \"$0\" \"$@\"`"
-    ]
-   ],
-   "red": [
-    "an ask answers within one second while an executor saturates its CPU budget"
-   ]
-  },
-  {
-   "id": "M65",
-   "title": "executor intents from books it may not read",
-   "file": "src/node.ts",
-   "edits": [
-    [
-     "        if (!sc || sc.only !== null) continue;\n        out.push({ identity: sc.identity,",
-     "        if (!sc && false) continue;\n        out.push({ identity: sc?.identity ?? String(b),"
     ]
    ],
    "red": [
@@ -1028,6 +973,488 @@
    ],
    "red": [
     "a flood of challenge requests neither grows memory nor stops an honest mirror"
+   ]
+  },
+  {
+   "id": "M65",
+   "title": "an answer from any book counts for the addressed executor",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "intent[${book}](K, E, Kind, In), result_of[${SYSTEM_BOOK}](K, E, V).\\n`;",
+     "intent[${book}](K, E, Kind, In), result_of[${SYSTEM_BOOK}](K, E2, V).\\n`;"
+    ]
+   ],
+   "red": [
+    "an intent derived by a rule is answered by an executor and why of the result reaches the rule"
+   ]
+  },
+  {
+   "id": "M72",
+   "title": "a hand-written HTTP route outside the table",
+   "file": "src/http.ts",
+   "edits": [
+    [
+     "      if (p === '/mcp') {",
+     "      if (p === '/debug/state') return send(res, 200, node.health());\n      if (p === '/mcp') {"
+    ]
+   ],
+   "red": [
+    "every operation in the table is reachable with the same name and schema over MCP, CLI and HTTP, and nothing outside the table is"
+   ]
+  },
+  {
+   "id": "M73",
+   "title": "an MCP tool outside the table",
+   "file": "src/mcp.ts",
+   "edits": [
+    [
+     "    .map((o) => ({ name: o.name, description: o.description, inputSchema: o.input }));",
+     "    .map((o) => ({ name: o.name, description: o.description, inputSchema: o.input }))\n    .concat([{ name: 'debug_dump', description: 'x', inputSchema: { type: 'object', properties: {}, additionalProperties: false } }]);"
+    ]
+   ],
+   "red": [
+    "every operation in the table is reachable with the same name and schema over MCP, CLI and HTTP, and nothing outside the table is"
+   ]
+  },
+  {
+   "id": "M74",
+   "title": "a hand-written CLI command outside the table",
+   "file": "src/cli.ts",
+   "edits": [
+    [
+     "  if (cmd === 'serve') return serve(data, f);",
+     "  if (cmd === 'dump') { process.stdout.write('state\\n'); return 0; }\n  if (cmd === 'serve') return serve(data, f);"
+    ]
+   ],
+   "red": [
+    "every operation in the table is reachable with the same name and schema over MCP, CLI and HTTP, and nothing outside the table is"
+   ]
+  },
+  {
+   "id": "M75",
+   "title": "HTTP route ignores the op's schema",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "  const a = validate(op, args);",
+     "  const a = args as Record<string, unknown>;"
+    ]
+   ],
+   "red": [
+    "every operation in the table is reachable with the same name and schema over MCP, CLI and HTTP, and nothing outside the table is"
+   ]
+  },
+  {
+   "id": "M76",
+   "title": "import salt random (not derived from key and content)",
+   "file": "src/import.ts",
+   "edits": [
+    [
+     "    const salt = importSalt(me, jsonl);",
+     "    const salt = (await import('./facts.ts')).newSalt();"
+    ]
+   ],
+   "red": [
+    "importing an Enox snapshot twice gives the same log head and every imported assertion answers by ask with its original author"
+   ]
+  },
+  {
+   "id": "M77",
+   "title": "import drops the original author",
+   "file": "src/import.ts",
+   "edits": [
+    [
+     "    add(F, 'enox:asserted_by', e.asserted_by);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "importing an Enox snapshot twice gives the same log head and every imported assertion answers by ask with its original author"
+   ]
+  },
+  {
+   "id": "M78",
+   "title": "import re-admits batches the node holds",
+   "file": "src/import.ts",
+   "edits": [
+    [
+     "    if (held.has(batchDigest(salt, jsonl))) { skipped++; continue; }\n",
+     ""
+    ]
+   ],
+   "red": [
+    "importing an Enox snapshot twice gives the same log head and every imported assertion answers by ask with its original author"
+   ]
+  },
+  {
+   "id": "M79",
+   "title": "Enox remember open to any caller",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "    input: obj({ subject: s(), fact: s(), relation: s(), domain: s(), confidence: n(), asserted_by: s() }, ['subject', 'fact']), access: 'operator', text: pretty,",
+     "    input: obj({ subject: s(), fact: s(), relation: s(), domain: s(), confidence: n(), asserted_by: s() }, ['subject', 'fact']), access: 'anyone', text: pretty,"
+    ]
+   ],
+   "red": [
+    "the tool calls an Enox client made on 2026-09-26 run unchanged against a node and get answers of the same shape"
+   ]
+  },
+  {
+   "id": "M80",
+   "title": "Enox delete_assertion writes nothing",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "      await write(ctx, [{ source: e.source, relation: e.relation, target: e.target, perspective: ENOX_PERSPECTIVE, confidence: 0 },\n        meta(e.F, 'deleted_at', new Date().toISOString())]);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "the tool calls an Enox client made on 2026-09-26 run unchanged against a node and get answers of the same shape"
+   ]
+  },
+  {
+   "id": "M81",
+   "title": "semantic_search fakes an answer without an index",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "    run: async (_ctx, a) => ({ nodes: [],",
+     "    run: async (ctx, a) => ({ nodes: [...(await graph(ctx)).nodes.values()].slice(0, 1).map((x) => ({ id: x.id })),"
+    ]
+   ],
+   "red": [
+    "the tool calls an Enox client made on 2026-09-26 run unchanged against a node and get answers of the same shape"
+   ]
+  },
+  {
+   "id": "M82",
+   "title": "Enox reads run as the operator, not the caller",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "cache = { key, g: await Graph.load(node(ctx), ctx.caller) };",
+     "cache = { key, g: await Graph.load(node(ctx), node(ctx).identity?.name ?? null) };"
+    ]
+   ],
+   "red": [
+    "the tool calls an Enox client made on 2026-09-26 run unchanged against a node and get answers of the same shape"
+   ]
+  },
+  {
+   "id": "M83",
+   "title": "a rule may conclude into another identity's book",
+   "file": "src/rules.ts",
+   "edits": [
+    [
+     "  if (head && book !== own) {",
+     "  if (false) {"
+    ]
+   ],
+   "red": [
+    "a rule published by alice derives facts in her book from bob's granted facts, and cannot conclude into bob's book"
+   ]
+  },
+  {
+   "id": "M84",
+   "title": "a rule reads a foreign book without a live grant",
+   "file": "src/rules.ts",
+   "edits": [
+    [
+     "  for (const b of [...foreign].sort()) body.push(",
+     "  for (const b of [...foreign].sort().filter(() => false)) body.push("
+    ]
+   ],
+   "red": [
+    "a rule published by alice derives facts in her book from bob's granted facts, and cannot conclude into bob's book",
+    "why names the facts and the rule an answer stands on, and whynot names the missing premise"
+   ]
+  },
+  {
+   "id": "M85",
+   "title": "a rule may read the system book",
+   "file": "src/rules.ts",
+   "edits": [
+    [
+     "  const book = r.startsWith('@') ? bookOf(checkName(r.slice(1))) : BOOK.test(r) ? r : null;",
+     "  const book = r.startsWith('@') ? bookOf(checkName(r.slice(1))) : BOOK.test(r) || r === 'sys_roflenox' ? r : null;"
+    ]
+   ],
+   "red": [
+    "a rule published by alice derives facts in her book from bob's granted facts, and cannot conclude into bob's book"
+   ]
+  },
+  {
+   "id": "M86",
+   "title": "agents act without a live delegation",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    while (parent !== undefined) {",
+     "    while (false) {"
+    ]
+   ],
+   "red": [
+    "a delegated agent key publishes until its expiry and is refused after it"
+   ]
+  },
+  {
+   "id": "M87",
+   "title": "delegation expiry not judged",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "`delegated[${SYSTEM_BOOK}](A, ${roflString(owner)}) :- delegate[${book}](A, U), clock[${SYSTEM_BOOK}](T), T < U.`",
+     "`delegated[${SYSTEM_BOOK}](A, ${roflString(owner)}) :- delegate[${book}](A, U).`"
+    ]
+   ],
+   "red": [
+    "a delegated agent key publishes until its expiry and is refused after it"
+   ]
+  },
+  {
+   "id": "M88",
+   "title": "follow facts derive no intent",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "    `intent[${book}](P, ${roflString(owner)}, \"follow\", U) :- edge[${book}](F, P, \"roflenox:follow\", U).`,\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a follower converges to the publisher's head after new batches without a manual pull"
+   ]
+  },
+  {
+   "id": "M89",
+   "title": "the follow executor pulls once and stops",
+   "file": "src/executor.ts",
+   "edits": [
+    [
+     "  while (!signal.aborted) {\n    const rows",
+     "  if (!signal.aborted) {\n    const rows"
+    ]
+   ],
+   "red": [
+    "a follower converges to the publisher's head after new batches without a manual pull"
+   ]
+  },
+  {
+   "id": "M90",
+   "title": "stdio offered as the network surface",
+   "file": "src/stdio.ts",
+   "edits": [
+    [
+     "handleRpc(ctx, m, 'local')",
+     "handleRpc(ctx, m, 'network')"
+    ]
+   ],
+   "red": [
+    "the same data directory answers the same over stdio and over HTTP"
+   ]
+  },
+  {
+   "id": "M91",
+   "title": "a second store: the Enox view cached on disk",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "  if (cache?.key !== key) cache = { key, g: await Graph.load(node(ctx), ctx.caller) };",
+     "  if (cache?.key !== key) cache = { key, g: await Graph.load(node(ctx), ctx.caller) };\n  (await import('node:fs')).writeFileSync('/tmp/roflenox-graph-cache.json', String(cache.g.nodes.size));"
+    ]
+   ],
+   "red": [
+    "a census of the source finds no second store, queue, wire format or proof of who"
+   ]
+  },
+  {
+   "id": "M92",
+   "title": "a second proof of who: an API-key header",
+   "file": "src/http.ts",
+   "edits": [
+    [
+     "  const auth = headers.authorization;",
+     "  if (headers['x-api-key'] === process.env.ROFLENOX_API_KEY) return node.identity?.name ?? null;\n  const auth = headers.authorization;"
+    ]
+   ],
+   "red": [
+    "a census of the source finds no second store, queue, wire format or proof of who"
+   ]
+  },
+  {
+   "id": "M93",
+   "title": "URI prefix mismatch not reported",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (foreign.length === 0) return;",
+     "    if (foreign.length >= 0) return;"
+    ]
+   ],
+   "red": [
+    "a node whose imported ids sit under another URI prefix says so at startup"
+   ]
+  },
+  {
+   "id": "M94",
+   "title": "delegation checks only the direct parent",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      agent = parent;\n      parent = this.current(agent)?.doc.delegated_by;",
+     "      agent = parent;\n      parent = undefined;"
+    ]
+   ],
+   "red": [
+    "a sub-agent is refused as soon as any identity above it in the delegation chain is"
+   ]
+  },
+  {
+   "id": "M95",
+   "title": "the grant guard covers positive literals only",
+   "file": "src/rules.ts",
+   "edits": [
+    [
+     "    if (book !== bookOf(author)) foreign.add(book);",
+     "    if (book !== bookOf(author) && !m[1]) foreign.add(book);"
+    ]
+   ],
+   "red": [
+    "negation over an ungranted book is no oracle"
+   ]
+  },
+  {
+   "id": "M96",
+   "title": "user rules run in the main world",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "  return toRofl(v.facts, bookOf(v.manifest.identity), seq);\n}",
+     "  return toRofl(v.facts, bookOf(v.manifest.identity), seq) + v.rules.map((r) => `${r}\\n`).join('');\n}"
+    ]
+   ],
+   "red": [
+    "an unbounded rule yields unknown with its budget named, and another identity's batch is admitted meanwhile without delay"
+   ]
+  },
+  {
+   "id": "M97",
+   "title": "an exhausted budget is not reported",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (unknown.length) ans.unknown = unknown;",
+     "      void unknown;"
+    ]
+   ],
+   "red": [
+    "an unbounded rule yields unknown with its budget named, and another identity's batch is admitted meanwhile without delay"
+   ]
+  },
+  {
+   "id": "M98",
+   "title": "mirrored rules run without trust",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (own.length === all.length) return own;",
+     "    return all.map((r) => r.text);"
+    ]
+   ],
+   "red": [
+    "a mirrored rule does not run until the reader trusts its author for rules, and then it does"
+   ]
+  },
+  {
+   "id": "M99",
+   "title": "a withdrawn trust still counts",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     ".filter((r) => Number(r[2]) > 0).map((r) => String(r[0])));",
+     ".map((r) => String(r[0])));"
+    ]
+   ],
+   "red": [
+    "a mirrored rule does not run until the reader trusts its author for rules, and then it does"
+   ]
+  },
+  {
+   "id": "M100",
+   "title": "a cut answer is not marked",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "  return { ...ans, rows, ...(more ? { cut: true,",
+     "  return { ...ans, rows, ...(false ? { cut: true,"
+    ]
+   ],
+   "red": [
+    "an answer longer than the limit is marked cut and the rest is fetched page by page to the same total"
+   ]
+  },
+  {
+   "id": "M101",
+   "title": "a cursor survives a changed log",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "    if (c.h !== head) throw",
+     "    if (false) throw"
+    ]
+   ],
+   "red": [
+    "an answer longer than the limit is marked cut and the rest is fetched page by page to the same total"
+   ]
+  },
+  {
+   "id": "M102",
+   "title": "a dead engine is never rebuilt",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "  private async rebuildEngine(): Promise<void> {\n",
+     "  private async rebuildEngine(): Promise<void> {\n    if (Date.now() > 0) return;\n"
+    ]
+   ],
+   "red": [
+    "killing the engine during an admission leaves the log consistent, refuses that batch, and the node answers after it rebuilds"
+   ]
+  },
+  {
+   "id": "M103",
+   "title": "an engine crash reported as the batch's fault (both layers)",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "      if (this.dead) throw this.down(e as Error);\n",
+     ""
+    ],
+    [
+     "        throw e instanceof Refusal && e.reason === 'engine_down' ? e\n          : new Refusal(503, 'engine_down',",
+     "        throw e instanceof Refusal ? e\n          : new Refusal(422, 'engine_refused',",
+     "src/node.ts"
+    ]
+   ],
+   "red": [
+    "killing the engine during an admission leaves the log consistent, refuses that batch, and the node answers after it rebuilds"
+   ]
+  },
+  {
+   "id": "M104",
+   "title": "replay evaluates after every batch",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "      await this.session.load(e.rofl, e.who);\n    }\n    await this.session.evaluate();",
+     "      await this.session.load(e.rofl, e.who);\n      await this.session.evaluate();\n    }\n    await this.session.evaluate();"
+    ]
+   ],
+   "red": [
+    "a node holding 200000 facts reopens from its log within 30 seconds"
    ]
   }
  ]

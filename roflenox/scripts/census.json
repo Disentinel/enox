@@ -1,0 +1,155 @@
+{
+ "note": "Every place in src/ that writes to disk, runs a timer or queue, speaks a wire format, or checks who someone is. npm run census fails on any place not listed here, and on any listed place no longer found (r_minimal_parts).",
+ "allowed": [
+  {
+   "file": "src/backup.ts",
+   "kind": "store",
+   "match": ".copyFileSync(",
+   "why": "backup: copies committed log files into the backup's staging directory (a copy of the one log, r_backup)"
+  },
+  {
+   "file": "src/backup.ts",
+   "kind": "store",
+   "match": ".mkdtempSync(",
+   "why": "backup: its staging directory"
+  },
+  {
+   "file": "src/backup.ts",
+   "kind": "store",
+   "match": ".renameSync(",
+   "why": "backup: swaps the verified copy in as latest"
+  },
+  {
+   "file": "src/backup.ts",
+   "kind": "store",
+   "match": ".writeFileSync(",
+   "why": "backup: the copied index and backup.json"
+  },
+  {
+   "file": "src/cli.ts",
+   "kind": "queue",
+   "match": "setInterval(",
+   "why": "serve --backup-every: the backup schedule (r_backup), not a work queue"
+  },
+  {
+   "file": "src/client.ts",
+   "kind": "store",
+   "match": ".renameSync(",
+   "why": "checkpoint: writes a static COPY of the public feed for a dumb host (r_static_feed)"
+  },
+  {
+   "file": "src/client.ts",
+   "kind": "store",
+   "match": ".writeFileSync(",
+   "why": "checkpoint: the static copy's file"
+  },
+  {
+   "file": "src/client.ts",
+   "kind": "wire",
+   "match": "'content-type': 'application/json'",
+   "why": "the one wire format: JSON carrying signed batches"
+  },
+  {
+   "file": "src/http.ts",
+   "kind": "who",
+   "match": "Bearer",
+   "why": "EXCEPTION put to the owner: the operator bearer token stands for the node's OWN identity, for MCP clients that cannot sign requests; every other caller proves who by an identity signature"
+  },
+  {
+   "file": "src/http.ts",
+   "kind": "who",
+   "match": "headers.authorization",
+   "why": "reads that bearer token"
+  },
+  {
+   "file": "src/http.ts",
+   "kind": "who",
+   "match": "timingSafeEqual",
+   "why": "compares that bearer token in constant time"
+  },
+  {
+   "file": "src/http.ts",
+   "kind": "wire",
+   "match": "'content-type': 'application/json'",
+   "why": "the one wire format: JSON carrying signed batches"
+  },
+  {
+   "file": "src/httpsig.ts",
+   "kind": "who",
+   "match": "crypto.verify(",
+   "why": "RFC 9421: a request is signed by an identity key — the identity signature"
+  },
+  {
+   "file": "src/identity.ts",
+   "kind": "store",
+   "match": ".renameSync(",
+   "why": "the key file (0600), not data"
+  },
+  {
+   "file": "src/identity.ts",
+   "kind": "store",
+   "match": ".writeSync(",
+   "why": "the key file (0600), not data"
+  },
+  {
+   "file": "src/identity.ts",
+   "kind": "who",
+   "match": "crypto.verify(",
+   "why": "THE proof of who: identity signatures over batches, documents, attestations"
+  },
+  {
+   "file": "src/log.ts",
+   "kind": "store",
+   "match": ".renameSync(",
+   "why": "THE log: admitted signed batches and their index"
+  },
+  {
+   "file": "src/log.ts",
+   "kind": "store",
+   "match": ".writeFileSync(",
+   "why": "THE log (quarantine of a torn tail is part of it)"
+  },
+  {
+   "file": "src/log.ts",
+   "kind": "store",
+   "match": ".writeSync(",
+   "why": "THE log: admitted signed batches and their index"
+  },
+  {
+   "file": "src/node.ts",
+   "kind": "queue",
+   "match": "queue",
+   "why": "the admission serialiser: one promise chain so each admission sees the last one's head; not a store of work"
+  },
+  {
+   "file": "src/node.ts",
+   "kind": "store",
+   "match": ".renameSync(",
+   "why": "the engine snapshot cache (derived, discarded on mismatch, r_snapshot_is_cache)"
+  },
+  {
+   "file": "src/node.ts",
+   "kind": "store",
+   "match": ".writeSync(",
+   "why": "the operator token file (0600), a credential not data"
+  },
+  {
+   "file": "src/node.ts",
+   "kind": "who",
+   "match": "createHmac",
+   "why": "authenticates this node's own challenge nonces (stateless challenges); proves issuance, not who"
+  },
+  {
+   "file": "src/node.ts",
+   "kind": "who",
+   "match": "timingSafeEqual",
+   "why": "compares a challenge's HMAC"
+  },
+  {
+   "file": "src/ops.ts",
+   "kind": "store",
+   "match": ".writeFileSync(",
+   "why": "seal: writes a sealed envelope FILE for the user to carry (an output, not a store)"
+  }
+ ]
+}

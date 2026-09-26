@@ -27,7 +27,9 @@ test('an MCP client lists the tools, asserts a fact, and asks it back with why, 
       body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) });
     assert.equal(note.status, 202);
     const list = await rpc('tools/list', {});
-    assert.deepEqual(list.body.result.tools.map((t: { name: string }) => t.name), ['ask', 'why', 'whynot', 'assert']);
+    const names = list.body.result.tools.map((t: { name: string }) => t.name) as string[];
+    for (const n of ['ask', 'why', 'whynot', 'assert']) assert.ok(names.includes(n), n);
+    assert.ok(!names.includes('recover') && !names.includes('init'), 'local-only operations are not offered over HTTP');
 
     // assert: a signed batch through normal admission, as the node's identity.
     const asserted = await rpc('tools/call', { name: 'assert', arguments: { facts: [

@@ -22,7 +22,7 @@ import * as path from 'node:path';
 const ROOT = path.join(import.meta.dirname, '..');
 const BUDGET_MS = 300_000;
 
-interface Mutant { id: string; title: string; file: string; edits: [string, string][]; red?: string[]; survivor?: string }
+interface Mutant { id: string; title: string; file: string; edits: ([string, string] | [string, string, string])[]; red?: string[]; survivor?: string }
 
 function args(): { only: Set<string> | null; extra: string | null; workers: number } {
   const a = process.argv.slice(2);
@@ -49,16 +49,14 @@ const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** Test files that define each named test. */
 function filesFor(tree: string, names: string[]): string[] {
-  const files = fs.readdirSync(path.join(tree, 'test')).filter((f) => f.endsWith('.test.ts'));
-  return files.filter((f) => {
-    const text = fs.readFileSync(path.join(tree, 'test', f), 'utf8');
-    return names.some((n) => text.includes(n));
-  }).map((f) => path.join('test', f));
+  const files = ['test', 'test/perf'].flatMap((d) => fs.existsSync(path.join(tree, d))
+    ? fs.readdirSync(path.join(tree, d)).filter((f) => f.endsWith('.test.ts')).map((f) => path.join(d, f)) : []);
+  return files.filter((f) => names.some((n) => fs.readFileSync(path.join(tree, f), 'utf8').includes(n)));
 }
 
 function run(tree: string, names: string[]): Promise<{ failed: Set<string>; passed: Set<string>; out: string }> {
   const files = filesFor(tree, names);
-  const argv = ['--experimental-strip-types', '--no-warnings', '--test', '--test-concurrency=4', '--test-timeout=30000',
+  const argv = ['--experimental-strip-types', '--no-warnings', '--test', '--test-concurrency=4', '--test-timeout=90000',
     '--test-force-exit', ...names.map((n) => `--test-name-pattern=^${escape(n)}$`), ...files];
   return new Promise((ok) => {
     // A run started from inside `node --test` inherits NODE_TEST_CONTEXT and
@@ -80,15 +78,27 @@ function run(tree: string, names: string[]): Promise<{ failed: Set<string>; pass
 type Verdict = { id: string; ok: boolean; line: string };
 
 async function judge(tree: string, m: Mutant): Promise<Verdict> {
-  const file = path.join(tree, m.file);
-  const pristine = fs.readFileSync(path.join(ROOT, m.file), 'utf8');
-  let text = pristine;
-  for (const [from, to] of m.edits) {
-    const n = text.split(from).length - 1;
-    if (n !== 1) return { id: m.id, ok: false, line: `ANCHOR  ${m.id} ${m.title}: an edit matches ${n} times in ${m.file}, not once — re-anchor it` };
-    text = text.replace(from, to);
+  // An edit may name its own file ([from, to, file]); by default the mutant's.
+  const byFile = new Map<string, [string, string][]>();
+  for (const [from, to, file] of m.edits as [string, string, string?][]) {
+    const f = file ?? m.file;
+    byFile.set(f, [...(byFile.get(f) ?? []), [from, to]]);
   }
-  fs.writeFileSync(file, text);
+  const pristine = new Map<string, string>();
+  for (const [f, edits] of byFile) {
+    const orig = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    let text = orig;
+    for (const [from, to] of edits) {
+      const n = text.split(from).length - 1;
+      if (n !== 1) {
+        for (const [pf, pt] of pristine) fs.writeFileSync(path.join(tree, pf), pt);
+        return { id: m.id, ok: false, line: `ANCHOR  ${m.id} ${m.title}: an edit matches ${n} times in ${f}, not once — re-anchor it` };
+      }
+      text = text.replace(from, to);
+    }
+    pristine.set(f, orig);
+    fs.writeFileSync(path.join(tree, f), text);
+  }
   try {
     const red = m.red ?? [];
     if (red.length === 0) return { id: m.id, ok: false, line: `EMPTY   ${m.id}: no tests are named to go red` };
@@ -99,7 +109,7 @@ async function judge(tree: string, m: Mutant): Promise<Verdict> {
     if (alive.length) return { id: m.id, ok: false, line: `SURVIVED ${m.id} ${m.title}: still green: ${alive.map((n) => `"${n}"`).join(', ')}` };
     return { id: m.id, ok: true, line: `killed  ${m.id} ${m.title} (${red.length} red)` };
   } finally {
-    fs.writeFileSync(file, pristine);
+    for (const [f, t] of pristine) fs.writeFileSync(path.join(tree, f), t);
   }
 }
 

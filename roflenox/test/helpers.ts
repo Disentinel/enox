@@ -39,7 +39,7 @@ export interface Running {
   dir: string;
   me: LocalIdentity;
   clock: Clock;
-  stop: (o?: { snapshot?: boolean }) => Promise<void>;
+  stop: () => Promise<void>;
 }
 
 /** Serve a node over `dir` exactly as found — no identity is created. */
@@ -49,9 +49,9 @@ export async function serveAsIs(dir: string, clock: Clock = { t: T0 }): Promise<
   const url = await listen(server, 0);
   return {
     node, url, dir, clock,
-    stop: async ({ snapshot = false } = {}) => {
+    stop: async () => {
       await new Promise<void>((r) => server.close(() => r()));
-      await node.close({ snapshot });
+      await node.close();
     },
   };
 }
@@ -67,9 +67,9 @@ export async function start(dir: string, name: string, o: Partial<NodeOptions> &
   clocks.set(url, clock);
   return {
     node, url, dir, me, clock,
-    stop: async ({ snapshot = false } = {}) => {
+    stop: async () => {
       await new Promise<void>((r) => server.close(() => r()));
-      await node.close({ snapshot });
+      await node.close();
     },
   };
 }
@@ -95,7 +95,7 @@ export function batch(me: LocalIdentity, facts: Fact[], prev: string | null, cla
 type As = { as?: LocalIdentity | null; now?: number };
 
 function signed(url: string, p: string, method: string, body: string | null, o: As): Record<string, string> {
-  const who = o.as === undefined ? (p.startsWith('/ask') || p.startsWith('/feeds/') ? operators.get(url) : undefined) : o.as;
+  const who = o.as === undefined ? (p.startsWith('/ask') || p.startsWith('/feeds/') || p.startsWith('/op/') ? operators.get(url) : undefined) : o.as;
   return who ? signRequest(who, method, url + p, body, o.now ?? clocks.get(url)?.t ?? T0) : {};
 }
 

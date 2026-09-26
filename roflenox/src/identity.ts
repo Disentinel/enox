@@ -60,6 +60,9 @@ export interface KeyEntry {
 export interface IdentityDocBody {
   identity: string; seq: number; prev: string | null; keys: KeyEntry[];
   recovery: { key_id: string; public_key: string }; enc: { public_key: string }; issued_at: string;
+  /** An AGENT's parent identity: this identity acts only while the parent's
+   *  roflenox:delegate fact for it is live. */
+  delegated_by?: string;
 }
 export interface IdentityDoc { doc: IdentityDocBody; key_id: string; sig: string }
 
@@ -184,7 +187,7 @@ export class LocalIdentity {
    *  self-signed document. Refuses to overwrite an existing one: a lost key is
    *  not silently replaced. The recovery key's private half is returned once,
    *  as `recoveryCode`, and stored nowhere. */
-  static create(dataDir: string, name: string, now: Date = new Date()): LocalIdentity {
+  static create(dataDir: string, name: string, now: Date = new Date(), o: { delegatedBy?: string } = {}): LocalIdentity {
     checkName(name);
     const key = crypto.generateKeyPairSync('ed25519').privateKey;
     const encKey = crypto.generateKeyPairSync('x25519').privateKey;
@@ -197,6 +200,7 @@ export class LocalIdentity {
       recovery: { key_id: keyIdOf(xOf(rec.key)), public_key: xOf(rec.key) },
       enc: { public_key: xOf(encKey) },
       issued_at: t,
+      ...(o.delegatedBy ? { delegated_by: checkName(o.delegatedBy) } : {}),
     };
     const me = new LocalIdentity(name, key, encKey, [signDoc(doc, key)]);
     LocalIdentity.write(dataDir, me.file(), false);
@@ -327,6 +331,7 @@ export function checkIdentityDoc(d: unknown): IdentityDoc {
   if (!x.doc.recovery || keyIdOf(String(x.doc.recovery.public_key)) !== x.doc.recovery.key_id) throw bad('malformed recovery key');
   if (!x.doc.enc || typeof x.doc.enc.public_key !== 'string') throw bad('malformed encryption key');
   if (!isTime(x.doc.issued_at)) throw bad('issued_at is RFC 3339 UTC');
+  if (x.doc.delegated_by !== undefined && (checkName(x.doc.delegated_by) === x.doc.identity)) throw bad('an identity is not its own agent');
   return x;
 }
 

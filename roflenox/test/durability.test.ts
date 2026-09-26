@@ -38,14 +38,12 @@ test('delete everything except the log, restart, and every ask returns the same 
   const before = [await answers(a.url, { as: reader }), await answers(a.url, { as: null })];
   assert.equal((before[0]![0] as { rows: unknown[] }).rows.length, 6, 'the reader sees every fact');
   assert.equal((before[1]![0] as { rows: unknown[] }).rows.length, 0);
-  await a.stop({ snapshot: true });
-  assert.ok(fs.existsSync(path.join(dir, 'cache')), 'there was a derived store to delete');
+  await a.stop();
   onlyLog(dir);
   assert.deepEqual(fs.readdirSync(dir), ['log']);
   // Not even the key: answering needs none of it.
   const r = await serveAsIs(dir);
   try {
-    assert.equal(((await get(r.url, '/health')).body.engine as { built_from: string }).built_from, 'replay');
     assert.deepEqual([await answers(r.url, { as: reader }), await answers(r.url, { as: null })], before);
   } finally { await r.stop(); }
 });
@@ -57,34 +55,6 @@ test('a key file that is not the identity the log knows stops the node', async (
   await a.stop();
   fs.rmSync(path.join(dir, 'key'), { recursive: true });
   await assert.rejects(start(dir, 'node-a'), /does not follow the identity the log knows \(.*keys changed without a rotation.*\); refusing to start/);
-});
-
-test('a snapshot from an older log head is ignored and the answers still match', async () => {
-  const dir = tmpDir('snap');
-  let a = await start(dir, 'node-a');
-  const b1 = batch(a.me, [fact('alice', 'knows', 'bob')], null, iso(a.clock.t));
-  assert.equal((await post(a.url, '/batches', b1)).status, 201);
-  await a.stop({ snapshot: true });
-  const old = tmpDir('snap-old');
-  fs.cpSync(path.join(dir, 'cache'), old, { recursive: true });
-
-  // Positive control: a snapshot that DOES name the head is used.
-  a = await start(dir, 'node-a');
-  assert.equal(((await get(a.url, '/health')).body.engine as { built_from: string }).built_from, 'snapshot');
-  const b2 = batch(a.me, [fact('alice', 'knows', 'carol')], b1.manifest.digest, iso(a.clock.t));
-  assert.equal((await post(a.url, '/batches', b2)).status, 201);
-  const before = await answers(a.url);
-  await a.stop({ snapshot: true });
-
-  fs.rmSync(path.join(dir, 'cache'), { recursive: true });
-  fs.cpSync(old, path.join(dir, 'cache'), { recursive: true });
-  a = await start(dir, 'node-a');
-  try {
-    assert.equal(((await get(a.url, '/health')).body.engine as { built_from: string }).built_from, 'replay');
-    assert.deepEqual(await answers(a.url), before);
-    assert.equal(((before[0] as { rows: unknown[] }).rows).length, 2);
-    assert.ok(!fs.existsSync(path.join(dir, 'cache', 'snapshot.seed')), 'the stale snapshot was discarded');
-  } finally { await a.stop(); }
 });
 
 test('a committed log file that cannot be read stops the node instead of an empty start', async () => {
@@ -155,43 +125,6 @@ for (const [point, committed] of POINTS) {
   });
 }
 
-test('a self-consistent snapshot built from different batches than the log is discarded and the log is replayed', async () => {
-  const dirA = tmpDir('swap-a');
-  const dirB = tmpDir('swap-b');
-  let a = await start(dirA, 'node-a');
-  assert.equal((await post(a.url, '/batches', batch(a.me, [fact('alice', 'knows', 'bob')], null, iso(a.clock.t)))).status, 201);
-  const before = await answers(a.url);
-  await a.stop({ snapshot: true });
-  const b = await start(dirB, 'node-b');
-  assert.equal((await post(b.url, '/batches', batch(b.me, [fact('mallory', 'owns', 'everything')], null, iso(b.clock.t)))).status, 201);
-  await b.stop({ snapshot: true });
-
-  // B's world under A's log head, its sidecar rewritten to be self-consistent.
-  const pa = path.join(dirA, 'cache');
-  fs.copyFileSync(path.join(dirB, 'cache', 'snapshot.seed'), path.join(pa, 'snapshot.seed'));
-  const meta = JSON.parse(fs.readFileSync(path.join(pa, 'snapshot.json'), 'utf8')) as { log_head: string; seed_sha256: string };
-  meta.seed_sha256 = sha256hex(fs.readFileSync(path.join(pa, 'snapshot.seed')));
-  fs.writeFileSync(path.join(pa, 'snapshot.json'), JSON.stringify(meta));
-
-  a = await start(dirA, 'node-a');
-  try {
-    const h = (await get(a.url, '/health')).body;
-    assert.equal((h.engine as { built_from: string }).built_from, 'replay');
-    assert.ok((h.recovered as string[]).some((r) => /did not match the log/.test(r)), 'the discard was reported');
-    assert.deepEqual(await answers(a.url), before);
-    assert.ok(!fs.existsSync(path.join(pa, 'snapshot.seed')), 'the foreign snapshot was deleted');
-  } finally { await a.stop(); }
-
-  // Positive control: A's own snapshot still passes the same check and is used.
-  a = await start(dirA, 'node-a');
-  await a.stop({ snapshot: true });
-  a = await start(dirA, 'node-a');
-  try {
-    assert.equal(((await get(a.url, '/health')).body.engine as { built_from: string }).built_from, 'snapshot');
-    assert.deepEqual(await answers(a.url), before);
-  } finally { await a.stop(); }
-});
-
 test('a node rebuilt from its latest backup answers every question the same as the node up to that backup', async () => {
   const dir = tmpDir('backup');
   const to = tmpDir('backup-to');
@@ -240,5 +173,42 @@ test('a node rebuilt from its latest backup answers every question the same as t
     await backup(dir, to, { now: () => a.clock.t });
     const again = await serveAsIs(path.join(to, 'latest'));
     try { assert.deepEqual(await answers(again.url, { as: reader }), after); } finally { await again.stop(); }
+  } finally { await a.stop(); }
+});
+
+test('killing the engine during an admission leaves the log consistent, refuses that batch, and the node answers after it rebuilds', async () => {
+  const dir = tmpDir('enginekill');
+  let armed = false;
+  let node: Running | null = null;
+  const a = node = await start(dir, 'node-a', {
+    fault: (p) => { if (p === 'engine:staged' && armed) { armed = false; process.kill(node!.node.enginePid()!, 'SIGKILL'); } },
+  });
+  try {
+    const reader = await populate(a, 'enginekill');
+    const before = await answers(a.url, { as: reader });
+    const indexBefore = fs.readFileSync(path.join(dir, 'log', 'index.jsonl'), 'utf8');
+    const head = ((await get(a.url, '/health')).body.heads as Record<string, string>)['node-a']!;
+
+    // The engine is SIGKILLed after it took the batch and before it evaluated.
+    armed = true;
+    const b = batch(a.me, [fact('during', 'the', 'crash')], head, iso(a.clock.t));
+    const r = await post(a.url, '/batches', b);
+    assert.equal(r.status, 503);
+    assert.equal(r.body.error, 'engine_down');
+    assert.equal(fs.readFileSync(path.join(dir, 'log', 'index.jsonl'), 'utf8'), indexBefore, 'the log is exactly as it was');
+
+    // The next question rebuilds the engine from what the node holds, and answers as before.
+    assert.deepEqual(await answers(a.url, { as: reader }), before);
+    const h = (await get(a.url, '/health')).body;
+    assert.deepEqual(h.engine, { up: true, restarts: 1 });
+    assert.deepEqual((h.heads as Record<string, string>)['node-a'], head);
+    // The refused batch can simply be sent again.
+    assert.equal((await post(a.url, '/batches', b)).status, 201);
+    assert.equal(((await post(a.url, '/ask', { query: 'edge(F, "during", R, T)' })).body.rows as unknown[]).length, 1);
+    // An engine that dies while idle is replaced the same way.
+    process.kill(a.node.enginePid()!, 'SIGKILL');
+    await new Promise((res) => setTimeout(res, 50));
+    assert.equal(((await post(a.url, '/ask', { query: 'edge(F, "during", R, T)' })).body.rows as unknown[]).length, 1);
+    assert.equal(((await get(a.url, '/health')).body.engine as { restarts: number }).restarts, 2);
   } finally { await a.stop(); }
 });

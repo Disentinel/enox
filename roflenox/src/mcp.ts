@@ -7,33 +7,20 @@
 // Stateless: no Mcp-Session-Id is issued, so there is no session to keep and
 // nothing to evict (r_session_eviction holds vacuously). Responses are plain
 // JSON (the transport allows it); no SSE stream is offered, and GET is 405.
-import { checkFact, Refusal } from './facts.ts';
-import type { RoflenoxNode } from './node.ts';
+import { Refusal } from './facts.ts';
+import { callOp, isLocal, OP, OPS, type Ctx } from './ops.ts';
 
 export const MCP_PROTOCOL = '2025-03-26';
 
 type Json = Record<string, unknown>;
 interface Rpc { jsonrpc?: string; id?: string | number | null; method?: string; params?: Json }
 
-const FACT_SCHEMA = {
-  type: 'object',
-  required: ['source', 'relation', 'target', 'perspective', 'confidence'],
-  properties: {
-    source: { type: 'string' }, relation: { type: 'string' }, target: { type: 'string' },
-    perspective: { type: 'string' }, confidence: { type: 'number', minimum: 0, maximum: 1 },
-  },
-};
-
-export const TOOLS = [
-  { name: 'ask', description: 'Ask one ROFL literal, e.g. edge(F, S, R, T). Optional perspective restricts to facts asserted under it.',
-    inputSchema: { type: 'object', required: ['query'], properties: { query: { type: 'string' }, perspective: { type: 'string' } } } },
-  { name: 'why', description: 'Explain why a ground literal holds, in the books you may read whole.',
-    inputSchema: { type: 'object', required: ['literal'], properties: { literal: { type: 'string' } } } },
-  { name: 'whynot', description: 'Explain why a ground literal does not hold, in the books you may read whole.',
-    inputSchema: { type: 'object', required: ['literal'], properties: { literal: { type: 'string' } } } },
-  { name: 'assert', description: 'Publish facts as this node\'s own identity (operator only): a signed batch through normal admission.',
-    inputSchema: { type: 'object', required: ['facts'], properties: { facts: { type: 'array', items: FACT_SCHEMA } } } },
-];
+/** The tools of a surface: the operation table, minus local-only operations
+ *  when the transport is the network. Schema = the op's input schema. */
+export function toolsFor(surface: 'network' | 'local') {
+  return OPS.filter((o) => surface === 'local' || !isLocal(o))
+    .map((o) => ({ name: o.name, description: o.description, inputSchema: o.input }));
+}
 
 function ok(id: Rpc['id'], result: unknown): Json {
   return { jsonrpc: '2.0', id: id ?? null, result };
@@ -48,7 +35,7 @@ function text(v: unknown, isError = false): Json {
 }
 
 /** One JSON-RPC message → its response, or null for a notification. */
-export async function handleRpc(node: RoflenoxNode, msg: Rpc, caller: string | null): Promise<Json | null> {
+export async function handleRpc(ctx: Ctx, msg: Rpc, surface: 'network' | 'local'): Promise<Json | null> {
   if (!msg || msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') return err(msg?.id, -32600, 'invalid request');
   const isNotification = msg.id === undefined;
   switch (msg.method) {
@@ -67,33 +54,20 @@ export async function handleRpc(node: RoflenoxNode, msg: Rpc, caller: string | n
     case 'ping':
       return ok(msg.id, {});
     case 'tools/list':
-      return ok(msg.id, { tools: TOOLS });
+      return ok(msg.id, { tools: toolsFor(surface) });
     case 'tools/call': {
       const name = msg.params?.name as string;
-      const a = (msg.params?.arguments ?? {}) as Json;
       try {
-        switch (name) {
-          case 'ask':
-            if (typeof a.query !== 'string') return err(msg.id, -32602, 'ask needs {query}');
-            return ok(msg.id, text(await node.ask(a.query, caller, typeof a.perspective === 'string' ? a.perspective : null)));
-          case 'why':
-          case 'whynot':
-            if (typeof a.literal !== 'string') return err(msg.id, -32602, `${name} needs {literal}`);
-            return ok(msg.id, text(await (name === 'why' ? node.why(a.literal, caller) : node.whynot(a.literal, caller))));
-          case 'assert': {
-            if (caller === null || caller !== node.identity?.name) {
-              throw new Refusal(403, 'not_operator', 'only the node\'s own identity asserts through this node; publish your own signed batches instead');
-            }
-            if (!Array.isArray(a.facts) || a.facts.length === 0) return err(msg.id, -32602, 'assert needs {facts: [...]}');
-            const facts = a.facts.map((f, i) => checkFact(f, i + 1));
-            const r = await node.assertAsSelf(facts);
-            return ok(msg.id, text({ admitted: true, identity: r.identity, facts: facts.length }));
-          }
-          default:
-            return err(msg.id, -32602, `unknown tool: ${name}`);
-        }
+        const r = await callOp(name, msg.params?.arguments ?? {}, ctx, surface);
+        const op = OP.get(name)!;
+        return ok(msg.id, { content: [{ type: 'text', text: op.text ? op.text(r) : JSON.stringify(r) }] });
       } catch (e) {
-        if (e instanceof Refusal) return ok(msg.id, text({ error: e.reason, message: e.message, ...e.detail }, true));
+        if (e instanceof Refusal) {
+          if (e.detail.plain) return ok(msg.id, { content: [{ type: 'text', text: e.message }], isError: true });
+          if (e.reason === 'unknown_op') return err(msg.id, -32602, `unknown tool: ${name}`);
+          if (e.reason === 'bad_args') return err(msg.id, -32602, e.message);
+          return ok(msg.id, text({ error: e.reason, message: e.message, ...e.detail }, true));
+        }
         throw e;
       }
     }

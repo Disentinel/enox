@@ -140,8 +140,8 @@ test('createAssertion requires asserted_by: a batch with no identity or signatur
     assert.equal((await post(a.url, '/batches', good)).status, 201);
     const rows = (await post(a.url, '/ask', { query: 'edge(F, S, R, T)' })).body.rows as { identity: string; cells: string[] }[];
     assert.deepEqual(rows.map((r) => r.identity), ['node-a']);
-    const why = await post(a.url, '/ask', { why: `edge("${rows[0]!.cells[0]}", "a", "r", "b")` });
-    assert.deepEqual((why.body.why as { identity: string; holds: boolean }[]).map((e) => [e.identity, e.holds]), [['node-a', true]]);
+    const why = await post(a.url, '/op/why', { literal: `edge("${rows[0]!.cells[0]}", "a", "r", "b")` });
+    assert.deepEqual((why.body as unknown as { identity: string; holds: boolean }[]).map((e) => [e.identity, e.holds]), [['node-a', true]]);
   } finally { await a.stop(); }
 });
 

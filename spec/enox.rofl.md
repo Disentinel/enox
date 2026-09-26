@@ -240,6 +240,7 @@ Declared as facts:
 - `r_enox_compat` says "the MCP tools that current Enox clients call, such as remember, recall, semantic_search, add_assertion, batch_assertions, query_graph, explore and graph_stats, are rows of the operation table mapped onto ask, assert and executors, so a client moves by changing its URL".
 - `r_enox_compat` is stated in "owner 2026-09-26; the twenty tools of the Enox MCP server in use".
 - `r_enox_compat` is to be checked by "the tool calls an Enox client made on 2026-09-26 run unchanged against a node and get answers of the same shape".
+- `r_enox_compat` is to be checked by "an Enox read right after a write answers within one second with 200000 facts held".
 - `r_minimal_parts` is about `architecture`.
 - `r_minimal_parts` binds as `must`.
 - `r_minimal_parts` says "a node is one process with one log, one engine, one wire format which is the signed batch, and one proof of who which is an identity signature; the one declared exception is an operator bearer token that acts only as the node's own identity, for MCP clients that cannot sign requests; its transports are stdio and HTTP; every use from one local agent to a federated swarm composes these and nothing else".
@@ -613,6 +614,20 @@ Accepted after verification:
 
 - `r_rule_budget` is accepted at "roflenox tree verified 2026-09-27, rules.test.ts 3/3 under load 80".
 - `r_answer_limits` is accepted at "roflenox tree verified 2026-09-27, suite 68/68".
+
+> Решение 2026-09-27 по замерам на 200000 фактах: rofl-serve пересчитывает
+> все выведенные факты при каждом evaluate (Eval::run → clear_derived), форк
+> копирует весь мир. Поэтому, пока в движке нет инкрементального пересчёта:
+> (A) допуск не пересчитывает — загрузка без форка, пересчёт лениво при
+> первом чтении; (B) «последнее утверждение побеждает» делается при допуске
+> через retract прежней строки, журнал хранит всё; (C) сроки грантов и
+> делегирования сравниваются с часами в момент решения, whynot отказа —
+> по-прежнему текст движка; (D) представление Enox поддерживается
+> инкрементально. Пользовательские правила остаются в rofl. Как только в
+> движке появится инкрементальный evaluate, системная логика возвращается в
+> правила: это обход ограничения, а не принцип. Паника rofl-serve в
+> store.rs:985 воспроизводится на синтетике примерно в одном прогоне из трёх
+> (roflenox/scripts/engine-panic-repro.ts, docs/engine-panic.md).
 
 ## Проверки
 

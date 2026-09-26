@@ -1,15 +1,12 @@
 // The engine: rofl-serve through the vendored RoflPort. Everything here is
-// DERIVED — rebuilt from the log, or opened from a snapshot that names the log
-// head it was taken at (r_snapshot_is_cache).
-import * as fs from 'node:fs';
+// DERIVED — rebuilt from the log by replay, and only that way.
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { RoflPort, type RoflSession } from '../vendor/rofl-port.ts';
-import { decodeCell, Refusal, roflString, sha256hex } from './facts.ts';
+import { decodeCell, Refusal, roflString } from './facts.ts';
 
 /** The engine's record of which log batches it holds. */
 export const SYSTEM_BOOK = 'sys_roflenox';
-const LOADED = 'loaded_batch';
 const SYSTEM_WHO = 'roflenox';
 
 export const DEFAULT_ROFL_BIN = process.env.ROFL_BIN
@@ -29,8 +26,11 @@ const FACT_KEYED = new Set(['edge']);
 //   conf(F, C)    ← current[sys](Book, F, _, C)
 //   persp(F, P)   ← current[sys](Book, F, P, _)
 //   edge(F,S,R,T) with a perspective P ← view[sys](Book, F, S, R, T, P, _)
-const VIEWS: Record<string, { rel: string; arity: number; place: (a: string[]) => string[] }> = {
+const VIEWS: Record<string, { rel: string; arity: number; place: (a: string[]) => string[]; whole?: true }> = {
   conf: { rel: 'current', arity: 2, place: (a) => [a[0]!, 'RoflenoxP', a[1]!] },
+  // answered(Key, Executor, Value): an intent of this book with its result.
+  // Not fact-keyed, so only a reader of the WHOLE book sees it.
+  answered: { rel: 'answered', arity: 3, place: (a) => a, whole: true },
   persp: { rel: 'current', arity: 2, place: (a) => [a[0]!, a[1]!, 'RoflenoxC'] },
 };
 
@@ -46,12 +46,15 @@ export function bookRules(book: string, owner: string): string {
     `current[${SYSTEM_BOOK}](${b}, F, P, C) :- asserted[${book}](F, P, C, S), not superseded[${SYSTEM_BOOK}](${b}, F, S).`,
     // The fact joined with its current perspective and confidence (r_perspective).
     `view[${SYSTEM_BOOK}](${b}, F, S, R, T, P, C) :- edge[${book}](F, S, R, T), current[${SYSTEM_BOOK}](${b}, F, P, C).`,
-    // Executor intents (r_executors_off_read_path): a fact needs an embedding
-    // until SOME book holds one for it; an executor's results are ordinary
-    // facts of relation "roflenox:embedding" in the executor's own book.
-    `has_embedding[${SYSTEM_BOOK}](F) :- edge[${book}](E, F, "roflenox:embedding", V).`,
-    `needs_embedding[${SYSTEM_BOOK}](${b}, F, S) :- edge[${book}](F, S, R, T), R != "roflenox:embedding", not has_embedding[${SYSTEM_BOOK}](F).`,
+    // A follow (r_follow) is a fact of the follower's: {source: <publisher>,
+    // relation: "roflenox:follow", target: <where its feed is>}. It is an
+    // intent addressed to the follower itself — its own executor keeps the
+    // mirror current; there is no second scheduler.
+    `intent[${book}](P, ${roflString(owner)}, "follow", U) :- edge[${book}](F, P, "roflenox:follow", U).`,
     `may_read[${SYSTEM_BOOK}](${roflString(owner)}, ${b}).`,
+    // Agents (r_agents_as_identities): an identity whose document names a
+    // parent acts only while the parent's live delegation says so.
+    `delegated[${SYSTEM_BOOK}](A, ${roflString(owner)}) :- delegate[${book}](A, U), clock[${SYSTEM_BOOK}](T), T < U.`,
     `may_read[${SYSTEM_BOOK}](R, ${b}) :- grant[${book}](R, U), clock[${SYSTEM_BOOK}](T), T < U.`,
     `exported[${SYSTEM_BOOK}](${b}, F, A) :- edge[${book}](F, S, Rel, T), export[${book}](Rel, A).`,
     `exported[${SYSTEM_BOOK}](${b}, F, A) :- edge[${book}](F, S, Rel, T), export[${book}]("*", A).`,
@@ -60,15 +63,14 @@ export function bookRules(book: string, owner: string): string {
 }
 
 export interface AskRow { identity: string; cells: (string | number)[] }
-export interface AskAnswer { vars: string[]; rows: AskRow[] }
-export interface Explanation { identity: string; holds: boolean; text: string }
+/** `unknown`: books whose authors' rules ran out of their budget — their
+ *  rows are what was derived before the wall, not the whole answer. */
+export interface AskAnswer { vars: string[]; rows: AskRow[]; unknown?: { identity: string; reason: string; budget: number; unit: string }[] }
+export interface Explanation { identity: string; holds: boolean; text: string; unknown?: { reason: string; budget: number; unit: string } }
 
 export class Engine {
   private port: RoflPort;
   private session: RoflSession;
-  /** 'replay' or 'snapshot': how the current world was built. */
-  source: 'replay' | 'snapshot' = 'replay';
-
   private constructor(port: RoflPort, session: RoflSession) {
     this.port = port;
     this.session = session;
@@ -79,28 +81,28 @@ export class Engine {
     return new Engine(port, await port.fresh());
   }
 
-  /** Open from a snapshot seed. The caller has already checked it names the
-   *  current log head. */
-  static async fromSnapshot(seedPath: string, bin = DEFAULT_ROFL_BIN): Promise<Engine> {
-    const port = await RoflPort.start(bin);
-    const e = new Engine(port, await port.open({ seedPath }));
-    e.source = 'snapshot';
-    return e;
-  }
-
   /** Load a program into a FORK of the world. Nothing is visible until
    *  `commit`; `abort` leaves the world exactly as it was. */
-  async stage(rofl: string, who: string, batch: { identity: string; digest: string }, rules: string | null = null):
-    Promise<{ commit: () => Promise<void>; abort: () => Promise<void> }> {
-    const work = await this.session.fork();
+  /** True once the rofl-serve process has died (a crash, a kill). */
+  get dead(): boolean {
+    return (this.port as unknown as { dead: Error | null }).dead !== null;
+  }
+
+  /** The engine process id (tests kill it to prove the node survives). */
+  pid(): number | undefined {
+    return (this.port as unknown as { child: { pid?: number } }).child.pid;
+  }
+
+  async stage(rofl: string, who: string, rules: string | null = null,
+    beforeEvaluate: () => void = () => {}): Promise<{ commit: () => Promise<void>; abort: () => Promise<void> }> {
+    const work = await this.session.fork().catch((e: Error) => { throw this.down(e); });
     try {
       if (rules) await work.load(rules, SYSTEM_WHO);
       await work.load(rofl, who);
-      // What this world was built from, in a book no identity can write into
-      // (toRofl only writes b_<16 hex> books). A snapshot is checked against it.
-      await work.load(`${LOADED}[${SYSTEM_BOOK}](${roflString(batch.identity)}, ${roflString(batch.digest)}).\n`, SYSTEM_WHO);
+      beforeEvaluate();
       await work.evaluate();
     } catch (e) {
+      if (this.dead) throw this.down(e as Error);
       await work.close();
       throw new Refusal(422, 'engine_refused', `the engine refused the batch: ${(e as Error).message}`);
     }
@@ -114,10 +116,22 @@ export class Engine {
     };
   }
 
-  /** The batches this world was built from, as `identity digest` keys. */
-  async loadedBatches(): Promise<Set<string>> {
-    const a = await this.session.ask(`${LOADED}[${SYSTEM_BOOK}](I, D)`);
-    return new Set(a.rows.map((r) => `${decodeCell(r[0]!)} ${decodeCell(r[1]!)}`));
+
+
+  /** Ask one literal over the books in `scope`. A literal without a book is
+   *  asked of every book in scope and each row names its identity; a literal
+   *  naming a book must name one in scope (the caller refuses otherwise, with
+   *  the engine's whynot). A book seen only through exports answers only its
+   *  exported facts, and only through fact-keyed relations. */
+  /** REPLAY: load already-verified batches straight into the world, in log
+   *  order, and evaluate once at the end. No fork per batch — the log was
+   *  verified before this runs, and a replay that fails refuses the start. */
+  async replay(entries: { rofl: string; who: string; rules: string | null }[]): Promise<void> {
+    for (const e of entries) {
+      if (e.rules) await this.session.load(e.rules, SYSTEM_WHO);
+      await this.session.load(e.rofl, e.who);
+    }
+    await this.session.evaluate();
   }
 
   /** Set the engine's clock (whole seconds) that grant expiry is judged on. */
@@ -127,6 +141,11 @@ export class Engine {
     for (const r of a.rows) await this.port.send({ op: 'retract', session: this.session.id, query: `clock[${SYSTEM_BOOK}](${r[0]})` });
     await this.session.assert(`clock[${SYSTEM_BOOK}](${sec}).`);
     await this.session.evaluate();
+  }
+
+  /** A fresh world with `budget` steps per evaluation (rule worlds). */
+  async world(budget: number): Promise<World> {
+    return new World(this.port, await this.port.fresh(budget));
   }
 
   /** Decide one question in a THROWAWAY fork: load `rofl` (facts and rules)
@@ -145,7 +164,7 @@ export class Engine {
     }
   }
 
-  /** Rows of a system question, decoded. Public so the node can read intents. */
+  /** Rows of a system question, decoded. */
   async sysRows(query: string): Promise<(string | number)[][]> {
     return (await this.session.ask(query)).rows.map((r) => r.map(decodeCell));
   }
@@ -156,15 +175,6 @@ export class Engine {
     return r.text as string;
   }
 
-  async save(seedPath: string): Promise<void> {
-    await this.port.send({ op: 'save', session: this.session.id, path: seedPath });
-  }
-
-  /** Ask one literal over the books in `scope`. A literal without a book is
-   *  asked of every book in scope and each row names its identity; a literal
-   *  naming a book must name one in scope (the caller refuses otherwise, with
-   *  the engine's whynot). A book seen only through exports answers only its
-   *  exported facts, and only through fact-keyed relations. */
   async ask(query: string, scope: Map<string, BookScope>, perspective: string | null = null): Promise<AskAnswer> {
     const { rel, book, args } = parseLiteral(query);
     const view = perspective !== null ? 'view' : VIEWS[rel] ? rel : null;
@@ -215,6 +225,7 @@ export class Engine {
       const b = bi >= 0 ? String(cells[bi]) : book!;
       const sc = scope.get(b);
       if (!sc) continue;
+      if (perspective === null && VIEWS[rel]!.whole && sc.only !== null) continue;
       const f = fi >= 0 ? String(cells[fi]) : String(decodeCell(placed[0]!));
       if (sc.only !== null && !sc.only.has(f)) continue;
       rows.push({ identity: sc.identity, cells: keep.map(([, i]) => cells[i]!) });
@@ -236,15 +247,29 @@ export class Engine {
   private async explain(op: 'why' | 'whynot', query: string, scope: Map<string, BookScope>): Promise<Explanation[]> {
     const { rel, book, args } = parseLiteral(query);
     const out: Explanation[] = [];
+    // A view explains through its sys relation, the book a constant: why of an
+    // answer walks from the executor's result back to the rule that asked.
+    const v = VIEWS[rel];
+    const a = splitArgs(args);
+    if (v && (a.length !== v.arity || v.place(a).some((x) => x.startsWith('Roflenox')))) {
+      throw new Refusal(400, 'bad_query', `why/whynot of ${rel} takes ${v.arity} ground arguments`);
+    }
     for (const [b, sc] of targets(book, scope)) {
       if (sc.only !== null) continue;
-      const r = await engineCall(() => this.port.send({ op, session: this.session.id, query: `${rel}[${b}](${args})` }));
+      const q = v ? `${v.rel}[${SYSTEM_BOOK}](${[roflString(b), ...v.place(a)].join(', ')})` : `${rel}[${b}](${args})`;
+      const r = await engineCall(() => this.port.send({ op, session: this.session.id, query: q }));
       out.push({ identity: sc.identity, holds: (op === 'why' ? r.okay : r.holds) as boolean, text: r.text as string });
     }
     return out;
   }
 
+  private down(e: Error): Refusal {
+    return new Refusal(503, 'engine_down',
+      `the engine stopped during this admission (${e.message.split('\n')[0]}); the batch was NOT admitted and the log is unchanged — the engine is rebuilt from the log; send it again`);
+  }
+
   async stop(): Promise<void> {
+    if (this.dead) return;
     await this.port.stop();
   }
 }
@@ -295,30 +320,51 @@ function targets(book: string | null, scope: Map<string, BookScope>): [string, B
   return [[book, scope.get(book)!]];
 }
 
-/** A snapshot is a seed plus a sidecar naming the log head and the seed's own
- *  digest. Anything else found in cache/ is discarded. */
-export interface SnapshotMeta { log_head: string; seed_sha256: string }
-
-export function snapshotPaths(dataDir: string): { seed: string; meta: string } {
-  const dir = path.join(dataDir, 'cache');
-  return { seed: path.join(dir, 'snapshot.seed'), meta: path.join(dir, 'snapshot.json') };
+/** The intent loop (r_intent_loop), loaded in an author's RULE WORLD (see
+ *  node.ts): a rule in a book derives intent[book](Key, Executor, Kind, Input)
+ *  addressed to an executor by NAME; the executor publishes, in its own book,
+ *  {source: Key, relation: "roflenox:result", target: Value}. A result counts
+ *  as the executor's only from the executor's own book (the name is bound to
+ *  the book), and `answered` joins the two, so why of an answer walks from the
+ *  result back through the rule that asked. */
+export function resultRule(book: string, owner: string): string {
+  return `result_of[${SYSTEM_BOOK}](K, ${roflString(owner)}, V) :- edge[${book}](F, K, "roflenox:result", V).\n`;
+}
+export function answeredRule(book: string): string {
+  return `answered[${SYSTEM_BOOK}](${roflString(book)}, K, E, V) :- intent[${book}](K, E, Kind, In), result_of[${SYSTEM_BOOK}](K, E, V).\n`;
+}
+/** The grant rule for one book, alone (a rule world needs no other system rule). */
+export function mayReadRules(book: string, owner: string): string {
+  const b = roflString(book);
+  return `may_read[${SYSTEM_BOOK}](${roflString(owner)}, ${b}).\n`
+    + `may_read[${SYSTEM_BOOK}](R, ${b}) :- grant[${book}](R, U), clock[${SYSTEM_BOOK}](T), T < U.\n`;
 }
 
-/** The seed path if a usable snapshot for `logHead` exists, else null — and
- *  a snapshot that does not match is deleted, so it cannot be used later by
- *  mistake. */
-export function usableSnapshot(dataDir: string, logHead: string): string | null {
-  const p = snapshotPaths(dataDir);
-  if (!fs.existsSync(p.meta) || !fs.existsSync(p.seed)) return null;
-  let meta: SnapshotMeta | null = null;
-  try { meta = JSON.parse(fs.readFileSync(p.meta, 'utf8')) as SnapshotMeta; } catch { meta = null; }
-  if (meta && meta.log_head === logHead && meta.seed_sha256 === sha256hex(fs.readFileSync(p.seed))) return p.seed;
-  discardSnapshot(dataDir);
-  return null;
-}
-
-export function discardSnapshot(dataDir: string): void {
-  const p = snapshotPaths(dataDir);
-  fs.rmSync(p.seed, { force: true });
-  fs.rmSync(p.meta, { force: true });
+/** A separate world with its own step budget: an author's rules run here and
+ *  nowhere else, so a rule that does not terminate costs only its author's
+ *  answers (r_rule_budget). */
+export class World {
+  readonly session: RoflSession;
+  private readonly port: RoflPort;
+  partial = false;
+  holes: string[] = [];
+  constructor(port: RoflPort, session: RoflSession) { this.port = port; this.session = session; }
+  async evaluate(): Promise<void> {
+    const e = await this.session.evaluate();
+    this.partial = e.partial;
+    this.holes = this.partial ? (await this.session.ask('hole(W, Why)')).rows.map((r) => `${decodeCell(r[1]!)} at ${r[0]}`) : [];
+  }
+  async ask(q: string) { return engineCall(() => this.session.ask(q)); }
+  async setClock(sec: number): Promise<void> {
+    const a = await this.session.ask(`clock[${SYSTEM_BOOK}](T)`);
+    if (a.rows.length === 1 && Number(a.rows[0]![0]) === sec) return;
+    for (const r of a.rows) await this.port.send({ op: 'retract', session: this.session.id, query: `clock[${SYSTEM_BOOK}](${r[0]})` });
+    await this.session.assert(`clock[${SYSTEM_BOOK}](${sec}).`);
+    await this.evaluate();
+  }
+  async explain(op: 'why' | 'whynot', q: string): Promise<{ holds: boolean; text: string }> {
+    const r = await engineCall(() => this.port.send({ op, session: this.session.id, query: q }));
+    return { holds: (op === 'why' ? r.okay : r.holds) as boolean, text: r.text as string };
+  }
+  close() { return this.session.close(); }
 }
