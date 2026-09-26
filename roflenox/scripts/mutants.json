@@ -1,0 +1,1034 @@
+{
+ "note": "Mutants of roflenox and the tests that must go RED under each. Run: npm run mutants. A listed mutant that survives, or an anchor that no longer matches, fails the gate.",
+ "mutants": [
+  {
+   "id": "M1",
+   "title": "skip signature verify",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (!verifyManifestSig(m, key)) throw",
+     "if (false && !verifyManifestSig(m, key)) throw"
+    ]
+   ],
+   "red": [
+    "a batch with one byte changed is rejected",
+    "a batch inserted into the middle of a chain is rejected",
+    "a batch whose prev was rewritten after signing is rejected"
+   ]
+  },
+  {
+   "id": "M2",
+   "title": "skip chain check",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (m.prev !== head) {",
+     "if (false && m.prev !== head) {"
+    ]
+   ],
+   "red": [
+    "a batch inserted into the middle of a chain is rejected"
+   ]
+  },
+  {
+   "id": "M3",
+   "title": "trust offered identity doc over the pin (book scoping)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (pendingOk && !this.idDocs.has(identity) && docs.length === 1)",
+     "if (pendingOk && docs.length === 1)"
+    ],
+    [
+     "    if (cur) return { doc: cur, pin: null };",
+     "    if (cur && !pending) return { doc: cur, pin: null };"
+    ]
+   ],
+   "red": [
+    "a batch signed by B that writes into the book of A is refused",
+    "a rotation in the middle of a chain is followed without a warning",
+    "a backdated batch received after revocation is rejected",
+    "a node that swaps its key without rotation is refused with a whynot"
+   ]
+  },
+  {
+   "id": "M4",
+   "title": "skip freshness",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (skew > this.freshnessMs) {",
+     "if (false && skew > this.freshnessMs) {"
+    ]
+   ],
+   "red": [
+    "a batch claiming a time outside the window is marked stale and a re-attestation is requested",
+    "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused",
+    "a re-attested batch keeps its digest and gains a second, fresh signature",
+    "an identity document dated past the allowed skew is refused"
+   ]
+  },
+  {
+   "id": "M5",
+   "title": "no quote escaping into ROFL",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "/[\\\\\"\\n\\t\\r]/g",
+     "/[\\\\\\n\\t\\r]/g"
+    ]
+   ],
+   "red": [
+    "a batch signed by B that writes into the book of A is refused"
+   ]
+  },
+  {
+   "id": "M6",
+   "title": "snapshot used without head check",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "meta.log_head === logHead && ",
+     ""
+    ]
+   ],
+   "survivor": "Subsumed by design: the batch-set check (r_snapshot_is_cache) rejects every snapshot the head check would; the head check stays only as a cheap pre-filter that avoids starting an engine for a stale seed (team lead, 2026-09-26). No input can tell the two apart."
+  },
+  {
+   "id": "M7",
+   "title": "no digest check of JSONL",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (batchDigest(body.salt, jsonl) !== m.digest) {",
+     "      if (false) {"
+    ]
+   ],
+   "red": [
+    "a batch with one byte changed is rejected",
+    "a static host holding a private batch cannot decrypt it, a recipient can"
+   ]
+  },
+  {
+   "id": "M8",
+   "title": "jsonl file never written",
+   "file": "src/log.ts",
+   "edits": [
+    [
+     "    if (jsonl !== null) writeFileAtomic(this.batchPath(manifest.identity, manifest.digest, 'jsonl'), jsonl, this.fault, 'jsonl');\n",
+     ""
+    ]
+   ],
+   "red": [
+    "delete everything except the log, restart, and every ask returns the same answers",
+    "a committed log file that cannot be read stops the node instead of an empty start",
+    "killed at jsonl:renamed: the node restarts at the previous state and stays writable"
+   ]
+  },
+  {
+   "id": "M9",
+   "title": "receipt committed before the manifest file",
+   "file": "src/log.ts",
+   "edits": [
+    [
+     "    writeFileAtomic(this.batchPath(manifest.identity, manifest.digest, 'manifest.json'), canonicalize(manifest), this.fault, 'manifest');\n    return this.commit({ received_at",
+     "    const r = this.commit({ received_at"
+    ],
+    [
+     "...extra });\n  }",
+     "...extra });\n    writeFileAtomic(this.batchPath(manifest.identity, manifest.digest, 'manifest.json'), canonicalize(manifest), this.fault, 'manifest');\n    return r;\n  }"
+    ]
+   ],
+   "red": [
+    "killed at manifest:temp-written: the node restarts at the previous state and stays writable",
+    "killed at manifest:renamed: the node restarts at the previous state and stays writable",
+    "killed at index:committed: the node restarts with the batch and stays writable"
+   ]
+  },
+  {
+   "id": "M10",
+   "title": "torn index tail not set aside",
+   "file": "src/log.ts",
+   "edits": [
+    [
+     "if (text.length > 0 && !text.endsWith('\\n')) {",
+     "if (false) {"
+    ]
+   ],
+   "red": [
+    "killed at index:half-written: the node restarts at the previous state and stays writable"
+   ]
+  },
+  {
+   "id": "M11",
+   "title": "prev left out of the signed bytes (spec item 4 as first written)",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "const { sig, ...unsigned } = m;",
+     "const { sig, prev: _p, ...unsigned } = m;"
+    ],
+    [
+     "Buffer.from(BATCH_CONTEXT + canonicalize(unsigned)), this.key)",
+     "Buffer.from(BATCH_CONTEXT + canonicalize({ ...unsigned, prev: undefined })), this.key)"
+    ]
+   ],
+   "red": [
+    "a batch inserted into the middle of a chain is rejected",
+    "a batch whose prev was rewritten after signing is rejected"
+   ]
+  },
+  {
+   "id": "M12",
+   "title": "snapshot batch set not compared with the log",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (have && have.size === want.size && [...want].every((k) => have.has(k))) {",
+     "if (true) {"
+    ]
+   ],
+   "red": [
+    "a self-consistent snapshot built from different batches than the log is discarded and the log is replayed"
+   ]
+  },
+  {
+   "id": "M13",
+   "title": "loaded batches not recorded in the engine",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "      await work.load(`${LOADED}[${SYSTEM_BOOK}](${roflString(batch.identity)}, ${roflString(batch.digest)}).\\n`, SYSTEM_WHO);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a snapshot from an older log head is ignored and the answers still match",
+    "a self-consistent snapshot built from different batches than the log is discarded and the log is replayed"
+   ]
+  },
+  {
+   "id": "M14",
+   "title": "feed challenge not required",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (!this.challengeLive(nonce)) {",
+     "      if (false) {"
+    ]
+   ],
+   "red": [
+    "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused"
+   ]
+  },
+  {
+   "id": "M15",
+   "title": "attestation nonce not matched",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (a.nonce !== nonce) throw",
+     "if (false) throw"
+    ]
+   ],
+   "red": [
+    "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused"
+   ]
+  },
+  {
+   "id": "M16",
+   "title": "feed attestation freshness skipped",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      this.checkFresh(a.attested_at, receivedAt, 'the feed attestation', 'pull again with a fresh challenge');\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused"
+   ]
+  },
+  {
+   "id": "M17",
+   "title": "attested head not matched",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (a.head !== last) throw",
+     "if (false) throw"
+    ]
+   ],
+   "red": [
+    "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused"
+   ]
+  },
+  {
+   "id": "M18",
+   "title": "feed batches judged by their age",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (mode === 'post') {",
+     "if (mode !== 'replay') {"
+    ]
+   ],
+   "red": [
+    "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused",
+    "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one",
+    "a rotation in the middle of a chain is followed without a warning"
+   ]
+  },
+  {
+   "id": "M19",
+   "title": "re-attestation signature not verified",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (!verifySigned(REATTEST_CONTEXT, r, rk)) throw",
+     "if (false) throw"
+    ]
+   ],
+   "red": [
+    "a re-attested batch keeps its digest and gains a second, fresh signature"
+   ]
+  },
+  {
+   "id": "M20",
+   "title": "re-attestation ignored for freshness",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (reattest) {\n        this.checkFresh(reattest",
+     "      if (false) {\n        this.checkFresh(reattest"
+    ]
+   ],
+   "red": [
+    "a re-attested batch keeps its digest and gains a second, fresh signature"
+   ]
+  },
+  {
+   "id": "M21",
+   "title": "feed attestation signature not verified",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (!verifySigned(FEED_CONTEXT, a, key)) throw",
+     "if (false) throw"
+    ]
+   ],
+   "red": [
+    "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused"
+   ]
+  },
+  {
+   "id": "M22",
+   "title": "grant expiry not judged",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "clock[${SYSTEM_BOOK}](T), T < U.`",
+     "clock[${SYSTEM_BOOK}](T).`"
+    ]
+   ],
+   "red": [
+    "a request signed by an identity with no grant is refused and whynot names the missing grant"
+   ]
+  },
+  {
+   "id": "M23",
+   "title": "every signed requester reads every book whole",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (whole.has(b)) scope.set",
+     "if (requester !== null) scope.set"
+    ]
+   ],
+   "red": [
+    "a request signed by an identity with no grant is refused and whynot names the missing grant",
+    "a fact with no export rule never appears in a published batch"
+   ]
+  },
+  {
+   "id": "M24",
+   "title": "explicit book not refused with whynot",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (sc && (sc.only === null || !whole)) return;",
+     "    return;"
+    ]
+   ],
+   "red": [
+    "a request signed by an identity with no grant is refused and whynot names the missing grant"
+   ]
+  },
+  {
+   "id": "M25",
+   "title": "request signature not verified",
+   "file": "src/httpsig.ts",
+   "edits": [
+    [
+     "if (!ok) throw bad('the request signature does not verify');",
+     ""
+    ]
+   ],
+   "red": [
+    "a request signed by an identity with no grant is refused and whynot names the missing grant",
+    "a request signed for the public https URL verifies at a node listening on plain http behind a proxy"
+   ]
+  },
+  {
+   "id": "M26",
+   "title": "request nonce replay allowed",
+   "file": "src/httpsig.ts",
+   "edits": [
+    [
+     "if (ctx.seen.has(params.nonce)) throw",
+     "if (false) throw"
+    ]
+   ],
+   "red": [
+    "a request signed by an identity with no grant is refused and whynot names the missing grant"
+   ]
+  },
+  {
+   "id": "M27",
+   "title": "content-digest not checked",
+   "file": "src/httpsig.ts",
+   "edits": [
+    [
+     "cd !== contentDigest(body ?? Buffer.alloc(0))",
+     "false"
+    ]
+   ],
+   "red": [
+    "a request signed by an identity with no grant is refused and whynot names the missing grant"
+   ]
+  },
+  {
+   "id": "M28",
+   "title": "feed export filter off (leak audit still on)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (s.jsonl === null || !parseJsonl(s.jsonl).every((f) => allowed(factId(f)))) {",
+     "if (s.jsonl === null) {"
+    ]
+   ],
+   "red": [
+    "a fact with no export rule never appears in a published batch",
+    "a guessed secret cannot be confirmed from a withheld manifest"
+   ]
+  },
+  {
+   "id": "M29",
+   "title": "leak audit off (filter still on)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    const out = batches.filter((b) => b.jsonl !== undefined);\n    if (out.length === 0",
+     "    const out = batches.filter((b) => b.jsonl !== undefined);\n    if (true"
+    ]
+   ],
+   "survivor": "Redundant by design: the leak audit sits behind the export filter and has no discriminating input while the filter is correct. Its ability to refuse is proven by M28 (filter off, audit on): the feed returns 500 leak_audit."
+  },
+  {
+   "id": "M30",
+   "title": "feed filter AND leak audit off",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (s.jsonl === null || !parseJsonl(s.jsonl).every((f) => allowed(factId(f)))) {",
+     "if (s.jsonl === null) {"
+    ],
+    [
+     "    const out = batches.filter((b) => b.jsonl !== undefined);\n    if (out.length === 0",
+     "    const out = batches.filter((b) => b.jsonl !== undefined);\n    if (true"
+    ]
+   ],
+   "red": [
+    "a fact with no export rule never appears in a published batch",
+    "a guessed secret cannot be confirmed from a withheld manifest"
+   ]
+  },
+  {
+   "id": "M31",
+   "title": "export audience ignored",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (a !== 'public' && a !== requester) continue;\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a fact with no export rule never appears in a published batch"
+   ]
+  },
+  {
+   "id": "M32",
+   "title": "a grant in any book opens every book",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (whole.has(b)) scope.set",
+     "if (whole.size > 0) scope.set"
+    ]
+   ],
+   "red": [
+    "a request signed by an identity with no grant is refused and whynot names the missing grant"
+   ]
+  },
+  {
+   "id": "M33",
+   "title": "recovery change not noticed",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (canonicalize(next.doc.recovery) !== canonicalize(cur.doc.recovery)) facts.push",
+     "if (false) facts.push"
+    ]
+   ],
+   "red": [
+    "a stolen current key cannot rotate the identity away from its recovery key"
+   ]
+  },
+  {
+   "id": "M34",
+   "title": "revocation by current key not noticed",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      facts.push(`revokes[${S}](${I}, ${seq}).`);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a stolen current key cannot rotate the identity away from its recovery key"
+   ]
+  },
+  {
+   "id": "M35",
+   "title": "revocation bound off (claimed_at trusted)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (key.revoked_at) {\n      const lastGood",
+     "    if (false) {\n      const lastGood"
+    ]
+   ],
+   "red": [
+    "a backdated batch received after revocation is rejected"
+   ]
+  },
+  {
+   "id": "M36",
+   "title": "follows always asserted",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (seq === cur.doc.seq + 1 && next.doc.prev === docHash(cur) && kept",
+     "    if (true || seq === cur.doc.seq + 1 && next.doc.prev === docHash(cur) && kept"
+    ]
+   ],
+   "red": [
+    "a rotation in the middle of a chain is followed without a warning",
+    "a node that swaps its key without rotation is refused with a whynot"
+   ]
+  },
+  {
+   "id": "M37",
+   "title": "update signature not verified",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (signer === null || !docSignedBy(next, signer)) {",
+     "if (signer === null) {"
+    ]
+   ],
+   "red": [
+    "a batch signed by B that writes into the book of A is refused",
+    "a stolen current key cannot rotate the identity away from its recovery key"
+   ]
+  },
+  {
+   "id": "M38",
+   "title": "valid_until ignored",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "&& !(key.valid_until && t >= Date.parse(key.valid_until))",
+     ""
+    ]
+   ],
+   "red": [
+    "a rotation in the middle of a chain is followed without a warning"
+   ]
+  },
+  {
+   "id": "M39",
+   "title": "current key accepted for any update (recovery-only rule dropped)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "`not changes_recovery[${S}](I, Seq), not revokes[${S}](I, Seq).`",
+     "`current_key[${S}](I, K).`"
+    ]
+   ],
+   "red": [
+    "a stolen current key cannot rotate the identity away from its recovery key"
+   ]
+  },
+  {
+   "id": "M40",
+   "title": "header not bound to the payload (no AAD)",
+   "file": "src/seal.ts",
+   "edits": [
+    [
+     "  c.setAAD(aad);\n",
+     ""
+    ],
+    [
+     "  d.setAAD(aad);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a static host holding a private batch cannot decrypt it, a recipient can"
+   ]
+  },
+  {
+   "id": "M41",
+   "title": "content key wrapped in the clear",
+   "file": "src/seal.ts",
+   "edits": [
+    [
+     "    const { iv, out } = gcmSeal(kek(shared, epk, r.enc_public_key), cek, Buffer.from(r.identity));\n    return { identity: r.identity, iv: b64(iv), wrapped: b64(out) };",
+     "    const { iv } = gcmSeal(kek(shared, epk, r.enc_public_key), cek, Buffer.from(r.identity));\n    return { identity: r.identity, iv: b64(iv), wrapped: b64(Buffer.concat([cek, crypto.randomBytes(16)])) };"
+    ]
+   ],
+   "red": [
+    "a static host holding a private batch cannot decrypt it, a recipient can"
+   ]
+  },
+  {
+   "id": "M42",
+   "title": "wrap key independent of the recipient's private key",
+   "file": "src/seal.ts",
+   "edits": [
+    [
+     "  return Buffer.from(crypto.hkdfSync('sha256', shared,",
+     "  return Buffer.from(crypto.hkdfSync('sha256', Buffer.alloc(32),"
+    ]
+   ],
+   "red": [
+    "a static host holding a private batch cannot decrypt it, a recipient can"
+   ]
+  },
+  {
+   "id": "M43",
+   "title": "future-dated documents and batches accepted",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (Date.parse(at) > Date.parse(receivedAt) + this.freshnessMs) {",
+     "    if (false) {"
+    ]
+   ],
+   "red": [
+    "a thief future-dating a rotation cannot lock out the recovery key",
+    "an identity document dated past the allowed skew is refused"
+   ]
+  },
+  {
+   "id": "M44",
+   "title": "recovery-signed document held to time order",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     " || next.key_id === cur.doc.recovery.key_id)) {",
+     ")) {"
+    ]
+   ],
+   "red": [
+    "a thief future-dating a rotation cannot lock out the recovery key"
+   ]
+  },
+  {
+   "id": "M45",
+   "title": "future-dated batch not checked",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (mode !== 'post') this.notFuture(m.claimed_at, receivedAt, 'the batch');\n",
+     ""
+    ]
+   ],
+   "red": [
+    "an identity document dated past the allowed skew is refused"
+   ]
+  },
+  {
+   "id": "M46",
+   "title": "salt dropped from the digest",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "createHash('sha256').update(Buffer.from(salt, 'base64url')).update(jsonl)",
+     "createHash('sha256').update(jsonl)"
+    ]
+   ],
+   "red": [
+    "a guessed secret cannot be confirmed from a withheld manifest",
+    "batch digest is SHA-256 of the salt followed by the JSONL bytes"
+   ]
+  },
+  {
+   "id": "M47",
+   "title": "salt served with withheld manifests",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "          return { manifest: s.manifest, withheld: true, ...extra };",
+     "          return { manifest: s.manifest, withheld: true, salt: s.salt ?? undefined, ...extra };"
+    ]
+   ],
+   "red": [
+    "a guessed secret cannot be confirmed from a withheld manifest"
+   ]
+  },
+  {
+   "id": "M48",
+   "title": "public URL ignored (scheme and Host from the request)",
+   "file": "src/http.ts",
+   "edits": [
+    [
+     "const target = `${node.publicUrl ?? `http://${req.headers.host}`}${req.url}`;",
+     "const target = `http://${req.headers.host}${req.url}`;"
+    ]
+   ],
+   "red": [
+    "a request signed for the public https URL verifies at a node listening on plain http behind a proxy"
+   ]
+  },
+  {
+   "id": "M50",
+   "title": "checkpoint age not judged",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (age > this.checkpointWindowMs) {",
+     "    if (false) {"
+    ]
+   ],
+   "red": [
+    "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one"
+   ]
+  },
+  {
+   "id": "M51",
+   "title": "checkpoint signature not verified",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (!verifySigned(CHECKPOINT_CONTEXT, c, key)) throw",
+     "if (false) throw"
+    ]
+   ],
+   "red": [
+    "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one"
+   ]
+  },
+  {
+   "id": "M52",
+   "title": "checkpoint head not matched",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (c.head !== last) throw",
+     "if (false) throw"
+    ]
+   ],
+   "red": [
+    "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one"
+   ]
+  },
+  {
+   "id": "M53",
+   "title": "offline content judged by freshness",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (mode === 'post') {\n      if (reattest)",
+     "    if (mode === 'post' || mode === 'offline') {\n      if (reattest)"
+    ]
+   ],
+   "red": [
+    "a sealed batch opened a day later is admitted, and one signed by a key revoked before it was sealed is refused"
+   ]
+  },
+  {
+   "id": "M54",
+   "title": "revoked key trusted until the reader has seen last_good",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     ": lastGood !== null && (m.digest === lastGood || upcoming.includes(lastGood));",
+     ": lastGood !== null && !(this.chains.get(m.identity) ?? []).includes(lastGood);"
+    ]
+   ],
+   "red": [
+    "a sealed batch opened a day later is admitted, and one signed by a key revoked before it was sealed is refused"
+   ]
+  },
+  {
+   "id": "M55",
+   "title": "key validity at claimed_at not checked",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (!keyValidAt(key, Date.parse(m.claimed_at))) {",
+     "    if (false) {"
+    ]
+   ],
+   "red": [
+    "a rotation in the middle of a chain is followed without a warning",
+    "a sealed batch opened a day later is admitted, and one signed by a key revoked before it was sealed is refused"
+   ]
+  },
+  {
+   "id": "M56",
+   "title": "gate counts a surviving mutant as killed",
+   "file": "scripts/mutants.ts",
+   "edits": [
+    [
+     "if (alive.length) return { id: m.id, ok: false,",
+     "if (alive.length) return { id: m.id, ok: true,"
+    ]
+   ],
+   "red": [
+    "the mutation gate fails when a listed mutant survives"
+   ]
+  },
+  {
+   "id": "M57",
+   "title": "gate skips the anchor check",
+   "file": "scripts/mutants.ts",
+   "edits": [
+    [
+     "    if (n !== 1) return { id: m.id, ok: false,",
+     "    if (false) return { id: m.id, ok: false,"
+    ]
+   ],
+   "red": [
+    "the mutation gate fails when a listed mutant survives"
+   ]
+  },
+  {
+   "id": "M58",
+   "title": "MCP assert open to any caller",
+   "file": "src/mcp.ts",
+   "edits": [
+    [
+     "if (caller === null || caller !== node.identity?.name) {",
+     "if (false) {"
+    ]
+   ],
+   "red": [
+    "an MCP client lists the tools, asserts a fact, and asks it back with why, all under the node's access rules"
+   ]
+  },
+  {
+   "id": "M59",
+   "title": "MCP bearer token not compared",
+   "file": "src/http.ts",
+   "edits": [
+    [
+     "if (!node.identity || given.length !== want.length || !crypto.timingSafeEqual(given, want)) {",
+     "if (!node.identity) {"
+    ]
+   ],
+   "red": [
+    "an MCP client lists the tools, asserts a fact, and asks it back with why, all under the node's access rules"
+   ]
+  },
+  {
+   "id": "M60",
+   "title": "MCP ask runs as the operator, not the caller",
+   "file": "src/mcp.ts",
+   "edits": [
+    [
+     "node.ask(a.query, caller,",
+     "node.ask(a.query, node.identity?.name ?? null,"
+    ]
+   ],
+   "red": [
+    "an MCP client lists the tools, asserts a fact, and asks it back with why, all under the node's access rules"
+   ]
+  },
+  {
+   "id": "M61",
+   "title": "perspective not bound in the view",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "placed = [...a, roflString(perspective), 'RoflenoxC'];",
+     "placed = [...a, 'RoflenoxP2', 'RoflenoxC'];"
+    ]
+   ],
+   "red": [
+    "a question restricted to one perspective sees only the facts asserted under it"
+   ]
+  },
+  {
+   "id": "M62",
+   "title": "view answers ignore the reader's scope",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "      if (sc.only !== null && !sc.only.has(f)) continue;\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a question restricted to one perspective sees only the facts asserted under it"
+   ]
+  },
+  {
+   "id": "M63",
+   "title": "every assertion current (no supersession)",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     ", not superseded[${SYSTEM_BOOK}](${b}, F, S).`",
+     ".`"
+    ]
+   ],
+   "red": [
+    "re-asserting a fact with a new confidence leaves exactly one confidence for that identity, the latest"
+   ]
+  },
+  {
+   "id": "M64",
+   "title": "executor started without a CPU limit",
+   "file": "src/executor.ts",
+   "edits": [
+    [
+     "`ulimit -t ${cpu}; exec \"$0\" \"$@\"`",
+     "`exec \"$0\" \"$@\"`"
+    ]
+   ],
+   "red": [
+    "an ask answers within one second while an executor saturates its CPU budget"
+   ]
+  },
+  {
+   "id": "M65",
+   "title": "executor intents from books it may not read",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        if (!sc || sc.only !== null) continue;\n        out.push({ identity: sc.identity,",
+     "        if (!sc && false) continue;\n        out.push({ identity: sc?.identity ?? String(b),"
+    ]
+   ],
+   "red": [
+    "an ask answers within one second while an executor saturates its CPU budget"
+   ]
+  },
+  {
+   "id": "M66",
+   "title": "backup copies the index beyond the committed lines' files (reads index after copying)",
+   "file": "src/backup.ts",
+   "edits": [
+    [
+     "    fs.writeFileSync(path.join(staging, 'log', 'index.jsonl'), index);",
+     "    fs.writeFileSync(path.join(staging, 'log', 'index.jsonl'), fs.readFileSync(path.join(log, 'index.jsonl')));"
+    ]
+   ],
+   "red": [
+    "a node rebuilt from its latest backup answers every question the same as the node up to that backup"
+   ]
+  },
+  {
+   "id": "M67",
+   "title": "backup installed without the rebuild check, manifests not copied",
+   "file": "src/backup.ts",
+   "edits": [
+    [
+     "      copy(path.join(book, `${r.digest}.manifest.json`));\n",
+     ""
+    ],
+    [
+     "    const n = await RoflenoxNode.open({ dataDir: staging, bin: o.bin, now });\n    const head = n.log.head();\n    const batches = n.log.receipts.filter((r) => r.kind !== 'identity').length;\n    await n.close();",
+     "    const head = sha256hex(index);\n    const batches = receipts.filter((r) => r.kind !== 'identity').length;"
+    ]
+   ],
+   "red": [
+    "a node rebuilt from its latest backup answers every question the same as the node up to that backup"
+   ]
+  },
+  {
+   "id": "M68",
+   "title": "challenge HMAC not checked",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (!crypto.timingSafeEqual(this.challengeMac(raw.subarray(0, 24)), raw.subarray(24))) return false;\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused",
+    "a flood of challenge requests neither grows memory nor stops an honest mirror"
+   ]
+  },
+  {
+   "id": "M69",
+   "title": "challenge expiry not checked",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (Number(raw.readBigUInt64BE(16)) < this.now()) return false;\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused",
+    "a flood of challenge requests neither grows memory nor stops an honest mirror"
+   ]
+  },
+  {
+   "id": "M70",
+   "title": "verified feed's challenge not remembered",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      this.consume(nonce);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused",
+    "a flood of challenge requests neither grows memory nor stops an honest mirror"
+   ]
+  },
+  {
+   "id": "M71",
+   "title": "issuing a challenge stores it (the old table)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    return Buffer.concat([body, this.challengeMac(body)]).toString('base64url');",
+     "    const n = Buffer.concat([body, this.challengeMac(body)]).toString('base64url');\n    this.consumed.set(`issued:${n}`, this.now() + this.freshnessMs);\n    return n;"
+    ]
+   ],
+   "red": [
+    "a flood of challenge requests neither grows memory nor stops an honest mirror"
+   ]
+  }
+ ]
+}

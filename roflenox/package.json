@@ -1,0 +1,18 @@
+{
+  "name": "roflenox",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ROFLENOX core: a federated signed knowledge log with the ROFL engine as its derived index",
+  "type": "module",
+  "bin": {
+    "roflenox": "src/cli.ts"
+  },
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --no-warnings --test --test-concurrency=4 --test-timeout=110000 --test-force-exit test/*.test.ts",
+    "roflenox": "node --experimental-strip-types --no-warnings src/cli.ts",
+    "mutants": "node --experimental-strip-types --no-warnings scripts/mutants.ts"
+  }
+}
