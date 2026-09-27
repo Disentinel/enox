@@ -515,6 +515,10 @@ Declared as facts:
 - `r_domain_vouch` is stated in "owner 2026-09-27: add domain vouching as an optional variant".
 - `r_domain_vouch` is to be checked by "with domain vouching on, a first contact with user@domain pins the key its domain publishes over HTTPS, and with it off the same contact needs an invitation".
 - `r_domain_vouch` is to be checked by "a domain vouches for no name outside it, never over plain HTTP or across a redirect to another host, and never replaces an already pinned key".
+- `r_domain_vouch` says "the node asks only public DNS names: the domain of user@domain must be a multi-label DNS name, never an IP literal or a single label like localhost; every address it resolves to must be public (not loopback, private, link-local, unique-local, shared or multicast), and the connection goes to the address that was checked, never a fresh resolution".
+- `r_domain_vouch` says "domain lookups are bounded: at most a few at a time per node, and each answer, including no answer, is cached for minutes, so first contacts cannot turn the node into a flood or a scanner".
+- `r_domain_vouch` is to be checked by "an anonymous first contact as user@127.0.0.1, user@localhost or a user at a name resolving to a private address makes no outbound connection".
+- `r_domain_vouch` is to be checked by "a flood of first contacts naming many domains opens a bounded number of domain lookups at a time and repeats none within the cache time".
 - `r_key_change_loud` is about `identity`.
 - `r_key_change_loud` binds as `must`.
 - `r_key_change_loud` says "first contact is bootstrapped over HTTPS and pinned; a key that changes without a signed rotation stops the pull and says why".
@@ -623,6 +627,7 @@ Kinds of the requirements:
 - `r_domain_vouch` is of `security`.
 - `r_key_change_loud` resists "anyone, including an identity this node already trusts, who wants a name here pinned to a key its owner does not hold".
 - `r_domain_vouch` resists "whoever controls the domain's DNS or web server, or the network between nodes, trying to pin a key the user does not hold, and the domain's owner trying to take over an identity already pinned".
+- `r_domain_vouch` resists "an anonymous caller who names crafted domains to make the node connect to internal addresses or to flood outbound lookups".
 - `r_default_deny` is of `security`.
 - `r_default_deny` resists "an anonymous or granted caller of ANY endpoint, who wants to learn what no export rule derives, facts or metadata".
 - `r_withheld_unguessable` is of `security`.
@@ -733,6 +738,7 @@ The queue:
 - `r_mutation_gate` is accepted at "3ca019fb84ae9d2aaeea0979e21e86715ec0b8b8".
 - `r_rotation` is accepted at "4f7c3617e44a355a89ed563c133438d5e58bd6fe".
 - `r_identity_names` is accepted at "2db9e9f9d7518478a277e98369bccc38681654b1".
+- `r_domain_vouch` is rejected at "e63b41e1564229c02ffde8d8463f71ef03984823".
 - `r_no_orphan_tests` is rejected at "2db9e9f9d7518478a277e98369bccc38681654b1".
 - `r_identity_names` is rejected at "fd7980616c080677b958b90759493edde1012954".
 - `r_no_orphan_tests` is rejected at "34572fa77b7e52c361d36c2d705e18285bf84bf2".
