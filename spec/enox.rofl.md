@@ -593,6 +593,11 @@ Kinds of the requirements:
 
 ## Очередь и приёмка
 
+> Поправка 2026-09-27: при отказе r_relation_primary ведущий утверждал, что
+> клиент и узел расходились на U+200B; на деле клиент бросил на BOM (trim его
+> срезает), расхождения не было — исполнитель прав. Сама находка (узел
+> принимал U+200B и U+202E) была верной.
+>
 > Приёмка 81647a8 (2026-09-27): crash — оба теста и исходная проба ведущего
 > (503 вместо пустого ответа); reopen 200k — 23.4 с при нагрузке 24, но 30.5 с
 > при нагрузке выше 40: порог близок к пределу на нагруженной 4-ядерной машине.
@@ -625,6 +630,7 @@ Rejected after verification:
 
 Accepted after verification:
 
+- `r_relation_primary` is accepted at "d04297a3de2013e18508beb00289d9be6e084164".
 - `r_derived_rebuildable` is accepted at "4170fad256ebfbac06d77bc0fefac9d2fac388d2".
 - `r_bounded_memory` is accepted at "fe6c2b55716d73ef8889f3d3ae57a74eae083063".
 - `r_uri_prefix_stable` is accepted at "8a03765e17e2a44a75ec811bfe911c30e25c16d1".
