@@ -107,8 +107,8 @@ type Mode = 'post' | 'feed' | 'offline' | 'replay';
 
 interface Verified {
   manifest: Manifest; facts: Fact[]; pin: IdentityDoc | null; reattest: Attestation | null; withheld: boolean;
-  /** The batch's user rules, compiled to its author's book (src/rules.ts). */
-  rules: string[];
+  /** The batch's user rules, compiled to its author's book (src/rules.ts), by fact id. */
+  rules: { F: string; text: string }[];
 }
 
 /** The ROFL program a verified batch loads into the MAIN world: its facts.
@@ -172,7 +172,7 @@ export class RoflenoxNode {
   private readonly ruleBudget: number;
   private readonly programs = new Map<string, string[]>();      // identity → its batches' fact programs
   private readonly results = new Map<string, string[]>();       // identity → its roflenox:result fact lines
-  private readonly userRules = new Map<string, { text: string; mirrored: boolean }[]>();  // author → compiled rules
+  private readonly userRules = new Map<string, Map<string, string>>();  // author → rule fact id → compiled rule
   private readonly worlds = new Map<string, { w: World; version: number; clock: number }>();
   /** The current assertion of every fact, per identity (src/assertions.ts). */
   private readonly assertions = new Assertions();
@@ -434,7 +434,11 @@ export class RoflenoxNode {
     this.programs.set(id, [...(this.programs.get(id) ?? []), programOf(v, seq)]);
     const res = v.facts.filter((f) => f.relation === RESULT);
     if (res.length) this.results.set(id, [...(this.results.get(id) ?? []), toRofl(res, bookOf(id), seq)]);
-    if (v.rules.length) this.userRules.set(id, [...(this.userRules.get(id) ?? []), ...v.rules.map((text) => ({ text, mirrored }))]);
+    if (v.rules.length) {
+      const m = this.userRules.get(id) ?? new Map<string, string>();
+      for (const r of v.rules) m.set(r.F, r.text);
+      this.userRules.set(id, m);
+    }
     this.version++;
     const claimed = Date.parse(v.manifest.claimed_at);
     if (claimed > (this.lastClaimed.get(id) ?? -Infinity)) this.lastClaimed.set(id, claimed);
@@ -620,7 +624,7 @@ export class RoflenoxNode {
     }
     // User rules are checked here, with the batch: a rule that would conclude
     // outside its author's book refuses the whole batch.
-    const rules = facts.filter((f) => f.relation === RULE).map((f) => compileRule(f.target, m.identity));
+    const rules = facts.filter((f) => f.relation === RULE).map((f) => ({ F: factId(f), text: compileRule(f.target, m.identity) }));
     return { manifest: m, facts, pin, reattest, withheld, rules };
   }
 
@@ -862,7 +866,14 @@ export class RoflenoxNode {
   }
 
   private headsOf(author: string): Set<string> {
-    return new Set((this.userRules.get(author) ?? []).map((r) => /^([a-z][A-Za-z0-9_]*)\[/.exec(r.text)?.[1] ?? ''));
+    return new Set(this.currentRules(author).map((r) => /^([a-z][A-Za-z0-9_]*)\[/.exec(r)?.[1] ?? ''));
+  }
+
+  /** An author's rules whose fact is current with confidence above 0: a rule
+   *  re-asserted at 0 is retired and derives nothing (r_confidence). */
+  private currentRules(author: string): string[] {
+    const cur = this.assertions.of(author);
+    return [...(this.userRules.get(author) ?? [])].filter(([F]) => (cur.get(F)?.C ?? 0) > 0).map(([, text]) => text);
   }
 
   /** Rules that run for `author` here: the operator's own, and another
@@ -874,7 +885,7 @@ export class RoflenoxNode {
    *    {source: <author>, relation: "roflenox:trust_rules", target: <anything>}
    *  with a current confidence above 0 (re-asserting it at 0 withdraws it). */
   private async runnableRules(author: string): Promise<string[]> {
-    const all = (this.userRules.get(author) ?? []).map((r) => r.text);
+    const all = this.currentRules(author);
     if (all.length === 0) return all;
     const op = this.identity?.name;
     if (author === op) return all;

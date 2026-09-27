@@ -225,11 +225,9 @@ export function toRofl(facts: Fact[], book: string, seq: number, withAsserted = 
     // count (592 restarts > 3 a day): edge_num(F, S, R, N) beside the edge.
     if (INTEGER.test(f.target)) out.push(`edge_num[${book}](${id}, ${roflString(f.source)}, ${roflString(f.relation)}, ${f.target}).`);
     if (withAsserted) out.push(`asserted[${book}](${id}, ${roflString(f.perspective)}, ${permille(f.confidence)}, ${seq}).`);
-    if (f.relation === GRANT) out.push(`grant[${book}](${roflString(f.source)}, ${Math.floor(Date.parse(f.target) / 1000)}).`);
-    if (f.relation === DELEGATE) out.push(`delegate[${book}](${roflString(f.source)}, ${Math.floor(Date.parse(f.target) / 1000)}).`);
-    if (f.relation === EXPORT) out.push(`export[${book}](${roflString(f.source)}, ${roflString(f.target)}).`);
-    // (A follow's follows[book](Name, b_<atom>) row — what a rule's book
-    // variable ranges by — is a CURRENT assertion: src/assertions.ts.)
+    // (A grant's, delegation's or export's row, and a follow's
+    // follows[book](Name, b_<atom>) row, act only while the fact is CURRENT
+    // with confidence above 0: src/assertions.ts.)
   }
   return `${out.join('\n')}\n`;
 }

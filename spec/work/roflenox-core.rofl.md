@@ -53,3 +53,5 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_key_change_loud`.
 - `roflenox_core` finished `r_key_change_loud` at "2873ca82a93a210e7954cd7dc7e6d9f33d604569".
 - `roflenox_core` takes `r_asserted_by`.
+- `roflenox_core` finished `r_asserted_by` at "47c198a247231c85bf38ef70395a3fb9514f5306".
+- `roflenox_core` takes `r_confidence`.

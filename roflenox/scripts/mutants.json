@@ -2055,8 +2055,8 @@
    "file": "src/facts.ts",
    "edits": [
     [
-     "    // (A follow's follows[book](Name, b_<atom>) row — what a rule's book\n",
-     "    if (f.relation === 'roflenox:follow') out.push(`follows[${book}](${roflString(f.source)}, b_${sha256hex(f.source).slice(0, 16)}).`);\n    // (A follow's follows[book](Name, b_<atom>) row — what a rule's book\n"
+     "    // (A grant's, delegation's or export's row, and a follow's\n",
+     "    if (f.relation === 'roflenox:follow') out.push(`follows[${book}](${roflString(f.source)}, b_${sha256hex(f.source).slice(0, 16)}).`);\n    // (A grant's, delegation's or export's row, and a follow's\n"
     ]
    ],
    "red": [
@@ -2433,6 +2433,104 @@
    ],
    "red": [
     "every admitted fact reads back asserted by the identity that signed its batch, whatever the batch claims"
+   ]
+  },
+  {
+   "id": "M176",
+   "title": "r_confidence: a retired control fact's row is never retracted",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "      if (acting(was) && !acting(cur)) retract.push(was.ctl);",
+     "      if (false && acting(was) && !acting(cur)) retract.push(was.ctl);"
+    ]
+   ],
+   "red": [
+    "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing"
+   ]
+  },
+  {
+   "id": "M177",
+   "title": "r_confidence: a control fact acts whatever its confidence",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "=> c?.ctl !== undefined && c.C > 0;",
+     "=> c?.ctl !== undefined;"
+    ]
+   ],
+   "red": [
+    "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing"
+   ]
+  },
+  {
+   "id": "M178",
+   "title": "r_confidence: a retired rule still runs",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     ".filter(([F]) => (cur.get(F)?.C ?? 0) > 0).map(([, text]) => text);",
+     ".map(([, text]) => text);"
+    ]
+   ],
+   "red": [
+    "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing"
+   ]
+  },
+  {
+   "id": "M179",
+   "title": "r_confidence: a rebuild loads retired control rows",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "${acting(c) ? `${c.ctl}.\\n` : ''}",
+     "${c.ctl !== undefined ? `${c.ctl}.\\n` : ''}"
+    ]
+   ],
+   "red": [
+    "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing"
+   ]
+  },
+  {
+   "id": "M180",
+   "title": "r_confidence: a grant's row comes with the batch, not with the current assertion",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "    // (A grant's, delegation's or export's row, and a follow's",
+     "    if (f.relation === 'roflenox:grant') out.push(`grant[${book}](${roflString(f.source)}, ${Math.floor(Date.parse(f.target) / 1000)}).`);\n    // (A grant's, delegation's or export's row, and a follow's"
+    ]
+   ],
+   "red": [
+    "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing"
+   ]
+  },
+  {
+   "id": "M181",
+   "title": "r_confidence: a delegation's row comes with the batch, not with the current assertion",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "    // (A grant's, delegation's or export's row, and a follow's\n",
+     "    if (f.relation === 'roflenox:delegate') out.push(`delegate[${book}](${roflString(f.source)}, ${Math.floor(Date.parse(f.target) / 1000)}).`);\n    // (A grant's, delegation's or export's row, and a follow's\n"
+    ]
+   ],
+   "red": [
+    "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing"
+   ]
+  },
+  {
+   "id": "M182",
+   "title": "r_confidence: an export's row comes with the batch, not with the current assertion",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "    // (A grant's, delegation's or export's row, and a follow's\n",
+     "    if (f.relation === 'roflenox:export') out.push(`export[${book}](${roflString(f.source)}, ${roflString(f.target)}).`);\n    // (A grant's, delegation's or export's row, and a follow's\n"
+    ]
+   ],
+   "red": [
+    "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing"
    ]
   }
  ]

@@ -13,9 +13,24 @@
 // RETRACTS the replaced asserted[book](F, P, C, S) row from the engine and
 // loads the new one — the engine's `asserted` is then exactly the current
 // assertions. The log keeps every assertion; replay loads only the current.
-import { factId, permille, roflString, sha256hex, type Fact } from './facts.ts';
+import { DELEGATE, EXPORT, factId, GRANT, permille, roflString, sha256hex, type Fact } from './facts.ts';
 
-export interface Current { P: string; C: number; S: number; follow?: string }
+export interface Current { P: string; C: number; S: number; follow?: string; ctl?: string }
+
+/** A CONTROL fact's engine row (r_confidence): grant[book](R, Until),
+ *  delegate[book](Agent, Until), export[book](Rel, Audience). One row per
+ *  fact, present only while the fact's current confidence is above 0 —
+ *  re-asserting it at 0 retires it, and with it the access, delegation or
+ *  publication it granted. (Rules and trust are filtered the same way where
+ *  they are used; a follow keeps its own row below.) */
+function controlRow(book: string, f: Fact): string | undefined {
+  const until = () => Math.floor(Date.parse(f.target) / 1000);
+  if (f.relation === GRANT) return `grant[${book}](${roflString(f.source)}, ${until()})`;
+  if (f.relation === DELEGATE) return `delegate[${book}](${roflString(f.source)}, ${until()})`;
+  if (f.relation === EXPORT) return `export[${book}](${roflString(f.source)}, ${roflString(f.target)})`;
+  return undefined;
+}
+const acting = (c: Current | undefined): c is Current & { ctl: string } => c?.ctl !== undefined && c.C > 0;
 
 /** A follow is a CURRENT assertion too: `follows[book](Name, b_<atom>)` — the
  *  row a rule ranges over books by — exists only while the follow's current
@@ -49,10 +64,19 @@ export class Assertions {
         retract.push(row(book, F, old));
         if (old.follow !== undefined && old.C > 0) unfollowed.add(old.follow);
       }
-      const cur: Current = { P: f.perspective, C: permille(f.confidence), S: seq, ...(f.relation === FOLLOW ? { follow: f.source } : {}) };
+      const ctl = controlRow(book, f);
+      const cur: Current = { P: f.perspective, C: permille(f.confidence), S: seq, ...(f.relation === FOLLOW ? { follow: f.source } : {}), ...(ctl ? { ctl } : {}) };
       next.set(F, cur);
       load.push(`${row(book, F, cur)}.`);
       if (cur.follow !== undefined && cur.C > 0) load.push(`${followRow(book, cur.follow)}.`);
+    }
+    // A control row changes only when the fact starts or stops acting: loaded
+    // and retracted rows are applied load-then-retract, so a row that stays
+    // is touched by neither.
+    for (const [F, cur] of next) {
+      const was = m.get(F);
+      if (acting(cur) && !acting(was)) load.push(`${cur.ctl}.`);
+      if (acting(was) && !acting(cur)) retract.push(was.ctl);
     }
     // A follows row goes only when NO current follow of that name is left:
     // two follow facts of one host with one retired still follow it, and a
@@ -69,7 +93,7 @@ export class Assertions {
   lines(identity: string, book: string): string {
     const m = this.by.get(identity);
     if (!m) return '';
-    return [...m].map(([F, c]) => `${row(book, F, c)}.\n${c.follow !== undefined && c.C > 0 ? `${followRow(book, c.follow)}.\n` : ''}`).join('');
+    return [...m].map(([F, c]) => `${row(book, F, c)}.\n${c.follow !== undefined && c.C > 0 ? `${followRow(book, c.follow)}.\n` : ''}${acting(c) ? `${c.ctl}.\n` : ''}`).join('');
   }
 }
 
