@@ -630,6 +630,7 @@ Rejected after verification:
 
 Accepted after verification:
 
+- `r_semantic_search` is accepted at "956f233fabf5c9d044be0bc18962e4fa0c3e15dd".
 - `r_relation_primary` is accepted at "d04297a3de2013e18508beb00289d9be6e084164".
 - `r_derived_rebuildable` is accepted at "4170fad256ebfbac06d77bc0fefac9d2fac388d2".
 - `r_bounded_memory` is accepted at "fe6c2b55716d73ef8889f3d3ae57a74eae083063".
