@@ -721,6 +721,7 @@ The queue:
 - `r_default_deny` is accepted at "a1bb4a0d379138676deab6a7b2bf05915362a5f7".
 - `r_chain` is accepted at "68809976741d5ab863ba19d57a9920566d4afa60".
 - `r_backup` is accepted at "d8f57a54ae23621d1c63757978d8ee7b69098e18".
+- `r_enox_compat` is accepted at "047c616173ff5b28ed1f33cfb24ff4aec1d7febc".
 - `r_enox_compat` is rejected at "63f344e6d8b0cc2c6b578bbd558a2dbaad21e357".
 - `r_mutation_gate` is rejected at "b6b67403f2e7a5c645be914d5f45754273e77418".
 - `r_identity_names` is rejected at "4800a6841d8476258cb98c07a16cfaf815353c4e".
@@ -989,6 +990,10 @@ The checks that exist:
 - "a node given a second signed successor of the same batch keeps both signatures as fork proof and marks every answer over that book" lives in "roflenox/test/admission.test.ts".
 - "a backup syncs every file and directory it holds before it becomes the latest" guards `r_backup`.
 - "a backup syncs every file and directory it holds before it becomes the latest" lives in "roflenox/test/durability.test.ts".
+- "an agent label given to an Enox write reads back as claimed_by next to the signing identity, and a forged label changes nothing but claimed_by" guards `r_enox_compat`.
+- "an agent label given to an Enox write reads back as claimed_by next to the signing identity, and a forged label changes nothing but claimed_by" lives in "roflenox/test/enox.test.ts".
+- "a claimed label holding brackets, a newline or 5000 characters can neither forge a signer nor add a line to a text view" guards `r_enox_compat`.
+- "a claimed label holding brackets, a newline or 5000 characters can neither forge a signer nor add a line to a text view" lives in "roflenox/test/enox.test.ts".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" guards `r_asserted_by`.
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" lives in "personal-node/src/mcp/main-graph.test.ts".
 
