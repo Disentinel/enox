@@ -73,6 +73,8 @@ Declared as facts:
 - `r_confidence` is about `data_model`.
 - `r_confidence` binds as `must`.
 - `r_confidence` says "every relation carries a confidence between 0 and 1".
+- `r_confidence` says "a control fact (grant, delegate, export, rule, trust in rules, follow) acts only while its identity's current assertion of it has confidence above 0; re-asserting it at 0 retires it, and that is how access, delegation and rules are withdrawn".
+- `r_confidence` is to be checked by "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing".
 - `r_confidence` is stated in "README.md#verification".
 - `r_confidence` says "confidence belongs to one identity's assertion; a later assertion of the same fact by the same identity replaces the earlier one in the order of the log; combining confidence across identities is a perspective rule, not a property of the store".
 - `r_confidence` is to be checked by "re-asserting a fact with a new confidence leaves exactly one confidence for that identity, the latest".
@@ -664,10 +666,12 @@ The queue:
 - `r_default_deny` is queued at 77.
 - `r_chain` is queued at 78.
 - `r_backup` is queued at 79.
+- `r_confidence` is queued at 69.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 - `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
 - `r_key_change_loud` is rejected at "6bfb1bbf0121614ca309293042adf2231ecc31d1".
 - `r_atomic_write` is accepted at "cb8730b753d33b9d28115ad4db650776d2c5a154".
+- `r_key_change_loud` is accepted at "2873ca82a93a210e7954cd7dc7e6d9f33d604569".
 
 Rejected after verification:
 
