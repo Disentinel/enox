@@ -7,6 +7,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { docHash, keyIdOf, LocalIdentity, signDoc, type IdentityDoc } from '../src/identity.ts';
 import { publish, publishSealed, RemoteRefusal } from '../src/client.ts';
+import { seal } from '../src/seal.ts';
 import { answers, batch, DAY, exportRule, fact, get, identityAt, invitation, iso, post, start, T0, tmpDir, pull, vouch } from './helpers.ts';
 
 const CLI = path.join(import.meta.dirname, '..', 'src', 'cli.ts');
@@ -286,6 +287,44 @@ test('a delegation to a name outside the parent\'s own names pins nothing, and t
     assert.deepEqual(await pull(b, invitation(a), 'node-a'), { identity: 'node-a', batches: 1 });
     assert.equal(((await get(b.url, '/identities/node-a')).body as unknown as IdentityDoc[])[0]!.key_id, a.me.keyId);
   } finally { await a.stop(); await b.stop(); }
+});
+
+test('a batch signed after its key\'s invalid_from is refused, and one dated 301 seconds past its receipt is refused as future-dated', async () => {
+  const dir = tmpDir('valid-a');
+  const a = await start(dir, 'node-a');
+  try {
+    const b1 = batch(a.me, [fact('alice', 'knows', 'bob')], null, iso(a.clock.t));
+    assert.equal((await post(a.url, '/batches', b1)).status, 201);
+    const old = a.me;
+    const R = T0 + 3_600_000;                                      // the old key is invalid from R on
+    const me2 = old.rotate(dir, new Date(R));
+    a.clock.t = R + 10_000;
+    assert.equal((await post(a.url, '/identities', me2.identityChain())).status, 200);
+    let head = b1.manifest.digest;
+    const send = async (who: LocalIdentity, claimed: number) => {
+      const b = batch(who, [fact('alice', 'says', String(claimed))], head, iso(claimed));
+      const r = await post(a.url, '/batches', b);
+      if (r.status === 201) head = b.manifest.digest;
+      return r.status === 201 ? 'admitted' : String(r.body.error);
+    };
+    // Validity is judged at the claimed time: one millisecond after invalid_from
+    // is refused, one before is the key's own time.
+    assert.equal(await send(old, R + 1), 'key_not_valid');
+    assert.equal(await send(old, R - 1), 'admitted');
+    // The new key, through the door where age is not judged (a sealed batch,
+    // admitted offline): 301 s past the receipt is the future; 300 s is skew.
+    // (A live POST 301 s ahead is refused too, as stale: r_freshness.)
+    const sealed = async (claimed: number) => {
+      const b = batch(me2, [fact('alice', 'seals', String(claimed))], head, iso(claimed));
+      const e = seal(b, [{ identity: 'node-a', enc_public_key: me2.identityDoc().doc.enc.public_key }]);
+      const r = await post(a.url, '/sealed', e);
+      if (r.status === 201) head = b.manifest.digest;
+      return r.status === 201 ? 'admitted' : String(r.body.error);
+    };
+    assert.equal(await sealed(a.clock.t + 301_000), 'future_dated');
+    assert.equal(await sealed(a.clock.t + 300_000), 'admitted');
+    assert.equal(await send(me2, a.clock.t + 301_000), 'stale');
+  } finally { await a.stop(); }
 });
 
 test('a node that swaps its key without rotation is refused with a whynot', async () => {

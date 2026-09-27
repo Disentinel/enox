@@ -228,3 +228,27 @@ test('a feed copied to a static directory mirrors under a fresh checkpoint and i
     } finally { await d.stop(); }
   } finally { await host.close(); await b.stop(); await c.stop(); }
 });
+
+test('a checkpoint one second past the window is refused and one second inside it mirrors', async () => {
+  const a = await start(tmpDir('cpw-a'), 'node-a');
+  const dir = tmpDir('cpw-dir');
+  const host = await staticDir(dir);
+  // Readers: two on the default window (24 h), two with a window of 60 s set on the node.
+  const readers = await Promise.all([
+    start(tmpDir('cpw-b1'), 'reader-1'), start(tmpDir('cpw-b2'), 'reader-2'),
+    start(tmpDir('cpw-b3'), 'reader-3', { checkpointWindowSec: 60 }), start(tmpDir('cpw-b4'), 'reader-4', { checkpointWindowSec: 60 }),
+  ]);
+  try {
+    await publish(a.url, a.me, [fact('alice', 'knows', 'bob'), exportRule('*', 'public')], () => a.clock.t);
+    await writeStaticFeed(a.url, a.me, dir, () => a.clock.t);    // checkpointed at T0
+    await a.stop();
+    const at = async (r: typeof readers[number], ageMs: number) => {
+      r.clock.t = T0 + ageMs;
+      return pull(r, invitation(a, host.url), 'node-a').then((x) => `mirrored ${x.batches}`, (e: unknown) => (e as RemoteRefusal).reason);
+    };
+    assert.deepEqual([
+      await at(readers[0]!, DAY + 1000), await at(readers[1]!, DAY - 1000),
+      await at(readers[2]!, 61_000), await at(readers[3]!, 59_000),
+    ], ['checkpoint_expired', 'mirrored 1', 'checkpoint_expired', 'mirrored 1']);
+  } finally { await host.close(); for (const r of readers) await r.stop(); }
+});

@@ -613,7 +613,8 @@
     ]
    ],
    "red": [
-    "an identity document dated past the allowed skew is refused"
+    "an identity document dated past the allowed skew is refused",
+    "a batch signed after its key's invalid_from is refused, and one dated 301 seconds past its receipt is refused as future-dated"
    ]
   },
   {
@@ -2559,6 +2560,76 @@
    ],
    "red": [
     "a revoked grant answers 410 on the next read, while facts read before the revocation still verify against their batch digest"
+   ]
+  },
+  {
+   "id": "M186",
+   "title": "r_rotation: key validity judged at the receipt, not the claimed time",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (!keyValidAt(key, Date.parse(m.claimed_at))) {",
+     "    if (!keyValidAt(key, Date.parse(receivedAt))) {"
+    ]
+   ],
+   "red": [
+    "a batch signed after its key's invalid_from is refused, and one dated 301 seconds past its receipt is refused as future-dated"
+   ]
+  },
+  {
+   "id": "M187",
+   "title": "r_rotation: the allowed skew is exclusive (300 s refused)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (Date.parse(at) > Date.parse(receivedAt) + this.freshnessMs) {",
+     "    if (Date.parse(at) >= Date.parse(receivedAt) + this.freshnessMs) {"
+    ]
+   ],
+   "red": [
+    "a batch signed after its key's invalid_from is refused, and one dated 301 seconds past its receipt is refused as future-dated"
+   ]
+  },
+  {
+   "id": "M188",
+   "title": "r_static_feed: the checkpoint window is not set per node",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "this.checkpointWindowMs = (o.checkpointWindowSec ?? DEFAULT_CHECKPOINT_WINDOW_SEC) * 1000;",
+     "this.checkpointWindowMs = DEFAULT_CHECKPOINT_WINDOW_SEC * 1000;"
+    ]
+   ],
+   "red": [
+    "a checkpoint one second past the window is refused and one second inside it mirrors"
+   ]
+  },
+  {
+   "id": "M189",
+   "title": "r_static_feed: the default window is not 24 hours",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "export const DEFAULT_CHECKPOINT_WINDOW_SEC = 24 * 3600;",
+     "export const DEFAULT_CHECKPOINT_WINDOW_SEC = 24 * 3600 + 60;"
+    ]
+   ],
+   "red": [
+    "a checkpoint one second past the window is refused and one second inside it mirrors"
+   ]
+  },
+  {
+   "id": "M190",
+   "title": "r_static_feed: a checkpoint is judged with a minute's grace past the window",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (age > this.checkpointWindowMs) {",
+     "    if (age > this.checkpointWindowMs + 60_000) {"
+    ]
+   ],
+   "red": [
+    "a checkpoint one second past the window is refused and one second inside it mirrors"
    ]
   }
  ]

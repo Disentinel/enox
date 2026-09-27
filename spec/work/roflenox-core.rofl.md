@@ -58,3 +58,6 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_confidence` at "27f4b5e57621eae2ebf937f99d7cf3540c766a1e".
 - `roflenox_core` takes `r_revocation_receipt`.
 - `roflenox_core` finished `r_revocation_receipt` at "85443bd2b257d98972e1de35b2ad3b5feace3e36".
+- `roflenox_core` takes `r_rotation`.
+- `roflenox_core` finished `r_rotation` at "db71b41d7281fe72aae5d4d4302303045a5fb4ce".
+- `roflenox_core` takes `r_static_feed`.
