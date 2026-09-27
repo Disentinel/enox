@@ -879,6 +879,46 @@ The checks that exist:
 - "auth: missing/wrong token -> 401, revoked -> 410, expired -> 410" lives in "personal-node/src/shares/shares.test.ts".
 - "manifest paths 410 once a share is revoked, including an unknown subpath" guards `r_revocation_receipt`.
 - "manifest paths 410 once a share is revoked, including an unknown subpath" lives in "personal-node/src/shares/shares.test.ts".
+- "a batch line that is not a relation between two entities is refused" guards `r_relation_primary`.
+- "a batch line that is not a relation between two entities is refused" lives in "roflenox/test/admission.test.ts".
+- "a name made only of invisible or text-direction characters is refused, the same way by the client and the node" guards `r_relation_primary`.
+- "a name made only of invisible or text-direction characters is refused, the same way by the client and the node" lives in "roflenox/test/admission.test.ts".
+- "every admitted fact reads back asserted by the identity that signed its batch, whatever the batch claims" guards `r_asserted_by`.
+- "every admitted fact reads back asserted by the identity that signed its batch, whatever the batch claims" lives in "roflenox/test/enox.test.ts".
+- "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing" guards `r_confidence`.
+- "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing" lives in "roflenox/test/model.test.ts".
+- "a node killed at each write step reopens with the whole batch or none of it" guards `r_atomic_write`.
+- "a node killed at each write step reopens with the whole batch or none of it" lives in "roflenox/test/durability.test.ts".
+- "a backup killed between any two of its steps leaves a readable backup at the latest path" guards `r_atomic_write`.
+- "a backup killed between any two of its steps leaves a readable backup at the latest path" lives in "roflenox/test/durability.test.ts".
+- "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent" guards `r_derived_rebuildable`.
+- "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent" lives in "roflenox/test/search.test.ts".
+- "a node holding 200000 facts stays under 1.5 GB of resident memory while idle" guards `r_bounded_memory`.
+- "a node holding 200000 facts stays under 1.5 GB of resident memory while idle" lives in "roflenox/test/perf/memory.test.ts".
+- "the MCP endpoint issues no session id and keeps no state per client" guards `r_session_eviction`.
+- "the MCP endpoint issues no session id and keeps no state per client" lives in "roflenox/test/mcp.test.ts".
+- "a revoked grant answers 410 on the next read, while facts read before the revocation still verify against their batch digest" guards `r_revocation_receipt`.
+- "a revoked grant answers 410 on the next read, while facts read before the revocation still verify against their batch digest" lives in "roflenox/test/access.test.ts".
+- "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent" guards `r_semantic_search`.
+- "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent" lives in "roflenox/test/search.test.ts".
+- "a meaning search finds a fact that shares none of the query's words" guards `r_semantic_search`.
+- "a meaning search finds a fact that shares none of the query's words" lives in "roflenox/executors/embedder/test/meaning.test.ts".
+- "a search the operator asks is never published by a wildcard export" guards `r_semantic_search`.
+- "a search the operator asks is never published by a wildcard export" lives in "roflenox/test/search.test.ts".
+- "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why" guards `r_uc_observability`.
+- "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why" lives in "roflenox/test/observability.test.ts".
+- "a fleet rule written once covers every followed host, including a host followed after the rule was written" guards `r_uc_observability`.
+- "a fleet rule written once covers every followed host, including a host followed after the rule was written" lives in "roflenox/test/observability.test.ts".
+- "a followed feed that no rule reads is reported as unknown, never as all-clear" guards `r_uc_observability`.
+- "a followed feed that no rule reads is reported as unknown, never as all-clear" lives in "roflenox/test/observability.test.ts".
+- "a follow retired with confidence 0 stops every rule ranging over that host's book" guards `r_uc_observability`.
+- "a follow retired with confidence 0 stops every rule ranging over that host's book" lives in "roflenox/test/observability.test.ts".
+- "a first contact over plain HTTP is refused without an invitation link and pins with one whose key id matches" guards `r_key_change_loud`.
+- "a first contact over plain HTTP is refused without an invitation link and pins with one whose key id matches" lives in "roflenox/test/keys.test.ts".
+- "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins" guards `r_key_change_loud`.
+- "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins" lives in "roflenox/test/keys.test.ts".
+- "a delegation to a name outside the parent's own names pins nothing, and the invited pull of that name's real owner still pins" guards `r_key_change_loud`.
+- "a delegation to a name outside the parent's own names pins nothing, and the invited pull of that name's real owner still pins" lives in "roflenox/test/keys.test.ts".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" guards `r_asserted_by`.
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" lives in "personal-node/src/mcp/main-graph.test.ts".
 
