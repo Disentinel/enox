@@ -428,13 +428,14 @@ Declared as facts:
 - `r_identity_names` binds as `must`.
 - `r_identity_names` says "users address identities by name; in normal operation no key, fingerprint or signature is shown or asked for".
 - `r_identity_names` is stated in "owner 2026-09-26".
-- `r_identity_names` says "a name is normalised by IDNA UTS 46 processing (NFC, case folding, punycode; the platform's domainToASCII) into its canonical ASCII form, which is the identity; its Unicode form is how it is shown; one format for people, hosts and agents".
+- `r_identity_names` says "a name is either a host-like name or user@domain, the form people already use for themselves; the domain, and a host-like name as a whole, are normalised by IDNA UTS 46 (the platform's domainToASCII); the part before the last @ is normalised by the PRECIS UsernameCaseMapped profile of RFC 8265 (width mapping, case mapping, NFC; letters, digits and printable ASCII without spaces); the canonical form is the identity and its Unicode form is how it is shown; one format for people, hosts and agents".
 - `r_identity_names` says "a name is refused when normalisation refuses it, when a label mixes letters of more than one script, when a label is longer than 63 or the whole longer than 253 characters, or when a label starts or ends with a hyphen".
 - `r_identity_names` says "every door that compares names — pinning, grants, delegation, follows, invitations, books — compares canonical forms through one function".
 - `r_identity_names` is to be checked by "a name with a space or a text-direction mark is refused, and names at the label and total length limits are accepted".
 - `r_identity_names` is to be checked by "Node-A, node-a and NODE-A are one identity, and so are a composed and a decomposed accent and a name with a zero-width mark".
 - `r_identity_names` is to be checked by "a label mixing Cyrillic and Latin letters is refused, while an all-Cyrillic name is accepted and shown in Cyrillic".
 - `r_identity_names` is to be checked by "a grant, a delegation and a follow written with a differently cased or composed name act on the same identity".
+- `r_identity_names` is to be checked by "vadim@rimych.ru, Vadim@Rimych.RU and a fullwidth spelling of it are one identity; vadim@римыч.рф is accepted and shown in Cyrillic; bot.vadim@rimych.ru is its delegated agent's name".
 - `r_identity_names` is to be checked by "an end-to-end pull between two nodes whose transcript contains no key material".
 - `r_keys_automatic` is about `identity`.
 - `r_keys_automatic` binds as `must`.
