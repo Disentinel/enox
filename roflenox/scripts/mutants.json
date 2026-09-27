@@ -1566,8 +1566,8 @@
      "  if (ctx.caller === null || ctx.caller !== own) { const g = await Graph.load(n, ctx.caller); if (ctx.caller) perCaller.set(ctx.caller, g); return g; }"
     ],
     [
-     "let kept: { owner: string; g: Graph; version: number } | null = null;",
-     "let kept: { owner: string; g: Graph; version: number } | null = null;\nconst perCaller = new Map<string, Graph>();"
+     "let kept: { node: RoflenoxNode; owner: string; g: Graph; version: number } | null = null;",
+     "let kept: { node: RoflenoxNode; owner: string; g: Graph; version: number } | null = null;\nconst perCaller = new Map<string, Graph>();"
     ]
    ],
    "red": [
@@ -1584,8 +1584,8 @@
      "  if (ctx.caller === null || ctx.caller !== own) { const g = await Graph.load(n, ctx.caller); if (ctx.caller) others.push(g); return g; }"
     ],
     [
-     "let kept: { owner: string; g: Graph; version: number } | null = null;",
-     "let kept: { owner: string; g: Graph; version: number } | null = null;\nconst others: Graph[] = [];"
+     "let kept: { node: RoflenoxNode; owner: string; g: Graph; version: number } | null = null;",
+     "let kept: { node: RoflenoxNode; owner: string; g: Graph; version: number } | null = null;\nconst others: Graph[] = [];"
     ],
     [
      "  return kept ? 1 : 0;",
@@ -1894,6 +1894,90 @@
    ],
    "red": [
     "a meaning search finds a fact that shares none of the query's words"
+   ]
+  },
+  {
+   "id": "M138",
+   "title": "r_uc_observability: a silent feed reads as an all-clear (no unknown)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        unknown.push(...await this.silentFeedsReadBy(sc.identity));\n",
+     ""
+    ]
+   ],
+   "red": [
+    "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why"
+   ]
+  },
+  {
+   "id": "M139",
+   "title": "r_uc_observability: a feed that spoke once is never silent",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (last !== undefined && now - last <= this.silenceSec * 1000) continue;",
+     "      if (last !== undefined) continue;"
+    ]
+   ],
+   "red": [
+    "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why"
+   ]
+  },
+  {
+   "id": "M140",
+   "title": "r_uc_observability: a feed that never spoke is taken as fine",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (last !== undefined && now - last <= this.silenceSec * 1000) continue;",
+     "      if (last === undefined || now - last <= this.silenceSec * 1000) continue;"
+    ]
+   ],
+   "red": [
+    "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why"
+   ]
+  },
+  {
+   "id": "M141",
+   "title": "r_uc_observability: integer targets are not numbers to the rules",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "    if (INTEGER.test(f.target)) out.push(",
+     "    if (false) out.push("
+    ]
+   ],
+   "red": [
+    "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why"
+   ]
+  },
+  {
+   "id": "M142",
+   "title": "r_uc_observability: silence measured from when the reader received, not when the host claimed",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    const claimed = Date.parse(v.manifest.claimed_at);",
+     "    const claimed = this.now();"
+    ]
+   ],
+   "red": [
+    "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why"
+   ]
+  },
+  {
+   "id": "M143",
+   "title": "r_session_eviction: the kept Enox view is shared by every node in the process",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "  if (kept && kept.node === n && kept.owner === own) {",
+     "  if (kept && kept.owner === own) {"
+    ]
+   ],
+   "red": [
+    "the MCP endpoint issues no session id and keeps no state per client"
    ]
   }
  ]

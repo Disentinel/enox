@@ -80,7 +80,10 @@ function filesFor(tree: string, names: string[]): string[] {
 
 function run(tree: string, names: string[]): Promise<{ failed: Set<string>; passed: Set<string>; out: string }> {
   const files = filesFor(tree, names);
-  const argv = ['--experimental-strip-types', '--no-warnings', '--test', '--test-concurrency=4', '--test-timeout=90000',
+  // In-process (isolation none): Node 22's runner can spin forever parsing a
+  // child's output when a multi-byte character straddles two chunks — seen
+  // here on a mutant whose failure diff carried an em dash (~15% of runs).
+  const argv = ['--experimental-strip-types', '--no-warnings', '--test', '--experimental-test-isolation=none', '--test-concurrency=4', '--test-timeout=90000',
     '--test-force-exit', ...names.map((n) => `--test-name-pattern=^${escape(n)}$`), ...files];
   return new Promise((ok) => {
     // A run started from inside `node --test` inherits NODE_TEST_CONTEXT and

@@ -18,7 +18,7 @@ const LITERAL = /^\s*([a-z][A-Za-z0-9_]*)\s*(?:\[([^\]]*)\])?\s*\(([\s\S]*)\)\s*
 /** What a reader may see of one book: all of it (`only` null), or only the
  *  facts whose ids are in `only` — and then only through fact-keyed relations. */
 export interface BookScope { identity: string; only: Set<string> | null }
-const FACT_KEYED = new Set(['edge']);
+const FACT_KEYED = new Set(['edge', 'edge_num']);
 
 // conf(F, C), persp(F, P), an edge question restricted to a perspective, and
 // answered(K, E, V) are answered by the NODE (src/assertions.ts; rule worlds),
@@ -65,7 +65,11 @@ export function bookRules(book: string, owner: string): string {
 export interface AskRow { identity: string; cells: (string | number)[] }
 /** `unknown`: books whose authors' rules ran out of their budget — their
  *  rows are what was derived before the wall, not the whole answer. */
-export interface AskAnswer { vars: string[]; rows: AskRow[]; unknown?: { identity: string; reason: string; budget: number; unit: string }[] }
+/** Why part of an answer is unknown: a rule world that ran out of its budget
+ *  (budget, unit), or a feed the answer reads that has gone silent (window,
+ *  last_report) — never an empty answer that reads like an all-clear. */
+export interface Unknown { identity: string; reason: string; budget?: number; unit?: string; window?: number; last_report?: string | null }
+export interface AskAnswer { vars: string[]; rows: AskRow[]; unknown?: Unknown[] }
 export interface Explanation { identity: string; holds: boolean; text: string; unknown?: { reason: string; budget: number; unit: string } }
 
 export class Engine {

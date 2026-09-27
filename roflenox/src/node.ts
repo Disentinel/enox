@@ -28,7 +28,7 @@ import {
 import { Log, writeFileAtomic, type Fault, type Receipt } from './log.ts';
 import {
   answeredRule, bookRules, DEFAULT_ROFL_BIN, Engine, mayReadRules, parseLiteral, resultRule, splitArgs, SYSTEM_BOOK,
-  type AskAnswer, type BookScope, type Explanation, type World,
+  type AskAnswer, type BookScope, type Explanation, type Unknown, type World,
 } from './engine.ts';
 import { verifyRequest } from './httpsig.ts';
 import { compileRule, RULE } from './rules.ts';
@@ -84,7 +84,12 @@ export interface NodeOptions {
   ruleBudget?: number;
   /** How old a static feed's checkpoint may be (default 24 h). */
   checkpointWindowSec?: number;
+  /** A followed feed with no batch claimed within this many seconds is
+   *  SILENT: answers that read it carry an unknown (default 1 h). */
+  silenceSec?: number;
 }
+
+export const DEFAULT_SILENCE_SEC = 3600;
 
 export const DEFAULT_CHECKPOINT_WINDOW_SEC = 24 * 3600;
 
@@ -174,6 +179,9 @@ export class RoflenoxNode {
   private version = 0;
   /** The last admissions, for views that apply writes instead of rebuilding. */
   private readonly recent: { version: number; identity: string; facts: Fact[]; seq: number }[] = [];
+  /** The newest claimed_at of each identity's batches (ms): when it last spoke. */
+  private readonly lastClaimed = new Map<string, number>();
+  private readonly silenceSec: number;
   private recentFacts = 0;
   /** RFC 9421 nonces seen on signed requests: nonce → expiry (ms). */
   private readonly requestNonces = new Map<string, number>();
@@ -187,6 +195,7 @@ export class RoflenoxNode {
     this.freshnessMs = (o.freshnessSec ?? DEFAULT_FRESHNESS_SEC) * 1000;
     this.publicUrl = o.publicUrl ? new URL(o.publicUrl).origin : null;
     this.ruleBudget = o.ruleBudget ?? DEFAULT_RULE_BUDGET;
+    this.silenceSec = o.silenceSec ?? DEFAULT_SILENCE_SEC;
     this.checkpointWindowMs = (o.checkpointWindowSec ?? DEFAULT_CHECKPOINT_WINDOW_SEC) * 1000;
   }
 
@@ -403,6 +412,8 @@ export class RoflenoxNode {
     if (res.length) this.results.set(id, [...(this.results.get(id) ?? []), toRofl(res, bookOf(id), seq)]);
     if (v.rules.length) this.userRules.set(id, [...(this.userRules.get(id) ?? []), ...v.rules.map((text) => ({ text, mirrored }))]);
     this.version++;
+    const claimed = Date.parse(v.manifest.claimed_at);
+    if (claimed > (this.lastClaimed.get(id) ?? -Infinity)) this.lastClaimed.set(id, claimed);
     this.recent.push({ version: this.version, identity: id, facts: v.facts, seq });
     this.recentFacts += v.facts.length;
     while (this.recentFacts > RECENT_FACTS) this.recentFacts -= this.recent.shift()!.facts.length;
@@ -751,6 +762,7 @@ export class RoflenoxNode {
           if (!seen.has(k)) { seen.add(k); ans.rows.push(row); }
         }
         if (w.partial) unknown.push({ identity: sc.identity, reason: w.holes.join('; '), budget: this.ruleBudget, unit: 'steps' });
+        unknown.push(...await this.silentFeedsReadBy(sc.identity));
       }
       if (unknown.length) ans.unknown = unknown;
       ans.rows.sort((x, y) => { const p = JSON.stringify([x.identity, x.cells]), q = JSON.stringify([y.identity, y.cells]); return p < q ? -1 : p > q ? 1 : 0; });
@@ -847,6 +859,27 @@ export class RoflenoxNode {
     const facts = await this.engine.sysRows(`edge[${b}](F, ${roflString(author)}, "roflenox:trust_rules", T)`);
     const cur = this.assertions.of(op);
     return facts.some((r) => (cur.get(String(r[0]))?.C ?? 0) > 0) ? all : [];
+  }
+
+  /** The feeds `author` follows, that its rules read, and that have gone
+   *  SILENT: nothing claimed within the silence window, or never anything.
+   *  An answer that reads such a feed is not an all-clear, so each one is an
+   *  unknown beside the rows (r_uc_observability). */
+  private async silentFeedsReadBy(author: string): Promise<Unknown[]> {
+    const read = new Set([...(await this.runnableRules(author)).join('\n').matchAll(/\[(b_[0-9a-f]{16})\]/g)].map((m) => m[1]!));
+    if (read.size === 0 || !this.chains.has(author)) return [];
+    const cur = this.assertions.of(author);
+    const follows = await this.engine.sysRows(`edge[${bookOf(author)}](F, P, "roflenox:follow", U)`);
+    const followed = [...new Set(follows.filter((r) => (cur.get(String(r[0]))?.C ?? 0) > 0).map((r) => String(r[1])))].sort();
+    const now = this.now();
+    const out: Unknown[] = [];
+    for (const p of followed.filter((x) => read.has(bookOf(x)))) {
+      const last = this.lastClaimed.get(p);
+      if (last !== undefined && now - last <= this.silenceSec * 1000) continue;
+      out.push({ identity: p, reason: last === undefined ? 'silent_feed: nothing ever received from it' : `silent_feed: nothing claimed for ${Math.floor((now - last) / 1000)} s`,
+        window: this.silenceSec, last_report: last === undefined ? null : new Date(last).toISOString() });
+    }
+    return out;
   }
 
   /** The author's rule world, rebuilt when anything was admitted since, and

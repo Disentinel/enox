@@ -107,6 +107,24 @@ test('the MCP endpoint issues no session id and keeps no state per client', asyn
       for (const m of [init, stats]) assert.equal((await post(a.url, '/mcp', m, { as: c })).status, 200);
     }
     assert.equal(heldViews(), held0, 'no view per client');
+    // The one view kept is THIS node's: another node in the same process whose
+    // operator has the same name never answers from it.
+    const statsAt = async (url: string, tok: string) => {
+      const r = await fetch(`${url}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${tok}` },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'graph_stats', arguments: {} } }) });
+      return JSON.parse(((await r.json()) as { result: { content: { text: string }[] } }).result.content[0]!.text) as { total_nodes: number };
+    };
+    const twin = await start(tmpDir('mcp-stateless-twin'), 'node-a');
+    try {
+      await post(a.url, '/op/assert', { facts: [{ source: 'enox://x/e/1', relation: 'enox:label', target: 'Only on a', perspective: 'p', confidence: 1 }] });
+      // Same log version on both, so only WHICH node it is can tell them apart.
+      for (let i = 0; twin.node.logVersion() < a.node.logVersion(); i++) {
+        await post(twin.url, '/op/assert', { facts: [{ source: `t${i}`, relation: 'r', target: 'x', perspective: 'p', confidence: 1 }] });
+      }
+      assert.equal(twin.node.logVersion(), a.node.logVersion());
+      assert.equal((await statsAt(a.url, token)).total_nodes, 1);
+      assert.equal((await statsAt(twin.url, twin.node.operatorToken())).total_nodes, 0, 'the twin does not read a\'s view');
+    } finally { await twin.stop(); }
     // And in the source: no session header, and no table at module level that
     // could hold a client's state.
     for (const f of ['src/mcp.ts', 'src/http.ts', 'src/enox-ops.ts']) {

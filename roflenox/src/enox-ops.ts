@@ -28,12 +28,14 @@ function node(ctx: Ctx): RoflenoxNode {
  *  from the node's record of recent admissions — no rebuild (r_batch_write).
  *  Any other caller's view depends on its grants and exports and is built for
  *  the call and dropped: the node keeps no state per client (r_session_eviction). */
-let kept: { owner: string; g: Graph; version: number } | null = null;
+let kept: { node: RoflenoxNode; owner: string; g: Graph; version: number } | null = null;
 async function graph(ctx: Ctx): Promise<Graph> {
   const n = node(ctx);
   const own = n.identity?.name;
   if (ctx.caller === null || ctx.caller !== own) return Graph.load(n, ctx.caller);
-  if (kept && kept.owner === own) {
+  // The kept view is of ONE node: another node in this process (a test, an
+  // embedding host) with an operator of the same name never reads it.
+  if (kept && kept.node === n && kept.owner === own) {
     if (kept.version === n.logVersion()) return kept.g.ensure();
     const since = n.admittedSince(kept.version);
     if (since) {
@@ -43,7 +45,7 @@ async function graph(ctx: Ctx): Promise<Graph> {
     }
   }
   const g = await Graph.load(n, own);
-  kept = { owner: own, g, version: n.logVersion() };
+  kept = { node: n, owner: own, g, version: n.logVersion() };
   return g;
 }
 

@@ -52,6 +52,8 @@ export const RESERVED = ['roflenox:rule', 'roflenox:trust_rules', GRANT, DELEGAT
  *  export that NAMES the relation publishes it. The export rule is what a
  *  reader needs to know what is published, and says nothing else. */
 export const NOT_BY_WILDCARD = RESERVED.filter((r) => r !== EXPORT);
+/** An integer the engine holds exactly (safe range, no leading zeros). */
+const INTEGER = /^-?(0|[1-9]\d{0,14})$/;
 const TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 export class Refusal extends Error {
@@ -219,6 +221,9 @@ export function toRofl(facts: Fact[], book: string, seq: number, withAsserted = 
   for (const f of facts) {
     const id = roflString(factId(f));
     out.push(`edge[${book}](${id}, ${roflString(f.source)}, ${roflString(f.relation)}, ${roflString(f.target)}).`);
+    // A target that is an integer is also a NUMBER, so rules can compare and
+    // count (592 restarts > 3 a day): edge_num(F, S, R, N) beside the edge.
+    if (INTEGER.test(f.target)) out.push(`edge_num[${book}](${id}, ${roflString(f.source)}, ${roflString(f.relation)}, ${f.target}).`);
     if (withAsserted) out.push(`asserted[${book}](${id}, ${roflString(f.perspective)}, ${permille(f.confidence)}, ${seq}).`);
     if (f.relation === GRANT) out.push(`grant[${book}](${roflString(f.source)}, ${Math.floor(Date.parse(f.target) / 1000)}).`);
     if (f.relation === DELEGATE) out.push(`delegate[${book}](${roflString(f.source)}, ${Math.floor(Date.parse(f.target) / 1000)}).`);
