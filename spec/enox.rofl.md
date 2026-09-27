@@ -434,6 +434,8 @@ Declared as facts:
 - `r_chain` is stated in "best practice, sigchain and transparency logs".
 - `r_chain` is to be checked by "a batch inserted into the middle of a chain is rejected".
 - `r_chain` is to be checked by "a batch whose prev was rewritten after signing is rejected".
+- `r_chain` says "two validly signed batches of one identity that name the same prev are kept as proof of a fork, and every answer over that book says the identity forked".
+- `r_chain` is to be checked by "a node given a second signed successor of the same batch keeps both signatures as fork proof and marks every answer over that book".
 - `r_admit_by_signer` is about `identity`.
 - `r_admit_by_signer` binds as `must`.
 - `r_admit_by_signer` says "an admitted fact lands only in the book of the identity that signed it; an unsigned or badly signed batch is not admitted at all".
@@ -658,6 +660,7 @@ The queue:
 - `r_static_feed` is queued at 75.
 - `r_identity_names` is queued at 76.
 - `r_default_deny` is queued at 77.
+- `r_chain` is queued at 78.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 - `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
 - `r_key_change_loud` is rejected at "6bfb1bbf0121614ca309293042adf2231ecc31d1".
