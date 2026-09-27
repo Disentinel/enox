@@ -483,6 +483,8 @@ Declared as facts:
 - `r_rotation` is to be checked by "a batch signed after its key's invalid_from is refused, and one dated 301 seconds past its receipt is refused as future-dated".
 - `r_rotation` says "claimed times within one identity's chain never go backwards, and once a batch signed by a newer key stands in the chain, no older key appends to it".
 - `r_rotation` is to be checked by "after a batch signed by the new key, a batch signed by the rotated key is refused whatever time it claims, and a batch claiming a time earlier than its predecessor is refused".
+- `r_rotation` says "the publishing client claims the later of its clock and its previous batch's claimed time, as a hybrid logical clock does, so an honest publisher whose clock steps back keeps publishing".
+- `r_rotation` is to be checked by "a publisher whose clock steps back publishes on without a refusal, each batch claiming no earlier than the one before".
 - `r_rotation` is to be checked by "a rotation in the middle of a chain is followed without a warning".
 - `r_recovery` is about `identity`.
 - `r_recovery` binds as `must`.
@@ -723,6 +725,7 @@ The queue:
 - `r_backup` is accepted at "d8f57a54ae23621d1c63757978d8ee7b69098e18".
 - `r_enox_compat` is accepted at "047c616173ff5b28ed1f33cfb24ff4aec1d7febc".
 - `r_mutation_gate` is accepted at "3ca019fb84ae9d2aaeea0979e21e86715ec0b8b8".
+- `r_rotation` is rejected at "07e4c49652e4dc5c8277573a363ecbdeecb2ef6d".
 - `r_enox_compat` is rejected at "63f344e6d8b0cc2c6b578bbd558a2dbaad21e357".
 - `r_mutation_gate` is rejected at "b6b67403f2e7a5c645be914d5f45754273e77418".
 - `r_identity_names` is rejected at "4800a6841d8476258cb98c07a16cfaf815353c4e".
