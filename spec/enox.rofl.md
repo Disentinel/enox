@@ -31,6 +31,7 @@ Declared as facts:
 - <a id="queued"></a>A requirement R is queued at a rank N
 - <a id="accepted"></a>A requirement R is accepted at a revision V
 - <a id="rejected"></a>A requirement R is rejected at a revision V
+- <a id="resists"></a>A requirement R resists an adversary A
 
 > Вид требования, закрытый список: `feature` — что можно делать; `model` — что
 > такое данные; `security` — защита от враждебной стороны; `reliability` —
@@ -492,6 +493,7 @@ Declared as facts:
 - `r_default_deny` says "nothing leaves a node unless an export rule derives it, and the leak audit runs before signing".
 - `r_default_deny` is stated in "owner 2026-09-26".
 - `r_default_deny` is to be checked by "a fact with no export rule never appears in a published batch".
+- `r_default_deny` is to be checked by "an anonymous caller of every open endpoint learns the node's own name and liveness and nothing about the identities, facts or batches it holds".
 - `r_withheld_unguessable` is about `access`.
 - `r_withheld_unguessable` binds as `must`.
 - `r_withheld_unguessable` says "a withheld batch reveals nothing that confirms a guess of its content: its digest commits to a secret random salt that travels only with the content".
@@ -552,20 +554,31 @@ Kinds of the requirements:
 - `r_semantic_search` is of `feature`.
 - `r_uc_observability` is of `feature`.
 - `r_foreign_rules_opt_in` is of `security`.
+- `r_foreign_rules_opt_in` resists "an author whose book this node holds, who wants its code run here by mirror, by posting, or through a delegate".
 - `r_rule_budget` is of `reliability`.
 - `r_answer_limits` is of `reliability`.
 - `r_import` is of `feature`.
 - `r_enox_compat` is of `feature`.
 - `r_signed_batch` is of `security`.
+- `r_signed_batch` resists "anyone on the path, who alters a batch or reuses its signature in another protocol".
 - `r_chain` is of `security`.
+- `r_chain` resists "a publisher or a mirror that reorders, drops or rewrites history within one identity".
 - `r_admit_by_signer` is of `security`.
+- `r_admit_by_signer` resists "any signer, through any admitting op, who wants a fact to land in another identity's book".
 - `r_freshness` is of `security`.
+- `r_freshness` resists "a replayer holding an old validly signed batch".
 - `r_no_future_docs` is of `security`.
+- `r_no_future_docs` resists "a signer who dates a document ahead to outlive a later revocation or rotation".
 - `r_revocation_bound` is of `security`.
+- `r_revocation_bound` resists "the holder of a stolen and since revoked key, who backdates new batches".
 - `r_key_change_loud` is of `security`.
+- `r_key_change_loud` resists "anyone, including an identity this node already trusts, who wants a name here pinned to a key its owner does not hold".
 - `r_default_deny` is of `security`.
+- `r_default_deny` resists "an anonymous or granted caller of ANY endpoint, who wants to learn what no export rule derives, facts or metadata".
 - `r_withheld_unguessable` is of `security`.
+- `r_withheld_unguessable` resists "a reader of a withheld manifest who guesses its content".
 - `r_challenge_stateless` is of `security`.
+- `r_challenge_stateless` resists "a flooder who wants to exhaust memory or deny honest mirrors".
 - `r_uri_prefix_stable` is of `reliability`.
 - `r_snapshot_is_cache` is of `reliability`.
 - `r_executors_off_read_path` is of `reliability`.
@@ -644,6 +657,7 @@ The queue:
 - `r_rotation` is queued at 74.
 - `r_static_feed` is queued at 75.
 - `r_identity_names` is queued at 76.
+- `r_default_deny` is queued at 77.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 - `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
 - `r_key_change_loud` is rejected at "6bfb1bbf0121614ca309293042adf2231ecc31d1".
@@ -852,7 +866,16 @@ The checks that exist:
 
 <a id="unchecked"></a>A requirement R is unchecked if R binds as a force F, unless R is checked.
 
-<a id="underspecified"></a>A requirement R is underspecified if R leaves open some question.
+<a id="underspecified"></a>A requirement R is underspecified either:
+1. if R leaves open some question;
+2. if R is unthreatened.
+
+> Требование безопасности без названного противника — недоспецифицировано: оно
+> описывает одну дверь, и реализация закрывает ровно её (r_key_change_loud,
+> 2026-09-27: два отказа подряд). Противник формулируется как «кто, что может,
+> чего добивается», а `says` — как инвариант над состоянием по ВСЕМ путям.
+
+<a id="unthreatened"></a>A requirement R is unthreatened if R is of `security`, unless R resists some adversary.
 
 <a id="unsourced"></a>A requirement R is unsourced if R says some text, unless R is stated in some document.
 
