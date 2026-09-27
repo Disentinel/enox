@@ -630,6 +630,7 @@ Rejected after verification:
 
 - `r_uc_observability` is rejected at "ef2147d2f7ff0e6faa68971239964306da5a4c0d".
 - `r_uc_observability` is rejected at "1ab2863c26a2db55074d9d7dbd4a72bcf4f46aa0".
+- `r_uc_observability` is accepted at "6f0bfeb26babcdf43d877d105c1a011a8efec47f".
 - `r_semantic_search` is rejected at "4170fad256ebfbac06d77bc0fefac9d2fac388d2".
 - `r_relation_primary` is rejected at "c7f2ea68049192b5ad4dffb5164ae8ef10fd14a3".
 
