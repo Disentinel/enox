@@ -96,3 +96,7 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_domain_vouch`.
 - `roflenox_core` finished `r_domain_vouch` at "e63b41e1564229c02ffde8d8463f71ef03984823".
 - `roflenox_core` takes `r_freshness`.
+- `roflenox_core` finished `r_freshness` at "90c44041770a0cd1c0c83595b88f17c9a5e4519c".
+- `roflenox_core` takes `r_domain_vouch`.
+- `roflenox_core` finished `r_domain_vouch` at "806c6af8065554dfda58a02fa06d1e7f591fdc32".
+- `roflenox_core` takes `r_no_orphan_tests`.

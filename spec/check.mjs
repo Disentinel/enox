@@ -346,8 +346,11 @@ export function check(specPath, { roflDir, root } = {}) {
     const files = testFiles(root);
     const listed = runnerList(root, files);
     let unreadable = 0, runnerOnly = 0, scannerOnly = 0, orphans = 0, scanned = 0, ran = 0;
+    // Linked by a guards fact whose test lives in this file — or, while its
+    // requirement is in review (not yet accepted), by a planned check naming
+    // it. Once accepted, a plan links nothing: it needs its own guards line.
     const guarded = (name, file) => spec.guards.some((g) => g.test === name && (spec.lives.get(name) ?? []).some((h) => h.file === file))
-      || spec.plans.some((p) => p.text === name);
+      || spec.plans.some((p) => p.text === name && !spec.accepted.has(p.id));
     if (listed.error) det.push(`runner list: ${listed.error}`);
     for (const f of files) {
       const found = scanCases(readFileSync(join(root, f), 'utf8'));
@@ -370,9 +373,18 @@ export function check(specPath, { roflDir, root } = {}) {
       for (const n of left) { scannerOnly++; det.push(`${f}: the scanner reads "${n}", the runner does not list it`); }
       for (const n of new Set(statics)) if (!guarded(n, f)) { orphans++; det.push(`orphan: "${n}" in ${f} guards no requirement`); }
     }
-    const unguarded = [...spec.accepted].filter((id) => !spec.guards.some((g) => g.id === id
-      && (spec.lives.get(g.test) ?? []).some((h) => existsSync(join(root, h.file)) && testNames(readFileSync(join(root, h.file), 'utf8')).some((t) => t.match(g.test)))));
-    for (const id of unguarded) det.push(`accepted ${id} has no guard naming an existing test`);
+    // An accepted requirement: every one of its planned checks guarded, by an
+    // existing test — and at least one guard at all.
+    const exists = (test) => (spec.lives.get(test) ?? []).some((h) => existsSync(join(root, h.file))
+      && testNames(readFileSync(join(root, h.file), 'utf8')).some((t) => t.match(test)));
+    const guardedFor = (id, test) => spec.guards.some((g) => g.id === id && g.test === test) && exists(test);
+    const unguarded = [];
+    for (const id of spec.accepted) {
+      const plans = spec.plans.filter((p) => p.id === id);
+      for (const p of plans) if (!guardedFor(id, p.text)) unguarded.push(`accepted ${id}: planned check "${p.text}" is not guarded by an existing test`);
+      if (!spec.guards.some((g) => g.id === id && exists(g.test))) unguarded.push(`accepted ${id} has no guard naming an existing test`);
+    }
+    det.push(...unguarded);
     record(!listed.error && unreadable + runnerOnly + scannerOnly + orphans + unguarded.length === 0 && scanned > 0,
       `6 cases: files ${files.length}, tests ${scanned} (runner ${ran}); unreadable ${unreadable}, runner-only ${runnerOnly}, scanner-only ${scannerOnly}, orphans ${orphans}, accepted unguarded ${unguarded.length}`, det);
   }

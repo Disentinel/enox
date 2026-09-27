@@ -3392,6 +3392,104 @@
    "red": [
     "a live batch dated 301 seconds ahead of its receipt is refused as future-dated, while one dated 301 seconds behind is refused as stale with a request to re-attest"
    ]
+  },
+  {
+   "id": "M252",
+   "title": "r_domain_vouch: an IP literal or a single label is looked up and asked",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "    if (host === '' || isIP(host) !== 0 || !host.includes('.')) return null;",
+     "    if (host === '') return null;"
+    ]
+   ],
+   "red": [
+    "an anonymous first contact as user@127.0.0.1, user@localhost or a user at a name resolving to a private address makes no outbound connection"
+   ]
+  },
+  {
+   "id": "M253",
+   "title": "r_domain_vouch: an internal address is connected to",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "    if (!addrs || addrs.length === 0 || !addrs.every((a) => allow(a.address, a.family))) return null;",
+     "    if (!addrs || addrs.length === 0) return null;"
+    ]
+   ],
+   "red": [
+    "an anonymous first contact as user@127.0.0.1, user@localhost or a user at a name resolving to a private address makes no outbound connection"
+   ]
+  },
+  {
+   "id": "M254",
+   "title": "r_domain_vouch: one public address among internal ones is enough",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "!addrs.every((a) => allow(a.address, a.family))",
+     "!addrs.some((a) => allow(a.address, a.family))"
+    ]
+   ],
+   "red": [
+    "an anonymous first contact as user@127.0.0.1, user@localhost or a user at a name resolving to a private address makes no outbound connection"
+   ]
+  },
+  {
+   "id": "M255",
+   "title": "r_domain_vouch: the connection resolves the name again",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "      const req = https.get({ host, servername: host, port: this.t.port ?? 443, path, ca: this.t.ca, lookup: fixed,",
+     "      const req = https.get({ host, servername: host, port: this.t.port ?? 443, path, ca: this.t.ca, lookup,"
+    ]
+   ],
+   "red": [
+    "an anonymous first contact as user@127.0.0.1, user@localhost or a user at a name resolving to a private address makes no outbound connection"
+   ]
+  },
+  {
+   "id": "M256",
+   "title": "r_domain_vouch: no answer is cached",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "    if (hit && this.now() - hit.at < (this.t.cacheMs ?? 300_000)) return hit.doc;",
+     "    if (false) return hit!.doc;"
+    ]
+   ],
+   "red": [
+    "a flood of first contacts naming many domains opens a bounded number of domain lookups at a time and repeats none within the cache time"
+   ]
+  },
+  {
+   "id": "M257",
+   "title": "r_domain_vouch: lookups are not bounded",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "    if (this.inFlight < IN_FLIGHT) { this.inFlight++; return Promise.resolve(); }",
+     "    this.inFlight++; return Promise.resolve();"
+    ]
+   ],
+   "red": [
+    "a flood of first contacts naming many domains opens a bounded number of domain lookups at a time and repeats none within the cache time"
+   ]
+  },
+  {
+   "id": "M258",
+   "title": "r_domain_vouch: the node's addresses count as public",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "    const allow = this.t.allowAddress ?? isPublic;",
+     "    const allow = this.t.allowAddress ?? (() => true);"
+    ]
+   ],
+   "red": [
+    "an anonymous first contact as user@127.0.0.1, user@localhost or a user at a name resolving to a private address makes no outbound connection"
+   ]
   }
  ]
 }

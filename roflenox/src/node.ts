@@ -30,7 +30,7 @@ import {
   answeredRule, bookRules, DEFAULT_ROFL_BIN, Engine, mayReadRules, parseLiteral, resultRule, splitArgs, SYSTEM_BOOK,
   type AskAnswer, type BookScope, type Explanation, type Unknown, type World,
 } from './engine.ts';
-import { domainDocument, type DomainTransport } from './domain.ts';
+import { DomainVouch, type DomainTransport } from './domain.ts';
 import { verifyRequest } from './httpsig.ts';
 import { compileRule, RULE } from './rules.ts';
 import { RESULT } from './executor.ts';
@@ -196,7 +196,7 @@ export class RoflenoxNode {
   /** The newest claimed_at of each identity's batches (ms): when it last spoke. */
   private readonly lastClaimed = new Map<string, number>();
   private readonly silenceSec: number;
-  private readonly domainVouch: DomainTransport | null;
+  private readonly domainVouch: DomainVouch | null;
   private recentFacts = 0;
   /** RFC 9421 nonces seen on signed requests: nonce → expiry (ms). */
   private readonly requestNonces = new Map<string, number>();
@@ -211,7 +211,7 @@ export class RoflenoxNode {
     this.publicUrl = o.publicUrl ? new URL(o.publicUrl).origin : null;
     this.ruleBudget = o.ruleBudget ?? DEFAULT_RULE_BUDGET;
     this.silenceSec = o.silenceSec ?? DEFAULT_SILENCE_SEC;
-    this.domainVouch = o.domainVouch === true ? {} : o.domainVouch || null;
+    this.domainVouch = o.domainVouch ? new DomainVouch(o.domainVouch === true ? {} : o.domainVouch, () => this.now()) : null;
     this.checkpointWindowMs = (o.checkpointWindowSec ?? DEFAULT_CHECKPOINT_WINDOW_SEC) * 1000;
   }
 
@@ -452,7 +452,7 @@ export class RoflenoxNode {
     // Its domain, when the operator lets domains vouch: the first document it
     // serves must be exactly the one offered.
     if (this.domainVouch && identity.includes('@')) {
-      const served = await domainDocument(identity, this.domainVouch);
+      const served = await this.domainVouch.document(identity);
       if (served && typeof served === 'object' && canonicalize(served) === canonicalize(first)) return;
     }
     throw notVouched(identity);

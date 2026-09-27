@@ -10,9 +10,9 @@ import * as https from 'node:https';
 import * as path from 'node:path';
 import type { LookupFunction } from 'node:net';
 import type { IdentityDoc, LocalIdentity } from '../src/identity.ts';
-import type { DomainTransport } from '../src/domain.ts';
+import { DomainVouch, isPublic, type DomainTransport } from '../src/domain.ts';
 import { listen } from '../src/http.ts';
-import { batch, fact, get, identityAt, invitation, iso, post, pull, start, tmpDir, exportRule } from './helpers.ts';
+import { batch, fact, get, identityAt, invitation, iso, post, pull, start, T0, tmpDir, exportRule } from './helpers.ts';
 
 const TLS = path.join(import.meta.dirname, 'fixtures', 'tls');
 const pem = (f: string) => fs.readFileSync(path.join(TLS, f));
@@ -35,10 +35,13 @@ async function webServer(docs: Record<string, Record<string, unknown>>, o: { tls
   const server = o.tls === 'none' ? http.createServer(handler)
     : https.createServer({ key: pem(o.tls === 'trusted' ? 'host.key' : 'untrusted.key'), cert: pem(o.tls === 'trusted' ? 'host.pem' : 'untrusted.pem') }, handler);
   const url = await listen(server as http.Server, 0);
-  return { port: Number(new URL(url).port), close: () => new Promise<void>((r) => server.close(() => r())) };
+  return { port: Number(new URL(url).port), close: () => new Promise<void>((r) => server.close(() => r())),
+    onConnection: (f: () => void) => { server.on('connection', f); } };      // any TCP connection, before TLS
 }
 
-const transport = (port: number): DomainTransport => ({ ca: pem('ca.pem'), lookup, port });
+/** The local test server is on loopback: these transports let it through
+ *  (allowAddress); the SSRF test below keeps the default, public only. */
+const transport = (port: number): DomainTransport => ({ ca: pem('ca.pem'), lookup, port, allowAddress: () => true });
 const firstDoc = (me: LocalIdentity): IdentityDoc => me.identityChain()[0]!;
 /** A stranger's own signed batch, posted with its identity attached: a first contact. */
 const contact = (url: string, me: LocalIdentity, t: number) =>
@@ -90,4 +93,80 @@ test('a domain vouches for no name outside it, never over plain HTTP or across a
     for (const n of [node, overHttp, badCert]) await n.stop();
     for (const w of [web, plain, selfSigned]) await w.close();
   }
+});
+
+test('an anonymous first contact as user@127.0.0.1, user@localhost or a user at a name resolving to a private address makes no outbound connection', async () => {
+  const web = await webServer({}, { tls: 'trusted' });
+  let connections = 0;
+  const asked: string[] = [];
+  const where: Record<string, { address: string; family: number }[]> = {
+    'intranet.example.org': [{ address: '127.0.0.1', family: 4 }], 'office.example.org': [{ address: '10.0.0.7', family: 4 }],
+    'shared.example.org': [{ address: '100.64.1.1', family: 4 }], 'linklocal.example.org': [{ address: '169.254.169.254', family: 4 }],
+    // One public address beside an internal one: not all public, so none is used.
+    'mixed.example.org': [{ address: '127.0.0.1', family: 4 }, { address: '203.0.113.9', family: 4 }],
+    'v6.example.org': [{ address: '::1', family: 6 }],
+  };
+  const spy = ((host: string, _o: unknown, cb: (e: Error | null, a?: unknown) => void) => {
+    asked.push(host);
+    cb(null, where[host] ?? [{ address: '127.0.0.1', family: 4 }]);
+  }) as unknown as LookupFunction;
+  const node = await start(tmpDir('ssrf-n'), 'hub', { domainVouch: { ca: pem('ca.pem'), lookup: spy, port: web.port } });   // public addresses only
+  try {
+    web.onConnection(() => { connections++; });
+    for (const host of ['127.0.0.1', 'localhost', ...Object.keys(where)]) {
+      const me = identityAt(tmpDir('ssrf-u'), `user@${host}`);
+      assert.equal((await contact(node.url, me, node.clock.t)).body.error, 'not_vouched', host);
+    }
+    assert.equal(connections, 0, 'no connection was made');
+    // Control of the classification itself: public addresses are public.
+    assert.deepEqual(['8.8.8.8', '203.0.113.9', '2001:4860::8888', '::ffff:8.8.8.8'].map((x) => isPublic(x, x.includes(':') ? 6 : 4)), [true, true, true, true]);
+    assert.deepEqual(['127.0.0.1', '10.1.2.3', '172.16.0.1', '192.168.1.1', '100.64.0.1', '169.254.169.254', '224.0.0.1', '::1', 'fd00::1', 'fe80::1', '::ffff:127.0.0.1']
+      .map((x) => isPublic(x, x.includes(':') ? 6 : 4)), Array(11).fill(false));
+    assert.deepEqual(asked.sort(), Object.keys(where).sort(), 'an IP literal or a single label is not even looked up');
+    // The connection goes to the address that was checked, never to a second
+    // resolution (a name that rebinds between the check and the connect).
+    let asks = 0;
+    const rebinding = ((_h: string, _o: unknown, cb: (e: null, a: unknown) => void) => {
+      asks++;
+      cb(null, [{ address: asks === 1 ? '127.0.0.1' : '10.9.9.9', family: 4 }]);
+    }) as unknown as LookupFunction;
+    const checked = await start(tmpDir('ssrf-r'), 'hub', { domainVouch: { ca: pem('ca.pem'), lookup: rebinding, port: web.port, allowAddress: (x) => x === '127.0.0.1' } });
+    try {
+      await contact(checked.url, identityAt(tmpDir('ssrf-rb'), 'user@rebind.example.org'), checked.clock.t);
+      assert.equal(asks, 1, 'resolved once, connected to what was checked');
+      assert.equal(connections, 1, 'the one connection is to the checked address');
+    } finally { await checked.stop(); }
+  } finally { await node.stop(); await web.close(); }
+});
+
+test('a flood of first contacts naming many domains opens a bounded number of domain lookups at a time and repeats none within the cache time', async () => {
+  const web = await webServer({}, { tls: 'trusted' });
+  let inFlight = 0, most = 0;
+  const counts = new Map<string, number>();
+  const slow = ((host: string, _o: unknown, cb: (e: Error | null, a?: unknown) => void) => {
+    counts.set(host, (counts.get(host) ?? 0) + 1);
+    most = Math.max(most, ++inFlight);
+    setTimeout(() => { inFlight--; cb(null, [{ address: '127.0.0.1', family: 4 }]); }, 20);
+  }) as unknown as LookupFunction;
+  const clock = { t: T0 };
+  const dv = new DomainVouch({ ca: pem('ca.pem'), lookup: slow, port: web.port, allowAddress: () => true, cacheMs: 60_000 }, () => clock.t);
+  const node = await start(tmpDir('flood-n'), 'hub', { clock, domainVouch: { ca: pem('ca.pem'), lookup: slow, port: web.port, allowAddress: () => true, cacheMs: 60_000 } });
+  try {
+    // Forty names at once, straight at the lookup layer: a few at a time.
+    const names = Array.from({ length: 40 }, (_, i) => `u@d${i}.example.org`);
+    await Promise.all(names.map((n) => dv.document(n)));
+    assert.ok(most >= 2 && most <= 4, `at most 4 lookups at a time (saw ${most})`);
+    // Asked again within the cache time: no lookup; after it: one each.
+    await Promise.all(names.map((n) => dv.document(n)));
+    assert.ok([...counts.values()].every((c) => c === 1), 'no repeat within the cache time');
+    clock.t += 60_001;
+    await dv.document(names[0]!);
+    assert.equal(counts.get('d0.example.org'), 2);
+    // Through the node: a flood of anonymous first contacts, one domain each, twice.
+    counts.clear(); most = 0;
+    const people = Array.from({ length: 12 }, (_, i) => identityAt(tmpDir('flood-u'), `u${i}@n${i}.example.org`));
+    for (let round = 0; round < 2; round++) await Promise.all(people.map((p) => contact(node.url, p, node.clock.t)));
+    assert.ok(most <= 4, `at most 4 at a time (saw ${most})`);
+    assert.ok([...counts.values()].every((c) => c === 1) && counts.size === 12, 'each domain looked up once');
+  } finally { await node.stop(); await web.close(); }
 });

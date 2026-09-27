@@ -92,6 +92,9 @@ let baselineRun;
 const baseline = () => (baselineRun ??= runCheck(SPEC));
 const brokenGuards = (out) => Number((checkLine(out, 4).match(/broken (\d+)\)/) ?? [])[1]);
 
+const orphans = (out) => Number((checkLine(out, 6).match(/orphans (\d+)/) ?? [])[1]);
+const unguardedCount = (out) => Number((checkLine(out, 6).match(/accepted unguarded (\d+)/) ?? [])[1]);
+
 const checkLine = (out, n) => out.split('\n').find((l) => new RegExp(`^(PASS|FAIL) ${n} `).test(l)) ?? '';
 
 // Remove exactly one line matching re; fails loudly if the spec no longer has it.
@@ -262,13 +265,15 @@ describe('spec gate', { concurrency: true }, () => {
     const orphan = { 'roflenox/test/zz-orphan.test.ts': "import { test } from 'node:test';\ntest('an orphan case zq9', () => {});\n" };
     const bad = await withTree(orphan);
     assert.notEqual(bad.code, 0);
-    assert.match(checkLine(bad.out, 6), /^FAIL 6 cases: .* orphans 1,/, bad.out);
+    assert.match(checkLine(bad.out, 6), /^FAIL 6 cases: /, bad.out);
     assert.ok(bad.out.includes('orphan: "an orphan case zq9" in roflenox/test/zz-orphan.test.ts guards no requirement'), bad.out);
-    // Linked by a guard that lives in that file: the same tree passes.
+    // Linked by a guard that lives in that file: that orphan is gone, and the
+    // count is back to the honest tree's.
     const good = await withTree(orphan, (src) => afterFirstGuard(src, [
       '- "an orphan case zq9" guards `r_zero_deps`.', '- "an orphan case zq9" lives in "roflenox/test/zz-orphan.test.ts".']));
-    assert.match(checkLine(good.out, 6), /^PASS 6 cases: .* orphans 0,/, good.out);
-    assert.equal(good.code, 0, good.out);
+    assert.ok(!good.out.includes('"an orphan case zq9"'), good.out);
+    assert.equal(orphans(good.out), orphans((await baseline()).out), good.out);
+    assert.equal(orphans(bad.out), orphans((await baseline()).out) + 1, bad.out);
   });
 
   test('a test the scanner cannot read, or one the runner lists and the scanner does not, fails the spec gate', async () => {
@@ -293,7 +298,45 @@ describe('spec gate', { concurrency: true }, () => {
     assert.ok(id, 'the spec has a requirement without guards to plant this on');
     const { code, out } = await withDefect((s) => afterFirstGuard(s, [`- \`${id}\` is accepted at "deadbeef".`]));
     assert.notEqual(code, 0);
-    assert.match(checkLine(out, 6), /^FAIL 6 cases: .* accepted unguarded 1$/, out);
+    assert.match(checkLine(out, 6), /^FAIL 6 cases: /, out);
     assert.ok(out.includes(`accepted ${id} has no guard naming an existing test`), out);
   });
+
+  test('a test that matches a planned check of an accepted requirement but has no guards line is an orphan, and an accepted requirement with one unguarded planned check fails the spec gate', async () => {
+    const src = readFileSync(SPEC, 'utf8');
+    const { accepted, says } = parseSpec(src);
+    const done = [...accepted][0];
+    const open = [...says.keys()].find((r) => !accepted.has(r));
+    assert.ok(done && open, 'the spec has an accepted and an unaccepted requirement to plant on');
+    const honest = (await baseline()).out;
+    const planted = (name, id) => withTree({ 'roflenox/test/zz-planned.test.ts': `import { test } from 'node:test';\ntest('${name}', () => {});\n` },
+      (s) => afterFirstGuard(s, [`- \`${id}\` is to be checked by "${name}".`]));
+    // An ACCEPTED requirement's plan names the test, with no guards line: an
+    // orphan, and that requirement now has an unguarded planned check.
+    const name = 'a planned but unguarded case zq11';
+    const bad = (await planted(name, done)).out;
+    assert.match(checkLine(bad, 6), /^FAIL 6 cases: /, bad);
+    assert.ok(bad.includes(`orphan: "${name}" in roflenox/test/zz-planned.test.ts guards no requirement`), 'a plan of an accepted requirement links nothing');
+    assert.ok(bad.includes(`accepted ${done}: planned check "${name}" is not guarded by an existing test`), bad);
+    assert.equal(orphans(bad), orphans(honest) + 1);
+    assert.equal(unguardedCount(bad), unguardedCount(honest) + 1);
+    // One of an accepted requirement's two checks loses its guards: the other
+    // being guarded does not cover it.
+    const twoGuarded = [...accepted].find((id) => {
+      const ps = parseSpec(src).plans.filter((p) => p.id === id);
+      return ps.length >= 2 && ps.every((p) => parseSpec(src).guards.some((g) => g.id === id && g.test === p.text));
+    });
+    assert.ok(twoGuarded, 'an accepted requirement with two guarded checks');
+    const victim = parseSpec(src).plans.find((p) => p.id === twoGuarded).text;
+    const esc = victim.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const one = await withDefect((s) => s.split('\n').filter((l) => !new RegExp(`^- "${esc}" guards \`${twoGuarded}\``).test(l)).join('\n'));
+    assert.match(checkLine(one.out, 6), /^FAIL 6 cases: /, one.out);
+    assert.ok(one.out.includes(`accepted ${twoGuarded}: planned check "${victim}" is not guarded by an existing test`), one.out);
+    // Control: the same planted test named by an UNACCEPTED requirement's plan
+    // is work in review — linked, no orphan.
+    const ok = (await planted('a planned case in review zq12', open)).out;
+    assert.ok(!ok.includes('zq12'), ok);
+    assert.equal(orphans(ok), orphans(honest));
+  });
+
 });
