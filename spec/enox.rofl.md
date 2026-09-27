@@ -278,6 +278,9 @@ Declared as facts:
 - `r_no_orphan_tests` is to be checked by "a test that guards no requirement fails the spec gate, and linking it passes".
 - `r_no_orphan_tests` is to be checked by "a test the scanner cannot read, or one the runner lists and the scanner does not, fails the spec gate".
 - `r_no_orphan_tests` is to be checked by "an accepted requirement whose checks guard no existing test fails the spec gate".
+- `r_no_orphan_tests` says "a test counts as linked only through a guards fact and its lives-in file, never by matching a planned check's text; and every planned check of an accepted requirement must itself be guarded by an existing test, not just one of them".
+- `r_no_orphan_tests` is to be checked by "a test that matches a planned check but has no guards line is an orphan, and an accepted requirement with one unguarded planned check fails the spec gate".
+- `r_no_orphan_tests` says "whole-suite nested runs belong to the hermetic5 gate, not to npm test, so npm test does not run the suite twice under its own time limit".
 - `r_typed` says "every requirement is of exactly one kind from the closed list".
 - `r_typed` is stated in "owner 2026-09-26".
 - `r_typed` is to be checked by "a requirement with an unknown kind fails typing".
@@ -730,6 +733,7 @@ The queue:
 - `r_mutation_gate` is accepted at "3ca019fb84ae9d2aaeea0979e21e86715ec0b8b8".
 - `r_rotation` is accepted at "4f7c3617e44a355a89ed563c133438d5e58bd6fe".
 - `r_identity_names` is rejected at "fd7980616c080677b958b90759493edde1012954".
+- `r_no_orphan_tests` is rejected at "34572fa77b7e52c361d36c2d705e18285bf84bf2".
 - `r_rotation` is rejected at "07e4c49652e4dc5c8277573a363ecbdeecb2ef6d".
 - `r_identity_names` is rejected at "3afa102a9be65b5e69fc77ca7da2839d8684ba77".
 - `r_enox_compat` is rejected at "63f344e6d8b0cc2c6b578bbd558a2dbaad21e357".
@@ -872,10 +876,6 @@ The checks that exist:
 - "an ask answers within one second while an executor saturates its CPU budget" lives in "roflenox/test/executor.test.ts".
 - "a flood of challenge requests neither grows memory nor stops an honest mirror" guards `r_challenge_stateless`.
 - "a flood of challenge requests neither grows memory nor stops an honest mirror" lives in "roflenox/test/freshness.test.ts".
-- "killed at index:half-written: the node restarts at the previous state and stays writable" guards `r_atomic_write`.
-- "killed at index:half-written: the node restarts at the previous state and stays writable" lives in "roflenox/test/durability.test.ts".
-- "killed at manifest:temp-written: the node restarts at the previous state and stays writable" guards `r_atomic_write`.
-- "killed at manifest:temp-written: the node restarts at the previous state and stays writable" lives in "roflenox/test/durability.test.ts".
 - "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused" guards `r_mirror_old_batches`.
 - "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused" lives in "roflenox/test/freshness.test.ts".
 - "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one" guards `r_static_feed`.
@@ -990,8 +990,6 @@ The checks that exist:
 - "negation over an ungranted book is no oracle" lives in "roflenox/test/rules.test.ts".
 - "a key file that is not the identity the log knows stops the node" guards `r_key_change_loud`.
 - "a key file that is not the identity the log knows stops the node" lives in "roflenox/test/durability.test.ts".
-- "two nodes: publish on A, mirror into B, identical ask answers; mirrored batches keep their original signer\" guards `r_follow`.
-- "two nodes: publish on A, mirror into B, identical ask answers; mirrored batches keep their original signer\" lives in "roflenox/test/federation.test.ts".
 - "a checkpoint one second past the window is refused and one second inside it mirrors" guards `r_static_feed`.
 - "a checkpoint one second past the window is refused and one second inside it mirrors" lives in "roflenox/test/freshness.test.ts".
 - "an anonymous caller of every open endpoint learns the node's own name and liveness and nothing about the identities, facts or batches it holds" guards `r_default_deny`.
@@ -1018,6 +1016,32 @@ The checks that exist:
 - "after a batch signed by the new key, a batch signed by the rotated key is refused whatever time it claims, and a batch claiming a time earlier than its predecessor is refused" lives in "roflenox/test/keys.test.ts".
 - "a publisher whose clock steps back publishes on without a refusal, each batch claiming no earlier than the one before" guards `r_rotation`.
 - "a publisher whose clock steps back publishes on without a refusal, each batch claiming no earlier than the one before" lives in "roflenox/test/keys.test.ts".
+- "a node killed at each point of a later batch restarts with it or at the previous head" guards `r_atomic_write`.
+- "a node killed at each point of a later batch restarts with it or at the previous head" lives in "roflenox/test/durability.test.ts".
+- "two nodes: publish on A, mirror into B, identical ask answers; mirrored batches keep their original signer's book on B" guards `r_follow`.
+- "two nodes: publish on A, mirror into B, identical ask answers; mirrored batches keep their original signer's book on B" lives in "roflenox/test/federation.test.ts".
+- "ROFL_DIR is set for this test run" guards `r_typed`.
+- "ROFL_DIR is set for this test run" lives in "spec/check.test.mjs".
+- "without ROFL_DIR the gate fails and says where to point it" guards `r_typed`.
+- "without ROFL_DIR the gate fails and says where to point it" lives in "spec/check.test.mjs".
+- "the real spec passes" guards `r_typed`.
+- "the real spec passes" lives in "spec/check.test.mjs".
+- "a status question the spec cannot answer fails, not counted" guards `r_typed`.
+- "a status question the spec cannot answer fails, not counted" lives in "spec/check.test.mjs".
+- "a REPL that answers empty to everything is not trusted" guards `r_typed`.
+- "a REPL that answers empty to everything is not trusted" lives in "spec/check.test.mjs".
+- "a sentence the reader cannot parse fails the reader" guards `r_typed`.
+- "a sentence the reader cannot parse fails the reader" lives in "spec/check.test.mjs".
+- "a requirement with its `is of` line removed fails typing, in ROFL and textually" guards `r_typed`.
+- "a requirement with its `is of` line removed fails typing, in ROFL and textually" lives in "spec/check.test.mjs".
+- "flipping security to features below 2/3 fails balance" guards `r_balanced`.
+- "flipping security to features below 2/3 fails balance" lives in "spec/check.test.mjs".
+- "an empty kind fails balance" guards `r_balanced`.
+- "an empty kind fails balance" lives in "spec/check.test.mjs".
+- "a guard naming a test that does not exist fails links" guards `r_no_orphan_tests`.
+- "a guard naming a test that does not exist fails links" lives in "spec/check.test.mjs".
+- "a guard with no `lives in` fact fails links" guards `r_no_orphan_tests`.
+- "a guard with no `lives in` fact fails links" lives in "spec/check.test.mjs".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" guards `r_asserted_by`.
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" lives in "personal-node/src/mcp/main-graph.test.ts".
 
