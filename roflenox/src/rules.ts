@@ -12,7 +12,12 @@
 //   * reads another book only while the author may: every literal over a
 //     foreign book gets the premise may_read[sys](author, that book), so a
 //     grant that expires stops the rule from seeing it — dynamically, by the
-//     same rule that answers asks (r_grants).
+//     same rule that answers asks (r_grants);
+//   * may range over books: a body literal whose book is a VARIABLE
+//     (`edge[B](...)`, B bound by the rule — e.g. from `follows(Name, B)`, which
+//     the node derives from the author's roflenox:follow facts) reads every
+//     book the author may read, each under the same may_read premise. One rule
+//     then covers every followed feed, including one followed later.
 import { Refusal, roflString } from './facts.ts';
 import { bookOf, checkName } from './identity.ts';
 import { SYSTEM_BOOK } from './engine.ts';
@@ -21,6 +26,7 @@ export const RULE = 'roflenox:rule';
 
 const LITERAL = /^(not\s+)?([a-z][A-Za-z0-9_]*)\s*(?:\[([^\]]*)\])?\s*\(([\s\S]*)\)$/;
 const BOOK = /^b_[0-9a-f]{16}$/;
+const VAR = /^[A-Z][A-Za-z0-9_]*$/;
 
 /** Split at top-level occurrences of `sep` (outside strings and brackets). */
 function splitTop(s: string, sep: string): string[] {
@@ -52,8 +58,12 @@ function resolveBook(ref: string | undefined, author: string, head: boolean): st
   const own = bookOf(author);
   if (ref === undefined || ref.trim() === '') return own;
   const r = ref.trim();
+  if (VAR.test(r)) {
+    if (head) throw new Refusal(422, 'rule_scope', `a rule of ${author} concludes only into ${author}'s own book, not a book variable ${r}`);
+    return r;
+  }
   const book = r.startsWith('@') ? bookOf(checkName(r.slice(1))) : BOOK.test(r) ? r : null;
-  if (book === null) throw bad(`a rule names books as @identity or b_<16 hex>; "${r}" is neither`);
+  if (book === null) throw bad(`a rule names books as @identity, b_<16 hex> or a variable; "${r}" is none of these`);
   if (head && book !== own) {
     throw new Refusal(422, 'rule_scope', `a rule of ${author} concludes only into ${author}'s own book, not ${r}`);
   }
@@ -70,6 +80,7 @@ export function compileRule(text: string, author: string): string {
   if (!hm || hm[1]) throw bad('a rule head is one positive literal');
   const headBook = resolveBook(hm[3], author, true);
   const foreign = new Set<string>();
+  const variables = new Set<string>();
   const body = splitTop(parts[1], ',').map((lit) => {
     if (lit === '') throw bad('an empty premise');
     const m = LITERAL.exec(lit);
@@ -79,9 +90,11 @@ export function compileRule(text: string, author: string): string {
       return lit;
     }
     const book = resolveBook(m[3], author, false);
-    if (book !== bookOf(author)) foreign.add(book);
+    if (VAR.test(book)) variables.add(book);
+    else if (book !== bookOf(author)) foreign.add(book);
     return `${m[1] ?? ''}${m[2]}[${book}](${m[4]})`;
   });
   for (const b of [...foreign].sort()) body.push(`may_read[${SYSTEM_BOOK}](${roflString(author)}, ${roflString(b)})`);
+  for (const v of [...variables].sort()) body.push(`may_read_book[${SYSTEM_BOOK}](${roflString(author)}, ${v})`);
   return `${hm[2]}[${headBook}](${hm[4]}) :- ${body.join(', ')}.`;
 }

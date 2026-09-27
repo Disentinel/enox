@@ -1277,8 +1277,8 @@
    "file": "src/rules.ts",
    "edits": [
     [
-     "    if (book !== bookOf(author)) foreign.add(book);",
-     "    if (book !== bookOf(author) && !m[1]) foreign.add(book);"
+     "    else if (book !== bookOf(author)) foreign.add(book);",
+     "    else if (book !== bookOf(author) && !m[1]) foreign.add(book);"
     ]
    ],
    "red": [
@@ -1902,7 +1902,7 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "        unknown.push(...await this.silentFeedsReadBy(sc.identity));\n",
+     "        unknown.push(...await this.silentFeeds(sc.identity));\n",
      ""
     ]
    ],
@@ -1978,6 +1978,117 @@
    ],
    "red": [
     "the MCP endpoint issues no session id and keeps no state per client"
+   ]
+  },
+  {
+   "id": "M144",
+   "title": "r_uc_observability: a book variable reads without may_read (every book, granted or not)",
+   "file": "src/rules.ts",
+   "edits": [
+    [
+     "  for (const v of [...variables].sort()) body.push(`may_read_book[${SYSTEM_BOOK}](${roflString(author)}, ${v})`);",
+     "  for (const v of [...variables].sort()) void v;"
+    ],
+    [
+     "    const ranging = rules.some((r) => /may_read_book\\[/.test(r));",
+     "    const ranging = true;",
+     "src/node.ts"
+    ],
+    [
+     "      ? (await this.engine.sysRows(`readable_until[${SYSTEM_BOOK}](${roflString(author)}, B, U)`)).filter((r) => clock < Number(r[1])).map((r) => String(r[0]))",
+     "      ? [...this.chains.keys()].map(bookOf)",
+     "src/node.ts"
+    ]
+   ],
+   "red": [
+    "a fleet rule written once covers every followed host, including a host followed after the rule was written"
+   ]
+  },
+  {
+   "id": "M145",
+   "title": "r_uc_observability: a ranging rule's world loads only the books its text names",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    const ranging = rules.some((r) => /may_read_book\\[/.test(r));",
+     "    const ranging = false;"
+    ]
+   ],
+   "red": [
+    "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why",
+    "a fleet rule written once covers every followed host, including a host followed after the rule was written"
+   ]
+  },
+  {
+   "id": "M146",
+   "title": "r_uc_observability: follows are not visible to rules",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "const followRow = (book: string, name: string) => `follows[${book}](",
+     "const followRow = (book: string, name: string) => `followed_elsewhere[${book}]("
+    ]
+   ],
+   "red": [
+    "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why",
+    "a fleet rule written once covers every followed host, including a host followed after the rule was written"
+   ]
+  },
+  {
+   "id": "M147",
+   "title": "r_uc_observability: only a feed some rule names is watched for silence",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    for (const p of followed) {",
+     "    for (const p of followed.filter((x) => (this.userRules.get(author) ?? []).some((r) => r.text.includes(bookOf(x))))) {"
+    ]
+   ],
+   "red": [
+    "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why",
+    "a followed feed that no rule reads is reported as unknown, never as all-clear"
+   ]
+  },
+  {
+   "id": "M148",
+   "title": "r_uc_observability: follows come from edge rows again (a retired follow still ranges)",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "    // (A follow's follows[book](Name, b_<atom>) row — what a rule's book\n",
+     "    if (f.relation === 'roflenox:follow') out.push(`follows[${book}](${roflString(f.source)}, b_${sha256hex(f.source).slice(0, 16)}).`);\n    // (A follow's follows[book](Name, b_<atom>) row — what a rule's book\n"
+    ]
+   ],
+   "red": [
+    "a follow retired with confidence 0 stops every rule ranging over that host's book"
+   ]
+  },
+  {
+   "id": "M149",
+   "title": "r_uc_observability: retiring one of two follows of a host unfollows it",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "      if (![...next].some(([F, c]) => still(F, c)) && ![...m].some(([F, c]) => !next.has(F) && still(F, c))) retract.push(followRow(book, name));",
+     "      retract.push(followRow(book, name));"
+    ]
+   ],
+   "red": [
+    "a follow retired with confidence 0 stops every rule ranging over that host's book"
+   ]
+  },
+  {
+   "id": "M151",
+   "title": "r_uc_observability: replay forgets the current follows",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "${c.follow !== undefined && c.C > 0 ? `${followRow(book, c.follow)}.\\n` : ''}",
+     "${''}"
+    ]
+   ],
+   "red": [
+    "a follow retired with confidence 0 stops every rule ranging over that host's book"
    ]
   }
  ]

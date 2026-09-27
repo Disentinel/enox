@@ -13,9 +13,15 @@
 // RETRACTS the replaced asserted[book](F, P, C, S) row from the engine and
 // loads the new one — the engine's `asserted` is then exactly the current
 // assertions. The log keeps every assertion; replay loads only the current.
-import { factId, permille, roflString, type Fact } from './facts.ts';
+import { factId, permille, roflString, sha256hex, type Fact } from './facts.ts';
 
-export interface Current { P: string; C: number; S: number }
+export interface Current { P: string; C: number; S: number; follow?: string }
+
+/** A follow is a CURRENT assertion too: `follows[book](Name, b_<atom>)` — the
+ *  row a rule ranges over books by — exists only while the follow's current
+ *  confidence is above 0. Retiring it (confidence 0) retracts the row, so
+ *  every rule ranging over that host's book stops (r_uc_observability). */
+const FOLLOW = 'roflenox:follow';
 
 export class Assertions {
   private readonly by = new Map<string, Map<string, Current>>();
@@ -34,14 +40,27 @@ export class Assertions {
     const retract: string[] = [];
     const load: string[] = [];
     const next = new Map<string, Current>();
+    const unfollowed = new Set<string>();
     for (const f of facts) {
       const F = factId(f);
       const old = next.get(F) ?? m.get(F);
       if (old && old.S > seq) continue;                 // never happens in chain order; guard anyway
-      if (old && !next.has(F)) retract.push(row(book, F, old));
-      const cur = { P: f.perspective, C: permille(f.confidence), S: seq };
+      if (old && !next.has(F)) {
+        retract.push(row(book, F, old));
+        if (old.follow !== undefined && old.C > 0) unfollowed.add(old.follow);
+      }
+      const cur: Current = { P: f.perspective, C: permille(f.confidence), S: seq, ...(f.relation === FOLLOW ? { follow: f.source } : {}) };
       next.set(F, cur);
       load.push(`${row(book, F, cur)}.`);
+      if (cur.follow !== undefined && cur.C > 0) load.push(`${followRow(book, cur.follow)}.`);
+    }
+    // A follows row goes only when NO current follow of that name is left:
+    // two follow facts of one host with one retired still follow it, and a
+    // re-asserted follow keeps the row (admission loads, then retracts).
+    // (Only a batch that retires a follow pays for the scan.)
+    for (const name of unfollowed) {
+      const still = (F: string, c: Current) => c.follow === name && c.C > 0 && (next.get(F) ?? c) === c;
+      if (![...next].some(([F, c]) => still(F, c)) && ![...m].some(([F, c]) => !next.has(F) && still(F, c))) retract.push(followRow(book, name));
     }
     return { retract, load: load.length ? `${load.join('\n')}\n` : '', apply: () => { for (const [F, c] of next) m.set(F, c); } };
   }
@@ -50,10 +69,11 @@ export class Assertions {
   lines(identity: string, book: string): string {
     const m = this.by.get(identity);
     if (!m) return '';
-    return [...m].map(([F, c]) => `${row(book, F, c)}.\n`).join('');
+    return [...m].map(([F, c]) => `${row(book, F, c)}.\n${c.follow !== undefined && c.C > 0 ? `${followRow(book, c.follow)}.\n` : ''}`).join('');
   }
 }
 
+const followRow = (book: string, name: string) => `follows[${book}](${roflString(name)}, b_${sha256hex(name).slice(0, 16)})`;
 const row = (book: string, F: string, c: Current) => `asserted[${book}](${roflString(F)}, ${roflString(c.P)}, ${c.C}, ${c.S})`;
 
 /** Match literal arguments (ROFL terms) against a row of values: variables

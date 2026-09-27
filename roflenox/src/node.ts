@@ -747,6 +747,7 @@ export class RoflenoxNode {
       const unknown: NonNullable<AskAnswer['unknown']> = [];
       for (const [b, sc] of scope) {
         if (sc.only !== null || (book !== null && book !== b)) continue;
+        unknown.push(...await this.silentFeeds(sc.identity));
         const w = await this.ruleWorld(sc.identity);
         if (!w) continue;
         const q = rel === 'answered' ? `answered[${SYSTEM_BOOK}](${roflString(b)}, ${args})` : `${rel}[${b}](${args})`;
@@ -762,7 +763,6 @@ export class RoflenoxNode {
           if (!seen.has(k)) { seen.add(k); ans.rows.push(row); }
         }
         if (w.partial) unknown.push({ identity: sc.identity, reason: w.holes.join('; '), budget: this.ruleBudget, unit: 'steps' });
-        unknown.push(...await this.silentFeedsReadBy(sc.identity));
       }
       if (unknown.length) ans.unknown = unknown;
       ans.rows.sort((x, y) => { const p = JSON.stringify([x.identity, x.cells]), q = JSON.stringify([y.identity, y.cells]); return p < q ? -1 : p > q ? 1 : 0; });
@@ -861,19 +861,18 @@ export class RoflenoxNode {
     return facts.some((r) => (cur.get(String(r[0]))?.C ?? 0) > 0) ? all : [];
   }
 
-  /** The feeds `author` follows, that its rules read, and that have gone
-   *  SILENT: nothing claimed within the silence window, or never anything.
-   *  An answer that reads such a feed is not an all-clear, so each one is an
-   *  unknown beside the rows (r_uc_observability). */
-  private async silentFeedsReadBy(author: string): Promise<Unknown[]> {
-    const read = new Set([...(await this.runnableRules(author)).join('\n').matchAll(/\[(b_[0-9a-f]{16})\]/g)].map((m) => m[1]!));
-    if (read.size === 0 || !this.chains.has(author)) return [];
+  /** The feeds `author` follows that have gone SILENT: nothing claimed within
+   *  the silence window, or never anything. Whether or not any rule reads
+   *  them: an answer from a book that follows a silent feed is not an
+   *  all-clear, so each one is an unknown beside the rows (r_uc_observability). */
+  private async silentFeeds(author: string): Promise<Unknown[]> {
+    if (!this.chains.has(author)) return [];
     const cur = this.assertions.of(author);
     const follows = await this.engine.sysRows(`edge[${bookOf(author)}](F, P, "roflenox:follow", U)`);
     const followed = [...new Set(follows.filter((r) => (cur.get(String(r[0]))?.C ?? 0) > 0).map((r) => String(r[1])))].sort();
     const now = this.now();
     const out: Unknown[] = [];
-    for (const p of followed.filter((x) => read.has(bookOf(x)))) {
+    for (const p of followed) {
       const last = this.lastClaimed.get(p);
       if (last !== undefined && now - last <= this.silenceSec * 1000) continue;
       out.push({ identity: p, reason: last === undefined ? 'silent_feed: nothing ever received from it' : `silent_feed: nothing claimed for ${Math.floor((now - last) / 1000)} s`,
@@ -900,7 +899,15 @@ export class RoflenoxNode {
     if (cached) { await cached.w.close(); this.worlds.delete(author); }
     const own = bookOf(author);
     const owners = new Map([...this.chains.keys()].map((id) => [bookOf(id), id]));
-    const foreign = [...new Set([...rules.join('\n').matchAll(/\[(b_[0-9a-f]{16})\]/g)].map((m) => m[1]!))].filter((b) => b !== own);
+    const named = [...new Set([...rules.join('\n').matchAll(/\[(b_[0-9a-f]{16})\]/g)].map((m) => m[1]!))];
+    // A rule with a book VARIABLE reads every book its author may read: load
+    // each one with a live grant (the rule's may_read_book premise still
+    // decides, at the world's clock).
+    const ranging = rules.some((r) => /may_read_book\[/.test(r));
+    const granted = ranging
+      ? (await this.engine.sysRows(`readable_until[${SYSTEM_BOOK}](${roflString(author)}, B, U)`)).filter((r) => clock < Number(r[1])).map((r) => String(r[0]))
+      : [];
+    const foreign = [...new Set([...named, ...granted])].filter((b) => b !== own);
     const w = await this.engine.world(this.ruleBudget);
     await w.session.load(`clock[${SYSTEM_BOOK}](${clock}).\n`, 'roflenox');
     for (const b of [own, ...foreign]) {
@@ -908,7 +915,7 @@ export class RoflenoxNode {
       if (!id) continue;
       const text = (this.programs.get(id) ?? []).join('') + this.assertions.lines(id, b);
       if (text) await w.session.load(text, id);
-      if (b !== own) await w.session.load(mayReadRules(b, id), 'roflenox');
+      if (b !== own || ranging) await w.session.load(mayReadRules(b, id), 'roflenox');
     }
     for (const [id, lines] of this.results) {
       if (id !== author && !foreign.includes(bookOf(id))) await w.session.load(lines.join(''), id);

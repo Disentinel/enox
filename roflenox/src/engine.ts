@@ -333,7 +333,9 @@ export function answeredRule(book: string): string {
 export function mayReadRules(book: string, owner: string): string {
   const b = roflString(book);
   return `may_read[${SYSTEM_BOOK}](${roflString(owner)}, ${b}).\n`
-    + `may_read[${SYSTEM_BOOK}](R, ${b}) :- grant[${book}](R, U), clock[${SYSTEM_BOOK}](T), T < U.\n`;
+    + `may_read[${SYSTEM_BOOK}](R, ${b}) :- grant[${book}](R, U), clock[${SYSTEM_BOOK}](T), T < U.\n`
+    // The same, keyed by the book ATOM: what a book variable in a rule binds to.
+    + `may_read_book[${SYSTEM_BOOK}](R, ${book}) :- may_read[${SYSTEM_BOOK}](R, ${b}).\n`;
 }
 
 /** A separate world with its own step budget: an author's rules run here and
