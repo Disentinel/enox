@@ -616,6 +616,7 @@ The queue:
 
 Accepted after verification:
 
+- `r_bounded_memory` is accepted at "fe6c2b55716d73ef8889f3d3ae57a74eae083063".
 - `r_uri_prefix_stable` is accepted at "8a03765e17e2a44a75ec811bfe911c30e25c16d1".
 - `r_session_eviction` is accepted at "4bed1e467dd5b09c5d04ffb0b83aa0fbb9d05056".
 - `r_batch_write` is accepted at "f8d14237e81c0e829d003203764242f18727e336".
