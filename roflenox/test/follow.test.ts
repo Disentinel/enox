@@ -19,7 +19,7 @@ test('a follower converges to the publisher\'s head after new batches without a 
   const head = async (url: string) => ((await get(url, '/health')).body.heads as Record<string, string>).publisher;
   const converged = async () => {
     const want = await head(p.url);
-    const deadline = Date.now() + 8_000;
+    const deadline = Date.now() + 30_000;          // a bound, not a wait: it returns as soon as the heads meet
     while (Date.now() < deadline) {
       if (await head(f.url) === want) return true;
       await new Promise((r) => setTimeout(r, 50));

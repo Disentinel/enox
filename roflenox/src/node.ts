@@ -210,6 +210,19 @@ export class RoflenoxNode {
     // A fresh engine first: identity decisions are made in throwaway forks of
     // it while the log is re-verified, and then the log is replayed into it.
     n.engine = await Engine.fresh(bin);
+    try {
+      await n.load();
+    } catch (e) {
+      // A node that refuses to start leaves no engine process behind.
+      await n.engine.stop().catch(() => {});
+      throw e;
+    }
+    return n;
+  }
+
+  /** Re-verify the log into the fresh engine (open's body). */
+  private async load(): Promise<void> {
+    const n = this;
     const batches: { v: Verified; rules: string | null; seq: number }[] = [];
     const receipts = n.log.receipts;
     for (const [ri, r] of receipts.entries()) {
@@ -243,19 +256,16 @@ export class RoflenoxNode {
       try {
         await n.applyChain(n.identity.name, n.identity.identityChain(), new Date(n.now()).toISOString(), false, n.identity.name);
       } catch (e) {
-        await n.engine.stop();
         throw new Error(`the key file for ${n.identity.name} does not follow the identity the log knows (${(e as Error).message}); refusing to start`);
       }
       const key = n.current(n.identity.name)!.doc.keys.find((k) => k.key_id === n.identity!.keyId);
       if (!key || key.revoked_at) {
-        await n.engine.stop();
         throw new Error(`the key file for ${n.identity.name} is not a key this identity has published under; refusing to start`);
       }
     }
     await n.engine.replay([...batches.map(({ v, rules, seq }) => ({ rofl: programOf(v, seq), who: v.manifest.identity, rules })),
       ...[...n.chains.keys()].map((id) => ({ rofl: n.assertions.lines(id, bookOf(id)), who: id, rules: null }))]);
     await n.checkUriPrefix();
-    return n;
   }
 
   /** Loud startup findings that are not errors (health.warnings; the CLI
@@ -788,7 +798,7 @@ export class RoflenoxNode {
         if (!w) continue;
         const q = rel === 'answered' ? `answered[${SYSTEM_BOOK}](${roflString(b)}, ${args})` : `${rel}[${b}](${args})`;
         let a;
-        try { a = await w.ask(q); } catch (e) {
+        try { this.fault('engine:world-ask'); a = await w.ask(q); } catch (e) {
           if (this.engine.dead) throw e;       // a death is never an empty answer
           continue;                            // the relation is not in this world
         }
@@ -967,6 +977,7 @@ export class RoflenoxNode {
     await w.session.load(answeredRule(own), 'roflenox');
     try {
       await w.session.load(rules.map((r) => `${r}\n`).join(''), author);
+      this.fault('engine:world');
       await w.evaluate();
     } catch (e) {
       if (this.engine.dead) throw e;

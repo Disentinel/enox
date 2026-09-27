@@ -318,7 +318,7 @@ test('killing the engine during an ask never yields a plain answer: the asker ge
   let armed: string | null = null;
   let node: Running | null = null;
   const a = node = await start(tmpDir('askkill'), 'alice', {
-    ruleBudget: 2_000_000,
+    ruleBudget: 20_000,                            // the runaway rule stops at its budget in milliseconds
     fault: (p) => { if (p === armed) { armed = null; killEngine(node!); } },
   });
   try {
@@ -339,14 +339,19 @@ test('killing the engine during an ask never yields a plain answer: the asker ge
     assert.equal(m.body.error, 'engine_down');
     assert.equal(((await answered('/ask', { query: 'edge(F, S, R, T)' })).body.rows as unknown[]).length, 3);
 
-    // 2. A rule world, killed while it evaluates the runaway rule (the probe).
-    const asking = post(a.url, '/ask', { query: 'n(X)', limit: 5 });
-    await new Promise((r) => setTimeout(r, 400));
-    killEngine(a);
-    const w = await asking;
+    // 2. A rule world, killed as it starts to evaluate the runaway rule (a
+    // new batch makes the next question build the world afresh).
+    assert.equal((await post(a.url, '/batches', batch(a.me, [fact('bob', 'knows', 'carol')], b1.manifest.digest, iso(a.clock.t)))).status, 201);
+    armed = 'engine:world';
+    const w = await post(a.url, '/ask', { query: 'n(X)', limit: 5 });
     assert.ok(!plain(w), `rule-world ask under a kill: ${w.status} ${JSON.stringify(w.body)}`);
     const next = await answered('/ask', { query: 'n(X)', limit: 5 });
     assert.ok((next.body.rows as unknown[]).length > 0);
+    // ...and a built world, killed as the question reaches it.
+    armed = 'engine:world-ask';
+    const wa = await post(a.url, '/ask', { query: 'n(X)', limit: 5 });
+    assert.ok(!plain(wa), `built-world ask under a kill: ${wa.status} ${JSON.stringify(wa.body)}`);
+    await answered('/ask', { query: 'n(X)', limit: 5 });
 
     // 3. why and whynot.
     for (const op of ['why', 'whynot'] as const) {

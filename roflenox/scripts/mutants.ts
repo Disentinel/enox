@@ -13,8 +13,12 @@
 //   npm run mutants -- --only M2,M14        some of them
 //   npm run mutants -- --extra more.json    add mutants (same shape) — the gate's own test uses this
 //   npm run mutants -- --workers 8
+//   npm run mutants -- --shard 1/2         one shard: the mutants whose red tests live in half of the test files
+//   npm run mutants -- --shards 2          every shard at once, each its own process (1 worker) with its own budget
 //
-// Budget: the whole run prints its duration and must stay under 300 s.
+// Budget: the whole run prints its duration and must stay under 300 s. As the
+// list grows, `npm run mutants` runs it as shards in parallel (by test file,
+// so each file's setup is paid in one shard), and each shard keeps the budget.
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -25,11 +29,48 @@ const BUDGET_MS = 300_000;
 
 interface Mutant { id: string; title: string; file: string; edits: ([string, string] | [string, string, string])[]; red?: string[]; survivor?: string }
 
-function args(): { only: Set<string> | null; extra: string | null; workers: number; perf: boolean } {
+function args(): { only: Set<string> | null; extra: string | null; workers: number; perf: boolean; shard: [number, number] | null; shards: number | null } {
   const a = process.argv.slice(2);
   const get = (k: string) => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] ?? null : null; };
   const only = get('--only');
-  return { only: only ? new Set(only.split(',')) : null, extra: get('--extra'), perf: a.includes('--perf'), workers: Number(get('--workers') ?? Math.max(1, Math.min(2, Math.floor(os.cpus().length / 4)))) };
+  const sh = get('--shard')?.split('/').map(Number);
+  return { only: only ? new Set(only.split(',')) : null, extra: get('--extra'), perf: a.includes('--perf'),
+    workers: Number(get('--workers') ?? Math.max(1, Math.min(2, Math.floor(os.cpus().length / 4)))),
+    shard: sh && sh.length === 2 && sh[0]! >= 1 && sh[0]! <= sh[1]! ? [sh[0]!, sh[1]!] : null,
+    shards: get('--shards') !== null ? Number(get('--shards')) : null };
+}
+
+/** Split mutants into `n` shards by the test file of their first red test:
+ *  files largest-first onto the lightest shard, so shards come out even and
+ *  deterministic. */
+function shardOf(list: Mutant[], n: number): Map<Mutant, number> {
+  const byFile = new Map<string, Mutant[]>();
+  for (const m of list) {
+    const f = filesFor(ROOT, (m.red ?? []).slice(0, 1))[0] ?? '';
+    byFile.set(f, [...(byFile.get(f) ?? []), m]);
+  }
+  const weight = Array.from({ length: n }, () => 0);
+  const out = new Map<Mutant, number>();
+  for (const [, ms] of [...byFile].sort((x, y) => y[1].length - x[1].length || (x[0] < y[0] ? -1 : 1))) {
+    const k = weight.indexOf(Math.min(...weight));
+    weight[k] += ms.length;
+    for (const m of ms) out.set(m, k + 1);
+  }
+  return out;
+}
+
+/** Every shard as its own process, in parallel; fails if any shard fails. */
+async function runShards(n: number, passOn: string[]): Promise<number> {
+  const codes = await Promise.all(Array.from({ length: n }, (_, i) => new Promise<number>((ok) => {
+    const c = spawn(process.execPath, ['--experimental-strip-types', '--no-warnings', path.join(ROOT, 'scripts', 'mutants.ts'),
+      ...passOn, '--shard', `${i + 1}/${n}`, '--workers', '1'], { stdio: ['ignore', 'pipe', 'inherit'] });
+    let out = '';
+    c.stdout.on('data', (d) => { out += d; });
+    c.on('exit', (code) => { process.stdout.write(out.replace(/^/gm, `[shard ${i + 1}/${n}] `)); ok(code ?? 1); });
+  })));
+  const bad = codes.filter((c) => c !== 0).length;
+  process.stdout.write(`\n${n - bad}/${n} shards passed\n`);
+  return bad === 0 ? 0 : 1;
 }
 
 function load(extra: string | null): Mutant[] {
@@ -145,12 +186,16 @@ async function judge(tree: string, m: Mutant): Promise<Verdict> {
 
 async function main(): Promise<number> {
   const t0 = Date.now();
-  const { only, extra, workers, perf } = args();
+  const { only, extra, workers, perf, shard, shards } = args();
+  if (shards !== null && shard === null && only === null) {
+    return runShards(shards, process.argv.slice(2).filter((x, i, a) => x !== '--shards' && a[i - 1] !== '--shards'));
+  }
   // Two gates, each within the budget: perf mutants (their red tests live in
   // test/perf and build a 200 000-fact log) and everything else.
   const perfNames = perfTestNames();
   const isPerf = (m: Mutant) => (m.red ?? []).some((n) => perfNames.has(n));
-  const all = load(extra).filter((m) => (only ? only.has(m.id) : isPerf(m) === perf));
+  let all = load(extra).filter((m) => (only ? only.has(m.id) : isPerf(m) === perf));
+  if (shard) { const of = shardOf(all, shard[1]); all = all.filter((m) => of.get(m) === shard[0]); }
   const survivors = all.filter((m) => m.survivor);
   const queue = all.filter((m) => !m.survivor);
   const verdicts: Verdict[] = [];
