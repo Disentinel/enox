@@ -917,7 +917,7 @@ The checks that exist:
 - "package.json declares no dependencies" guards `r_zero_deps`.
 - "package.json declares no dependencies" lives in "roflenox/test/hermetic.test.ts".
 - "the full test suite passes with no network and no model files" guards `r_core_without_executors`.
-- "the full test suite passes with no network and no model files" lives in "roflenox/test/hermetic.test.ts".
+- "the full test suite passes with no network and no model files" lives in "roflenox/test/hermetic5/hermetic5.test.ts".
 - "an end-to-end pull between two nodes whose transcript contains no key material" guards `r_identity_names`.
 - "an end-to-end pull between two nodes whose transcript contains no key material" lives in "roflenox/test/federation.test.ts".
 - "a batch with one byte changed is rejected" guards `r_signed_batch`.
@@ -1003,7 +1003,7 @@ The checks that exist:
 - "a claimed label holding brackets, a newline or 5000 characters can neither forge a signer nor add a line to a text view" guards `r_enox_compat`.
 - "a claimed label holding brackets, a newline or 5000 characters can neither forge a signer nor add a line to a text view" lives in "roflenox/test/enox.test.ts".
 - "every test file exits on its own without force-exit, leaving no engine process behind" guards `r_mutation_gate`.
-- "every test file exits on its own without force-exit, leaving no engine process behind" lives in "roflenox/test/hermetic.test.ts".
+- "every test file exits on its own without force-exit, leaving no engine process behind" lives in "roflenox/test/hermetic5/hermetic5.test.ts".
 - "a failing mutant shard fails the whole mutant gate" guards `r_mutation_gate`.
 - "a failing mutant shard fails the whole mutant gate" lives in "roflenox/test/gate.test.ts".
 - "a mutant whose red test already fails on the unmutated tree is reported as a broken baseline, never as killed" guards `r_mutation_gate`.
