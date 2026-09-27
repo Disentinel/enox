@@ -281,6 +281,11 @@ Declared as facts:
 - `r_no_orphan_tests` says "a test counts as linked through a guards fact and its lives-in file; the one exception is work in review: a test named by a planned check of a requirement not yet accepted counts as linked until that requirement is accepted, after which it needs its own guards line; and every planned check of an accepted requirement must itself be guarded by an existing test, not just one of them".
 - `r_no_orphan_tests` is to be checked by "a test that matches a planned check of an accepted requirement but has no guards line is an orphan, and an accepted requirement with one unguarded planned check fails the spec gate".
 - `r_no_orphan_tests` says "whole-suite nested runs belong to the hermetic5 gate, not to npm test, so npm test does not run the suite twice under its own time limit".
+- `r_single_writer` is about `storage`.
+- `r_single_writer` binds as `must`.
+- `r_single_writer` says "one process at a time owns a data directory: serve, stdio and every local operation that signs take an exclusive lock on it, and a second process refuses to start, naming the holder, before it reads or writes anything; so a node can never sign two successors of its own head by accident".
+- `r_single_writer` is stated in "found 2026-09-27 while verifying the quickstart: stdio and serve on one data dir forked the node's own chain, and the node then refused to start".
+- `r_single_writer` is to be checked by "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing".
 - `r_typed` says "every requirement is of exactly one kind from the closed list".
 - `r_typed` is stated in "owner 2026-09-26".
 - `r_typed` is to be checked by "a requirement with an unknown kind fails typing".
@@ -654,6 +659,7 @@ Kinds of the requirements:
 - `r_interface_parity` is of `constraint`.
 - `r_mutation_gate` is of `gate`.
 - `r_typed` is of `gate`.
+- `r_single_writer` is of `reliability`.
 - `r_no_orphan_tests` is of `gate`.
 - `r_balanced` is of `gate`.
 - `r_relation_primary` is of `model`.
@@ -723,6 +729,7 @@ The queue:
 - `r_no_orphan_tests` is queued at 76.
 - `r_freshness` is queued at 77.
 - `r_domain_vouch` is queued at 82.
+- `r_single_writer` is queued at 83.
 - `r_mutation_gate` is queued at 73.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 - `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
