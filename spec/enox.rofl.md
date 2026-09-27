@@ -250,6 +250,8 @@ Declared as facts:
 - `r_import` is to be checked by "importing an Enox snapshot twice gives the same log head and every imported assertion answers by ask with its original author".
 - `r_enox_compat` is about `hybrid`.
 - `r_enox_compat` binds as `must`.
+- `r_enox_compat` says "an Enox write's asserted_by label is kept as claimed_by, shown beside the signer and marked as a claim; it never replaces the signer as asserted_by".
+- `r_enox_compat` is to be checked by "an agent label given to an Enox write reads back as claimed_by next to the signing identity, and a forged label changes nothing but claimed_by".
 - `r_enox_compat` says "the MCP tools that current Enox clients call, such as remember, recall, semantic_search, add_assertion, batch_assertions, query_graph, explore and graph_stats, are rows of the operation table mapped onto ask, assert and executors, so a client moves by changing its URL".
 - `r_enox_compat` is stated in "owner 2026-09-26; the twenty tools of the Enox MCP server in use".
 - `r_enox_compat` is to be checked by "the tool calls an Enox client made on 2026-09-26 run unchanged against a node and get answers of the same shape".
@@ -667,11 +669,13 @@ The queue:
 - `r_chain` is queued at 78.
 - `r_backup` is queued at 79.
 - `r_confidence` is queued at 69.
+- `r_enox_compat` is queued at 80.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 - `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
 - `r_key_change_loud` is rejected at "6bfb1bbf0121614ca309293042adf2231ecc31d1".
 - `r_atomic_write` is accepted at "cb8730b753d33b9d28115ad4db650776d2c5a154".
 - `r_key_change_loud` is accepted at "2873ca82a93a210e7954cd7dc7e6d9f33d604569".
+- `r_asserted_by` is accepted at "47c198a247231c85bf38ef70395a3fb9514f5306".
 
 Rejected after verification:
 
