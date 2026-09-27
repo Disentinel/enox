@@ -65,7 +65,8 @@
    "red": [
     "a batch claiming a time outside the window is marked stale and a re-attestation is requested",
     "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused",
-    "a re-attested batch keeps its digest and gains a second, fresh signature"
+    "a re-attested batch keeps its digest and gains a second, fresh signature",
+    "a live batch dated 301 seconds ahead of its receipt is refused as future-dated, while one dated 301 seconds behind is refused as stale with a request to re-attest"
    ]
   },
   {
@@ -3047,7 +3048,8 @@
    ],
    "red": [
     "a batch signed after its key's invalid_from is refused, and one dated 301 seconds past its receipt is refused as future-dated",
-    "a batch claiming a time outside the window is marked stale and a re-attestation is requested"
+    "a batch claiming a time outside the window is marked stale and a re-attestation is requested",
+    "a live batch dated 301 seconds ahead of its receipt is refused as future-dated, while one dated 301 seconds behind is refused as stale with a request to re-attest"
    ]
   },
   {
@@ -3305,6 +3307,90 @@
    ],
    "red": [
     "a user part holding any of < > ( ) [ ] : ; , a backslash or a double quote is refused, while one with + or ' is accepted, as email atext allows"
+   ]
+  },
+  {
+   "id": "M246",
+   "title": "r_domain_vouch: the operator's switch does nothing",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (this.domainVouch && identity.includes('@')) {",
+     "    if (false) {"
+    ]
+   ],
+   "red": [
+    "with domain vouching on, a first contact with user@domain pins the key its domain publishes over HTTPS, and with it off the same contact needs an invitation"
+   ]
+  },
+  {
+   "id": "M247",
+   "title": "r_domain_vouch: any document the domain serves vouches",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (served && typeof served === 'object' && canonicalize(served) === canonicalize(first)) return;",
+     "      if (served) return;"
+    ]
+   ],
+   "red": [
+    "a domain vouches for no name outside it, never over plain HTTP or across a redirect to another host, and never replaces an already pinned key"
+   ]
+  },
+  {
+   "id": "M248",
+   "title": "r_domain_vouch: the domain is asked over plain HTTP",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "import * as https from 'node:https';",
+     "import * as https from 'node:http';"
+    ]
+   ],
+   "red": [
+    "a domain vouches for no name outside it, never over plain HTTP or across a redirect to another host, and never replaces an already pinned key"
+   ]
+  },
+  {
+   "id": "M249",
+   "title": "r_domain_vouch: a certificate no one trusts is accepted",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "      headers: { accept: 'application/json' } }, (res) => {",
+     "      headers: { accept: 'application/json' }, rejectUnauthorized: false }, (res) => {"
+    ]
+   ],
+   "red": [
+    "a domain vouches for no name outside it, never over plain HTTP or across a redirect to another host, and never replaces an already pinned key"
+   ]
+  },
+  {
+   "id": "M250",
+   "title": "r_domain_vouch: one domain answers for names under another",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "  const host = domainToASCII(identity.slice(at + 1));",
+     "  const host = 'example.org';"
+    ]
+   ],
+   "red": [
+    "a domain vouches for no name outside it, never over plain HTTP or across a redirect to another host, and never replaces an already pinned key"
+   ]
+  },
+  {
+   "id": "M251",
+   "title": "r_freshness: a stale batch is refused without the request to re-attest",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "          're-attestation requested: the publisher signs the same digest again with a current claimed_at');",
+     "          'the publisher signs the same digest again with a current claimed_at');"
+    ]
+   ],
+   "red": [
+    "a live batch dated 301 seconds ahead of its receipt is refused as future-dated, while one dated 301 seconds behind is refused as stale with a request to re-attest"
    ]
   }
  ]

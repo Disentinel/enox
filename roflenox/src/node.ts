@@ -30,6 +30,7 @@ import {
   answeredRule, bookRules, DEFAULT_ROFL_BIN, Engine, mayReadRules, parseLiteral, resultRule, splitArgs, SYSTEM_BOOK,
   type AskAnswer, type BookScope, type Explanation, type Unknown, type World,
 } from './engine.ts';
+import { domainDocument, type DomainTransport } from './domain.ts';
 import { verifyRequest } from './httpsig.ts';
 import { compileRule, RULE } from './rules.ts';
 import { RESULT } from './executor.ts';
@@ -89,6 +90,9 @@ export interface NodeOptions {
   /** A followed feed with no batch claimed within this many seconds is
    *  SILENT: answers that read it carry an unknown (default 1 h). */
   silenceSec?: number;
+  /** Let the domain of a user@domain identity vouch for its first key
+   *  (r_domain_vouch). Off by default; `true` uses the platform's DNS and CAs. */
+  domainVouch?: boolean | DomainTransport;
 }
 
 export const DEFAULT_SILENCE_SEC = 3600;
@@ -192,6 +196,7 @@ export class RoflenoxNode {
   /** The newest claimed_at of each identity's batches (ms): when it last spoke. */
   private readonly lastClaimed = new Map<string, number>();
   private readonly silenceSec: number;
+  private readonly domainVouch: DomainTransport | null;
   private recentFacts = 0;
   /** RFC 9421 nonces seen on signed requests: nonce → expiry (ms). */
   private readonly requestNonces = new Map<string, number>();
@@ -206,6 +211,7 @@ export class RoflenoxNode {
     this.publicUrl = o.publicUrl ? new URL(o.publicUrl).origin : null;
     this.ruleBudget = o.ruleBudget ?? DEFAULT_RULE_BUDGET;
     this.silenceSec = o.silenceSec ?? DEFAULT_SILENCE_SEC;
+    this.domainVouch = o.domainVouch === true ? {} : o.domainVouch || null;
     this.checkpointWindowMs = (o.checkpointWindowSec ?? DEFAULT_CHECKPOINT_WINDOW_SEC) * 1000;
   }
 
@@ -442,6 +448,12 @@ export class RoflenoxNode {
       const at = Math.floor(Date.parse(receivedAt) / 1000);
       const until = (await this.engine.sysRows(`delegate[${bookOf(parent)}](${roflString(identity)}, U)`)).map((r) => Number(r[0]));
       if (until.some((u) => at < u)) return;
+    }
+    // Its domain, when the operator lets domains vouch: the first document it
+    // serves must be exactly the one offered.
+    if (this.domainVouch && identity.includes('@')) {
+      const served = await domainDocument(identity, this.domainVouch);
+      if (served && typeof served === 'object' && canonicalize(served) === canonicalize(first)) return;
     }
     throw notVouched(identity);
   }

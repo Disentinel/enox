@@ -34,7 +34,7 @@ import { callOp, createIdentity, isLocal, OP, OPS, type Op } from './ops.ts';
 import { serveStdio } from './stdio.ts';
 
 const GLOBAL = new Set(['data', 'url']);
-const SERVE = ['port', 'host', 'public-url', 'freshness', 'checkpoint-window', 'backup-to', 'backup-every', 'name'];
+const SERVE = ['port', 'host', 'public-url', 'freshness', 'checkpoint-window', 'backup-to', 'backup-every', 'name', 'domain-vouch'];
 
 function parse(argv: string[]): { pos: string[]; f: Record<string, string> } {
   const pos: string[] = [];
@@ -75,6 +75,7 @@ async function serve(data: string, f: Record<string, string>): Promise<number> {
     freshnessSec: f.freshness ? Number(f.freshness) : undefined,
     publicUrl: f['public-url'] ?? process.env.ROFLENOX_PUBLIC_URL,
     checkpointWindowSec: f['checkpoint-window'] ? Number(f['checkpoint-window']) : undefined,
+    domainVouch: f['domain-vouch'] === 'on',
   });
   for (const r of node.log.recovered) process.stderr.write(`recovered: ${r}\n`);
   for (const w of node.warnings) process.stderr.write(`WARNING: ${w}\n`);

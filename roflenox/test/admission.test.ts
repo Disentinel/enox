@@ -348,3 +348,21 @@ test('a node given a second signed successor of the same batch keeps both signat
     await check('after a restart');
   } finally { await a.stop(); await b.stop(); }
 });
+
+test('a live batch dated 301 seconds ahead of its receipt is refused as future-dated, while one dated 301 seconds behind is refused as stale with a request to re-attest', async () => {
+  const a = await start(tmpDir('fresh301'), 'node-a', { freshnessSec: 300 });
+  try {
+    const t = a.clock.t;
+    const send = (claimed: number) => post(a.url, '/batches', batch(a.me, [fact('a', 'r', String(claimed))], null, iso(claimed)));
+    const ahead = await send(t + 301_000);
+    assert.deepEqual([ahead.status, ahead.body.error], [422, 'future_dated']);
+    assert.doesNotMatch(String(ahead.body.message), /re-attest/, 'nothing re-attests a date from the future');
+    const behind = await send(t - 301_000);
+    assert.deepEqual([behind.status, behind.body.error], [422, 'stale']);
+    assert.match(String(behind.body.message), /re-attestation requested/);
+    // Neither was kept.
+    assert.equal((await get(a.url, '/health')).body.facts, 0);
+    // Control: at the window's edges both ways, admitted.
+    assert.equal((await send(t - 300_000)).status, 201);
+  } finally { await a.stop(); }
+});

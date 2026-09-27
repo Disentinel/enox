@@ -90,3 +90,9 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_no_orphan_tests` at "34572fa77b7e52c361d36c2d705e18285bf84bf2".
 - `roflenox_core` takes `r_identity_names`.
 - `roflenox_core` takes `r_no_orphan_tests`.
+- `roflenox_core` finished `r_no_orphan_tests` at "2db9e9f9d7518478a277e98369bccc38681654b1".
+- `roflenox_core` finished `r_identity_names` at "2db9e9f9d7518478a277e98369bccc38681654b1".
+- `roflenox_core` is blocked on `r_freshness` by "the check says a batch 301 s behind is kept as stale, but no says defines kept: persisted in the log and left out of every answer until re-attested (a new held state), or refused with 422 stale as today; the two differ in storage, chain order and answers".
+- `roflenox_core` takes `r_domain_vouch`.
+- `roflenox_core` finished `r_domain_vouch` at "e63b41e1564229c02ffde8d8463f71ef03984823".
+- `roflenox_core` takes `r_freshness`.
