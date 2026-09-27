@@ -178,6 +178,8 @@ export class RoflenoxNode {
   private readonly ruleBudget: number;
   private readonly programs = new Map<string, string[]>();      // identity → its batches' fact programs
   private readonly results = new Map<string, string[]>();       // identity → its roflenox:result fact lines
+  /** Proven forks, per identity: the two signed successors of one batch. */
+  private readonly forks = new Map<string, { prev: string | null; proof: [Manifest, Manifest] }[]>();
   private readonly userRules = new Map<string, Map<string, string>>();  // author → rule fact id → compiled rule
   private readonly worlds = new Map<string, { w: World; version: number; clock: number }>();
   /** The current assertion of every fact, per identity (src/assertions.ts). */
@@ -232,6 +234,7 @@ export class RoflenoxNode {
     const batches: { v: Verified; rules: string | null; seq: number }[] = [];
     const receipts = n.log.receipts;
     for (const [ri, r] of receipts.entries()) {
+      if (r.kind === 'fork') { n.noteFork(n.log.read(r).manifest); continue; }
       if (r.kind === 'identity') {
         try {
           await n.applyDoc(n.log.readIdentity(r), r.received_at, false);
@@ -247,7 +250,7 @@ export class RoflenoxNode {
           manifest: s.manifest, reattest: r.reattest,
           ...(r.withheld ? { withheld: true } : { jsonl: s.jsonl, salt: s.salt }),
         }, r.received_at, r.withheld ? 'feed' : r.via === 'envelope' ? 'offline' : 'replay', s.pinned,
-          receipts.slice(ri + 1).filter((x) => x.identity === r.identity && x.kind !== 'identity').map((x) => x.digest), true);
+          receipts.slice(ri + 1).filter((x) => x.identity === r.identity && x.kind === undefined).map((x) => x.digest), true);
       } catch (e) {
         throw new Error(`log batch ${r.identity}/${r.digest} no longer verifies (${(e as Error).message}); refusing to start`);
       }
@@ -504,6 +507,36 @@ export class RoflenoxNode {
     this.factCount += v.facts.length;
   }
 
+  /** Remember a fork: `m`, validly signed, names the same prev as a batch in
+   *  its identity's chain. Kept durably (once) so the proof outlives a restart. */
+  private recordFork(m: Manifest, receivedAt: string): void {
+    if ((this.forks.get(m.identity) ?? []).some((f) => f.proof[1].digest === m.digest)) return;
+    this.log.appendFork(m, receivedAt);
+    this.noteFork(m);
+  }
+
+  private noteFork(m: Manifest): void {
+    const chain = this.chains.get(m.identity) ?? [];
+    const other = chain[m.prev === null ? 0 : chain.indexOf(m.prev) + 1];
+    const r = this.log.receipts.find((x) => x.kind === undefined && x.identity === m.identity && x.digest === other);
+    if (!r) return;
+    const f = this.forks.get(m.identity) ?? [];
+    f.push({ prev: m.prev, proof: [this.log.read(r).manifest, m] });
+    this.forks.set(m.identity, f);
+  }
+
+  /** Every answer over a forked identity's book says so, with the proof. */
+  private forkedUnknowns(scope: Map<string, BookScope>, book: string | null): Unknown[] {
+    const out: Unknown[] = [];
+    for (const [b, sc] of scope) {
+      if (book !== null && book !== b) continue;
+      for (const f of this.forks.get(sc.identity) ?? []) {
+        out.push({ identity: sc.identity, reason: `forked: two signed successors of ${f.prev ?? 'nothing (two first batches)'}`, proof: f.proof });
+      }
+    }
+    return out;
+  }
+
   /** A counter that moves with every admission. */
   logVersion(): number {
     return this.version;
@@ -673,6 +706,11 @@ export class RoflenoxNode {
     if (chain.includes(m.digest)) throw new Refusal(409, 'duplicate', 'this batch is already in the chain');
     const head = chain.length ? chain[chain.length - 1]! : null;
     if (m.prev !== head) {
+      // A second validly signed successor of a batch in the chain: the
+      // identity forked its history. Kept as proof by the caller (r_chain).
+      if (m.prev === null || chain.includes(m.prev)) {
+        throw new Refusal(409, 'forked', `${m.identity} signed two successors of ${m.prev ?? 'nothing (two first batches)'}; both are kept as proof of the fork`, { fork: m });
+      }
       throw new Refusal(409, 'chain_mismatch',
         `prev must be the head of ${m.identity}'s chain (${head ?? 'null: this is its first batch'})`);
     }
@@ -714,7 +752,16 @@ export class RoflenoxNode {
     const ident = (body?.manifest as Manifest | undefined)?.identity;
     const pending = body?.identity !== undefined && typeof ident === 'string'
       ? await this.applyChain(ident, body.identity, receivedAt, true, by) : null;
-    const v = this.verify(body, receivedAt, mode, pending, upcoming);
+    let v: Verified;
+    try {
+      v = this.verify(body, receivedAt, mode, pending, upcoming);
+    } catch (e) {
+      if (e instanceof Refusal && e.reason === 'forked') {
+        this.recordFork(e.detail.fork as Manifest, receivedAt);
+        delete e.detail.fork;
+      }
+      throw e;
+    }
     await this.checkDelegation(v.manifest, receivedAt, mode, pending);
     const id = v.manifest.identity;
     const rules = this.chains.has(id) ? null : bookRules(bookOf(id), id);
@@ -830,7 +877,12 @@ export class RoflenoxNode {
       await this.requireBook(query, requester, scope, false);
       this.fault('engine:ask');
       const { rel, book, args } = parseLiteral(query);
-      if (perspective !== null || rel === 'conf' || rel === 'persp') return this.askAssertions(rel, book, args, scope, perspective);
+      if (perspective !== null || rel === 'conf' || rel === 'persp') {
+        const a = await this.askAssertions(rel, book, args, scope, perspective);
+        const forked = this.forkedUnknowns(scope, book);
+        if (forked.length) a.unknown = [...(a.unknown ?? []), ...forked];
+        return a;
+      }
       const ans: AskAnswer = rel === 'answered' ? { vars: [], rows: [] } : await this.engine.ask(query, scope);
       // What the authors' own rules derive, from their rule worlds.
       const seen = new Set(ans.rows.map((r) => JSON.stringify([r.identity, r.cells])));
@@ -854,6 +906,7 @@ export class RoflenoxNode {
         }
         if (w.partial) unknown.push({ identity: sc.identity, reason: w.holes.join('; '), budget: this.ruleBudget, unit: 'steps' });
       }
+      unknown.push(...this.forkedUnknowns(scope, book));
       if (unknown.length) ans.unknown = unknown;
       ans.rows.sort((x, y) => { const p = JSON.stringify([x.identity, x.cells]), q = JSON.stringify([y.identity, y.cells]); return p < q ? -1 : p > q ? 1 : 0; });
       return ans;
@@ -1178,6 +1231,9 @@ export class RoflenoxNode {
         if ((b.manifest as Manifest)?.identity !== a.identity) {
           throw new Refusal(422, 'identity_mismatch', 'a feed carries batches of the attested identity only');
         }
+        // What is already held is not news; where the feed then diverges, a
+        // fork is proven and kept (r_chain), or the chain refuses it.
+        if (this.chains.get(String((b.manifest as Manifest)?.identity))?.includes(digests[i]!)) continue;
         await this.admitNow({ ...b, identity: body.identity }, 'feed', receivedAt, digests.slice(i + 1), by);
         admitted++;
       }
@@ -1214,6 +1270,9 @@ export class RoflenoxNode {
       if ((b.manifest as Manifest)?.identity !== c.identity) {
         throw new Refusal(422, 'identity_mismatch', 'a feed carries batches of the checkpointed identity only');
       }
+      // What is already held is not news; where the feed then diverges, a
+      // fork is proven and kept (r_chain), or the chain refuses it.
+      if (this.chains.get(String((b.manifest as Manifest)?.identity))?.includes(digests[i]!)) continue;
       await this.admitNow({ ...b, identity: body.identity }, 'feed', receivedAt, digests.slice(i + 1), by);
       admitted++;
     }
@@ -1242,7 +1301,7 @@ export class RoflenoxNode {
       }
       const sc = (await this.scopeFor(reader)).get(bookOf(identity));
       const allowed = (fid: string) => sc !== undefined && (sc.only === null || sc.only.has(fid));
-      const byDigest = new Map(this.log.receipts.filter((r) => r.identity === identity && r.kind !== 'identity').map((r) => [r.digest, r]));
+      const byDigest = new Map(this.log.receipts.filter((r) => r.identity === identity && r.kind === undefined).map((r) => [r.digest, r]));
       const batches = chain.slice(from).map((d): FeedEntry => {
         const s = this.log.read(byDigest.get(d)!);
         const extra = s.receipt.reattest ? { reattest: s.receipt.reattest } : {};
@@ -1298,7 +1357,8 @@ export class RoflenoxNode {
       identity: this.identity?.name ?? null,
       heads: Object.fromEntries([...this.chains.keys()].sort().map((id) => [id, this.head(id)])),
       facts: this.factCount,
-      batches: this.log.receipts.filter((r) => r.kind !== 'identity').length,
+      batches: this.log.receipts.filter((r) => r.kind === undefined).length,
+      forks: [...this.forks.values()].reduce((n, f) => n + f.length, 0),
       log_head: this.log.head(),
       engine: { up: !this.engine.dead, restarts: this.engineRestarts },
       warnings: this.warnings,

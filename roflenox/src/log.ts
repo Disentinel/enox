@@ -28,7 +28,9 @@ import { batchDigest, sha256hex } from './facts.ts';
 import { bookOf, type Attestation, type IdentityDoc, type Manifest } from './identity.ts';
 
 export interface Receipt {
-  kind?: 'identity';
+  /** 'fork': a second validly signed successor of a batch already in the
+   *  chain, kept (manifest only, never admitted) as proof of the fork (r_chain). */
+  kind?: 'identity' | 'fork';
   received_at: string;
   /** The batch digest; for an identity receipt, the document's SHA-256. */
   digest: string;
@@ -167,6 +169,15 @@ export class Log {
     if (jsonl !== null) writeFileAtomic(this.batchPath(manifest.identity, manifest.digest, 'jsonl'), jsonl, this.fault, 'jsonl');
     writeFileAtomic(this.batchPath(manifest.identity, manifest.digest, 'manifest.json'), canonicalize(manifest), this.fault, 'manifest');
     return this.commit({ received_at: receivedAt, digest: manifest.digest, identity: manifest.identity, pin: pinDigest, ...extra });
+  }
+
+  /** Durably keep a fork's second successor: its signed manifest, and a
+   *  receipt that is not a batch of the chain. */
+  appendFork(manifest: Manifest, receivedAt: string): Receipt {
+    const bookDir = path.join(this.dir, bookOf(manifest.identity));
+    fs.mkdirSync(bookDir, { recursive: true });
+    writeFileAtomic(this.batchPath(manifest.identity, manifest.digest, 'manifest.json'), canonicalize(manifest), this.fault, 'fork');
+    return this.commit({ kind: 'fork', received_at: receivedAt, digest: manifest.digest, identity: manifest.identity, pin: null, withheld: true });
   }
 
   /** Durably admit an identity document on its own. */

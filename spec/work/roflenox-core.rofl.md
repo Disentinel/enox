@@ -65,3 +65,5 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_identity_names`.
 - `roflenox_core` finished `r_identity_names` at "4800a6841d8476258cb98c07a16cfaf815353c4e".
 - `roflenox_core` takes `r_default_deny`.
+- `roflenox_core` finished `r_default_deny` at "a1bb4a0d379138676deab6a7b2bf05915362a5f7".
+- `roflenox_core` takes `r_chain`.

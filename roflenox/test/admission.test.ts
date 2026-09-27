@@ -1,13 +1,14 @@
 // Admission: signature, chain, book scoping, freshness, provenance.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bookOf } from '../src/identity.ts';
+import { bookOf, verifyManifestSig, type Manifest } from '../src/identity.ts';
+import { seal } from '../src/seal.ts';
 import { canonicalize } from '../src/jcs.ts';
 import { MAX_ENTITY, MAX_RELATION, newSalt, Refusal, toJsonl } from '../src/facts.ts';
-import { readFacts } from '../src/client.ts';
+import { publish, readFacts } from '../src/client.ts';
 import { Log } from '../src/log.ts';
 import { RoflenoxNode } from '../src/node.ts';
-import { batch, fact, get, identityAt, iso, post, start, T0, tmpDir } from './helpers.ts';
+import { batch, exportRule, fact, get, identityAt, invitation, iso, post, pull, start, T0, tmpDir } from './helpers.ts';
 
 test('a batch with one byte changed is rejected', async () => {
   const a = await start(tmpDir('byte'), 'node-a');
@@ -48,7 +49,7 @@ test('a batch inserted into the middle of a chain is rejected', async () => {
     const mid = batch(a.me, [fact('a', 'r', 'inserted')], b1.manifest.digest, iso(a.clock.t));
     const r = await post(a.url, '/batches', mid);
     assert.equal(r.status, 409);
-    assert.equal(r.body.error, 'chain_mismatch');
+    assert.equal(r.body.error, 'forked', 'a second successor of b1 is refused, and kept as proof of a fork (r_chain)');
     // A second "first" batch (prev null) is the same attack at the start.
     const r0 = await post(a.url, '/batches', batch(a.me, [fact('a', 'r', 'first')], null, iso(a.clock.t)));
     assert.equal(r0.status, 409);
@@ -290,4 +291,60 @@ test('a name made only of invisible or text-direction characters is refused, the
       assert.equal((await node(f)).status, 201, JSON.stringify(f));
     }
   } finally { await a.stop(); }
+});
+
+test('a node given a second signed successor of the same batch keeps both signatures as fork proof and marks every answer over that book', async () => {
+  const a = await start(tmpDir('fork-a'), 'node-a');
+  const dirB = tmpDir('fork-b');
+  let b = await start(dirB, 'node-b');
+  try {
+    await publish(a.url, a.me, [fact('alice', 'knows', 'bob'), exportRule('*', 'public')], () => a.clock.t);
+    await publish(a.url, a.me, [fact('alice', 'knows', 'carol')], () => a.clock.t);
+    await publish(b.url, b.me, [fact('b', 'own', 'fact')], () => b.clock.t);
+    assert.deepEqual(await pull(b, invitation(a), 'node-a'), { identity: 'node-a', batches: 2 });
+    const feed = (await get(a.url, '/feeds/node-a')).body as { identity: unknown; batches: { manifest: Manifest; jsonl: string; salt: string }[] };
+    const [b1, b2] = feed.batches.map((x) => x.manifest);
+    // node-a equivocates: other second batches, each validly signed, reach B by every door.
+    const other = (what: string) => batch(a.me, [fact('alice', 'knows', what)], b1!.digest, iso(b.clock.t));
+    const viaPost = other('mallory');
+    const viaFeed = other('trent');
+    const viaSeal = other('eve');
+    const sent = [
+      await post(b.url, '/batches', viaPost, { as: null }),
+      await post(b.url, '/feeds/admit', { identity: feed.identity, batches: [feed.batches[0], { manifest: viaFeed.manifest, jsonl: viaFeed.jsonl, salt: viaFeed.salt }],
+        checkpoint: a.me.checkpoint(viaFeed.manifest.digest, iso(b.clock.t)) }, { as: null }),
+      await post(b.url, '/sealed', seal(viaSeal, [{ identity: 'node-b', enc_public_key: b.me.identityDoc().doc.enc.public_key }]), { as: null }),
+    ];
+    assert.deepEqual(sent.map((r) => [r.status, r.body.error]), [[409, 'forked'], [409, 'forked'], [409, 'forked']]);
+
+    const key = a.me.identityDoc().doc.keys[0]!;
+    const check = async (label: string) => {
+      const h = (await get(b.url, '/health')).body;
+      assert.equal((h.heads as Record<string, string>)['node-a'], b2!.digest, `${label}: the chain is unchanged`);
+      assert.equal(h.forks, 3, `${label}: every fork is kept`);
+      // Every answer over node-a's book says it forked, with both signed successors.
+      for (const [q, as] of [[{ query: 'edge(F, S, R, T)' }, undefined], [{ query: `edge[${bookOf('node-a')}](F, S, R, T)` }, undefined],
+        [{ query: 'conf(F, C)' }, undefined], [{ query: 'edge(F, S, R, T)', perspective: 'test' }, undefined], [{ query: 'edge(F, S, R, T)' }, null]] as const) {
+        const r = await post(b.url, '/ask', q, as === null ? { as: null } : {});
+        const forks = ((r.body.unknown ?? []) as { identity: string; reason: string; proof: Manifest[] }[]).filter((u) => u.reason.startsWith('forked'));
+        assert.equal(forks.length, 3, `${label}: ${JSON.stringify(q)} ${as === null ? 'anonymous' : ''}`);
+        for (const f of forks) {
+          assert.equal(f.identity, 'node-a');
+          const [x, y] = f.proof;
+          assert.equal(x!.digest, b2!.digest);
+          assert.equal(x!.prev, y!.prev);
+          assert.notEqual(x!.digest, y!.digest);
+          assert.ok(verifyManifestSig(x!, key) && verifyManifestSig(y!, key), 'both successors are signed by node-a');
+        }
+        assert.deepEqual(forks.map((f) => f.proof[1]!.digest).sort(), [viaPost, viaFeed, viaSeal].map((x) => x.manifest.digest).sort());
+      }
+      // An answer over another book is not marked.
+      const own = await post(b.url, '/ask', { query: `edge[${bookOf('node-b')}](F, S, R, T)` });
+      assert.equal(own.body.unknown, undefined, `${label}: node-b's book did not fork`);
+    };
+    await check('live');
+    await b.stop();
+    b = await start(dirB, 'node-b');
+    await check('after a restart');
+  } finally { await a.stop(); await b.stop(); }
 });

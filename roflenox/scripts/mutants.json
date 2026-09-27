@@ -2799,6 +2799,90 @@
    "red": [
     "an anonymous caller of every open endpoint learns the node's own name and liveness and nothing about the identities, facts or batches it holds"
    ]
+  },
+  {
+   "id": "M203",
+   "title": "r_chain: a second successor is only a chain mismatch",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (m.prev === null || chain.includes(m.prev)) {",
+     "      if (false) {"
+    ]
+   ],
+   "red": [
+    "a node given a second signed successor of the same batch keeps both signatures as fork proof and marks every answer over that book"
+   ]
+  },
+  {
+   "id": "M204",
+   "title": "r_chain: a fork is not kept durably",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    this.log.appendFork(m, receivedAt);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a node given a second signed successor of the same batch keeps both signatures as fork proof and marks every answer over that book"
+   ]
+  },
+  {
+   "id": "M205",
+   "title": "r_chain: a restart forgets the forks",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (r.kind === 'fork') { n.noteFork(n.log.read(r).manifest); continue; }",
+     "if (r.kind === 'fork') continue;"
+    ]
+   ],
+   "red": [
+    "a node given a second signed successor of the same batch keeps both signatures as fork proof and marks every answer over that book"
+   ]
+  },
+  {
+   "id": "M206",
+   "title": "r_chain: an answer over a forked book is not marked",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      unknown.push(...this.forkedUnknowns(scope, book));\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a node given a second signed successor of the same batch keeps both signatures as fork proof and marks every answer over that book"
+   ]
+  },
+  {
+   "id": "M207",
+   "title": "r_chain: a confidence or perspective answer is not marked",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        if (forked.length) a.unknown = [...(a.unknown ?? []), ...forked];",
+     "        if (false) a.unknown = [...(a.unknown ?? []), ...forked];"
+    ]
+   ],
+   "red": [
+    "a node given a second signed successor of the same batch keeps both signatures as fork proof and marks every answer over that book"
+   ]
+  },
+  {
+   "id": "M208",
+   "title": "r_chain: a static copy that repeats held batches never reaches the fork",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "\n      if (this.chains.get(String((b.manifest as Manifest)?.identity))?.includes(digests[i]!)) continue;",
+     "\n      if (false) continue;"
+    ]
+   ],
+   "red": [
+    "a node given a second signed successor of the same batch keeps both signatures as fork proof and marks every answer over that book"
+   ]
   }
  ]
 }
