@@ -35,18 +35,23 @@ export interface DomainTransport {
 const LIMIT = 64 * 1024;
 const IN_FLIGHT = 4;
 
-/** Addresses that are not the public internet. */
-const INTERNAL = new BlockList();
+/** IPv4 addresses that are not the public internet. */
+const INTERNAL4 = new BlockList();
 for (const [net, bits] of [['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16], ['172.16.0.0', 12],
-  ['192.0.0.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['224.0.0.0', 4], ['240.0.0.0', 4]] as const) INTERNAL.addSubnet(net, bits, 'ipv4');
-for (const [net, bits] of [['::', 128], ['::1', 128], ['fc00::', 7], ['fe80::', 10], ['ff00::', 8]] as const) INTERNAL.addSubnet(net, bits, 'ipv6');
-/** (A BlockList sees IPv4 as IPv4-mapped IPv6, so the mapped range is not
- *  listed above; a mapped address is judged by the IPv4 it carries.) */
-export const isPublic = (address: string, family: number): boolean => {
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address);
-  if (mapped) return isPublic(mapped[1]!, 4);
-  return !INTERNAL.check(address, family === 6 ? 'ipv6' : 'ipv4');
-};
+  ['192.0.0.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['224.0.0.0', 4], ['240.0.0.0', 4]] as const) INTERNAL4.addSubnet(net, bits, 'ipv4');
+/** IPv6 is an ALLOW-list: global unicast 2000::/3 only, and not the ranges in
+ *  it that carry an IPv4 address or are not the internet (Teredo and friends
+ *  2001::/23, 6to4 2002::/16, documentation 2001:db8::/32). Everything else —
+ *  NAT64 64:ff9b::/96, IPv4-compatible ::a.b.c.d, mapped ::ffff:a.b.c.d,
+ *  unique-local, link-local, multicast — is not public. */
+const GLOBAL6 = new BlockList();
+GLOBAL6.addSubnet('2000::', 3, 'ipv6');
+const NOT_GLOBAL6 = new BlockList();
+for (const [net, bits] of [['2001::', 23], ['2002::', 16], ['2001:db8::', 32]] as const) NOT_GLOBAL6.addSubnet(net, bits, 'ipv6');
+/** (A BlockList matches an IPv4 rule against IPv4-mapped IPv6 too, so each
+ *  family is checked against its own list only by family.) */
+export const isPublic = (address: string, family: number): boolean =>
+  family === 6 ? GLOBAL6.check(address, 'ipv6') && !NOT_GLOBAL6.check(address, 'ipv6') : !INTERNAL4.check(address, 'ipv4');
 
 export class DomainVouch {
   private readonly cache = new Map<string, { at: number; doc: IdentityDoc | null }>();

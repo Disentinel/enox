@@ -119,7 +119,7 @@ test('an anonymous first contact as user@127.0.0.1, user@localhost or a user at 
     }
     assert.equal(connections, 0, 'no connection was made');
     // Control of the classification itself: public addresses are public.
-    assert.deepEqual(['8.8.8.8', '203.0.113.9', '2001:4860::8888', '::ffff:8.8.8.8'].map((x) => isPublic(x, x.includes(':') ? 6 : 4)), [true, true, true, true]);
+    assert.deepEqual(['8.8.8.8', '203.0.113.9', '2001:4860::8888', '2606:4700::1111'].map((x) => isPublic(x, x.includes(':') ? 6 : 4)), [true, true, true, true]);
     assert.deepEqual(['127.0.0.1', '10.1.2.3', '172.16.0.1', '192.168.1.1', '100.64.0.1', '169.254.169.254', '224.0.0.1', '::1', 'fd00::1', 'fe80::1', '::ffff:127.0.0.1']
       .map((x) => isPublic(x, x.includes(':') ? 6 : 4)), Array(11).fill(false));
     assert.deepEqual(asked.sort(), Object.keys(where).sort(), 'an IP literal or a single label is not even looked up');
@@ -169,4 +169,15 @@ test('a flood of first contacts naming many domains opens a bounded number of do
     assert.ok(most <= 4, `at most 4 at a time (saw ${most})`);
     assert.ok([...counts.values()].every((c) => c === 1) && counts.size === 12, 'each domain looked up once');
   } finally { await node.stop(); await web.close(); }
+});
+
+test('an internal IPv4 written in any IPv6 form, NAT64, 6to4, IPv4-compatible or mapped, is not a public address', () => {
+  const v6 = (x: string) => isPublic(x, 6);
+  // 10.0.0.5 and 127.0.0.1 in every IPv6 spelling that carries an IPv4 address.
+  for (const x of ['64:ff9b::a00:5', '64:ff9b::7f00:1', '2002:a00:5::1', '2002:7f00:1::', '::a00:5', '::7f00:1',
+    '::ffff:10.0.0.5', '::ffff:127.0.0.1', '2001:0:a00:5::1']) assert.equal(v6(x), false, x);
+  // And what is not the internet at all.
+  for (const x of ['2001:db8::1', '100::1', '::', '::1', 'fc00::1', 'fd12::1', 'fe80::1', 'ff02::1']) assert.equal(v6(x), false, x);
+  // Control: global unicast is public.
+  for (const x of ['2001:4860:4860::8888', '2606:4700::1111', '2a00:1450::1']) assert.equal(v6(x), true, x);
 });

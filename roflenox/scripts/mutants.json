@@ -3490,6 +3490,34 @@
    "red": [
     "an anonymous first contact as user@127.0.0.1, user@localhost or a user at a name resolving to a private address makes no outbound connection"
    ]
+  },
+  {
+   "id": "M259",
+   "title": "r_domain_vouch: IPv6 judged by a deny-list (only what is listed internal)",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "  family === 6 ? GLOBAL6.check(address, 'ipv6') && !NOT_GLOBAL6.check(address, 'ipv6') : !INTERNAL4.check(address, 'ipv4');",
+     "  family === 6 ? !NOT_GLOBAL6.check(address, 'ipv6') && !['::1', '::'].includes(address) : !INTERNAL4.check(address, 'ipv4');"
+    ]
+   ],
+   "red": [
+    "an internal IPv4 written in any IPv6 form, NAT64, 6to4, IPv4-compatible or mapped, is not a public address"
+   ]
+  },
+  {
+   "id": "M260",
+   "title": "r_domain_vouch: 6to4 and Teredo count as global",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "  family === 6 ? GLOBAL6.check(address, 'ipv6') && !NOT_GLOBAL6.check(address, 'ipv6') : !INTERNAL4.check(address, 'ipv4');",
+     "  family === 6 ? GLOBAL6.check(address, 'ipv6') : !INTERNAL4.check(address, 'ipv4');"
+    ]
+   ],
+   "red": [
+    "an internal IPv4 written in any IPv6 form, NAT64, 6to4, IPv4-compatible or mapped, is not a public address"
+   ]
   }
  ]
 }
