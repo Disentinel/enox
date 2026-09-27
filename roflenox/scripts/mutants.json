@@ -1645,16 +1645,16 @@
   },
   {
    "id": "M120",
-   "title": "r_relation_primary: a blank source, relation or target is let in",
+   "title": "r_relation_primary: blank means only ASCII-style white space (trim)",
    "file": "src/facts.ts",
    "edits": [
     [
-     "    if ((f[k] as string).trim().length === 0) throw",
-     "    if ((f[k] as string).length === 0) throw"
+     "    if (f[k].replace(INVISIBLE, '').length === 0) {",
+     "    if (f[k].trim().length === 0) {"
     ]
    ],
    "red": [
-    "a batch line that is not a relation between two entities is refused"
+    "a name made only of invisible or text-direction characters is refused, the same way by the client and the node"
    ]
   },
   {
@@ -1781,6 +1781,63 @@
    ],
    "red": [
     "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent"
+   ]
+  },
+  {
+   "id": "M130",
+   "title": "r_relation_primary: the node uses its own weaker check (drifts from the client)",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "    const f = checkFact(o, i + 1, admission);",
+     "    const f = checkFact(o, i + 1, false);\n    if (admission && (['source', 'relation', 'target'] as const).some((k) => f[k].trim() === '')) throw new Refusal(400, 'not_a_relation', `line ${i + 1}: blank`);"
+    ]
+   ],
+   "red": [
+    "a batch line that is not a relation between two entities is refused",
+    "a name made only of invisible or text-direction characters is refused, the same way by the client and the node"
+   ]
+  },
+  {
+   "id": "M131",
+   "title": "r_relation_primary: text-direction controls let inside a name",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "    if (BIDI.test(v)) throw",
+     "    if (false) throw"
+    ]
+   ],
+   "red": [
+    "a name made only of invisible or text-direction characters is refused, the same way by the client and the node"
+   ]
+  },
+  {
+   "id": "M132",
+   "title": "r_relation_primary: the client's loose-JSONL path skips the rule",
+   "file": "src/client.ts",
+   "edits": [
+    [
+     "    return checkFact(o, i + 1);\n",
+     "    return checkFact(o, i + 1, false);\n"
+    ]
+   ],
+   "red": [
+    "a name made only of invisible or text-direction characters is refused, the same way by the client and the node"
+   ]
+  },
+  {
+   "id": "M133",
+   "title": "r_relation_primary: blank blind to format characters (zero-width, BOM, bidi)",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "const INVISIBLE = /[\\p{White_Space}\\p{Cf}\\p{Cc}]/gu;",
+     "const INVISIBLE = /[\\p{White_Space}\\p{Cc}]/gu;"
+    ]
+   ],
+   "red": [
+    "a name made only of invisible or text-direction characters is refused, the same way by the client and the node"
    ]
   }
  ]

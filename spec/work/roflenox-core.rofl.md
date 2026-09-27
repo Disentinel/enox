@@ -34,3 +34,7 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_relation_primary` at "c7f2ea68049192b5ad4dffb5164ae8ef10fd14a3".
 - `roflenox_core` takes `r_semantic_search`.
 - `roflenox_core` takes `r_derived_rebuildable`.
+- `roflenox_core` finished `r_semantic_search` at "4170fad256ebfbac06d77bc0fefac9d2fac388d2".
+- `roflenox_core` finished `r_derived_rebuildable` at "4170fad256ebfbac06d77bc0fefac9d2fac388d2".
+- `roflenox_core` takes `r_uc_observability`.
+- `roflenox_core` is blocked on `r_uc_observability` by "the four host findings of 2026-09-26 are named nowhere: not in the spec, the repo, or Enox recall; the check cannot be written without them".

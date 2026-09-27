@@ -82,6 +82,35 @@ export function factId(f: { source: string; relation: string; target: string }):
   return sha256hex(canonicalize([f.source, f.relation, f.target]));
 }
 
+/** Characters that show nothing: white space, format characters (zero-width
+ *  spaces and joiners, the BOM, the bidi controls) and control characters. */
+const INVISIBLE = /[\p{White_Space}\p{Cf}\p{Cc}]/gu;
+/** Bidi embeddings, overrides and isolates: they reorder how a name LOOKS
+ *  without changing what it IS (Trojan Source). */
+const BIDI = /[\u202A-\u202E\u2066-\u2069]/u;
+
+/** A line is a directed typed relation between two entities, not a document
+ *  (r_relation_primary): the source is an entity — a name or id, one line, of
+ *  bounded length — the relation a type of the same kind, and the target an
+ *  entity or a value (Enox keeps attributes as relations to values: a label,
+ *  a description). None of them is blank or made only of invisible
+ *  characters, and a name never carries text-direction controls. The ONE
+ *  check: the client (toJsonl, readFacts) and the node (parseJsonl, the
+ *  operation table) all come through here, so they cannot drift. */
+export function checkRelation(f: Fact, at: string): void {
+  for (const k of ['source', 'relation', 'target'] as const) {
+    if (f[k].replace(INVISIBLE, '').length === 0) {
+      throw new Refusal(400, 'not_a_relation', `${at}: ${k} is blank — made only of invisible or text-direction characters`);
+    }
+  }
+  for (const [k, max] of [['source', MAX_ENTITY], ['relation', MAX_RELATION]] as const) {
+    const v = f[k];
+    if (BIDI.test(v)) throw new Refusal(400, 'not_a_relation', `${at}: ${k} carries a text-direction control, which makes a name look like another`);
+    if (/[\u0000-\u001f\u007f]/.test(v)) throw new Refusal(400, 'not_a_relation', `${at}: ${k} is an entity or a type, one line without control characters`);
+    if (v.length > max) throw new Refusal(400, 'not_a_relation', `${at}: ${k} is ${v.length} characters; an entity or a type is at most ${max} — a document is a value, the target of a relation`);
+  }
+}
+
 /** Throws a 400 Refusal naming the line if `o` is not a well-formed fact. */
 export function checkFact(o: unknown, line: number, admission = true): Fact {
   const at = `line ${line}`;
@@ -99,20 +128,9 @@ export function checkFact(o: unknown, line: number, admission = true): Fact {
       throw new Refusal(400, 'malformed_fact', `${at}: ${k} must be a non-empty string`);
     }
   }
-  // A line is a directed typed relation between two entities, not a document
-  // (r_relation_primary): the source is an entity — a name or id, one line, of
-  // bounded length — the relation a type of the same kind, and the target an
-  // entity or a value (Enox keeps attributes as relations to values: a label,
-  // a description). None of them is blank. This is ADMISSION's rule: a batch
-  // the log already holds is not judged again on replay (the log is truth).
-  if (admission) for (const k of ['source', 'relation', 'target']) {
-    if ((f[k] as string).trim().length === 0) throw new Refusal(400, 'not_a_relation', `${at}: ${k} is blank`);
-  }
-  if (admission) for (const [k, max] of [['source', MAX_ENTITY], ['relation', MAX_RELATION]] as const) {
-    const v = f[k] as string;
-    if (/[\u0000-\u001f\u007f]/.test(v)) throw new Refusal(400, 'not_a_relation', `${at}: ${k} is an entity or a type, one line without control characters`);
-    if (v.length > max) throw new Refusal(400, 'not_a_relation', `${at}: ${k} is ${v.length} characters; an entity or a type is at most ${max} — a document is a value, the target of a relation`);
-  }
+  // This is ADMISSION's rule: a batch the log already holds is not judged
+  // again on replay (the log is truth).
+  if (admission) checkRelation(f as unknown as Fact, at);
   if ((f.relation === GRANT || f.relation === DELEGATE) && (!TIME.test(f.target as string) || Number.isNaN(Date.parse(f.target as string)))) {
     throw new Refusal(400, 'malformed_fact', `${at}: a grant's target is its expiry, RFC 3339 UTC with milliseconds`);
   }

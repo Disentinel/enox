@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { bookOf } from '../src/identity.ts';
 import { canonicalize } from '../src/jcs.ts';
-import { MAX_ENTITY, MAX_RELATION, newSalt } from '../src/facts.ts';
+import { MAX_ENTITY, MAX_RELATION, newSalt, Refusal, toJsonl } from '../src/facts.ts';
+import { readFacts } from '../src/client.ts';
 import { Log } from '../src/log.ts';
 import { RoflenoxNode } from '../src/node.ts';
 import { batch, fact, get, identityAt, iso, post, start, T0, tmpDir } from './helpers.ts';
@@ -239,4 +240,54 @@ test('a batch line that is not a relation between two entities is refused', asyn
   log.append(me.signBatch(jsonl, null, iso(T0), salt), jsonl, iso(T0), me.identityDoc(), { salt });
   const n = await RoflenoxNode.open({ dataDir: dir, now: () => T0 + 60_000 });
   try { assert.equal((n.health() as { facts: number }).facts, 1); } finally { await n.close(); }
+});
+
+test('a name made only of invisible or text-direction characters is refused, the same way by the client and the node', async () => {
+  const a = await start(tmpDir('invisible'), 'node-a');
+  try {
+    const rel = (source: string, relation: string, target: string) => ({ source, relation, target, perspective: 'test', confidence: 0.9 });
+    const node = async (f: ReturnType<typeof rel>) => {
+      const jsonl = `${canonicalize(f)}\n`;
+      const salt = newSalt();
+      const manifest = a.me.signBatch(jsonl, a.node.head(a.me.name), iso(a.clock.t), salt);
+      const r = await post(a.url, '/batches', { manifest, jsonl, salt, identity: a.me.identityChain() });
+      return { status: r.status, error: r.body.error, message: r.body.message };
+    };
+    const client = (f: ReturnType<typeof rel>) => {
+      const seen: unknown[] = [];
+      for (const build of [() => toJsonl([f]), () => readFacts(`${JSON.stringify(f)}\n`)]) {
+        try { build(); seen.push(null); } catch (e) {
+          assert.ok(e instanceof Refusal, String(e));
+          seen.push({ status: e.status, error: e.reason, message: e.message });
+        }
+      }
+      assert.deepEqual(seen[0], seen[1], 'every client path refuses alike');
+      return seen[0] as { status: number; error: string; message: string } | null;
+    };
+    const refused = [
+      rel('​​', 'knows', 'bob'),              // zero-width spaces only
+      rel('‮', 'knows', 'bob'),                    // a right-to-left override only
+      rel('﻿', 'knows', 'bob'),                    // a byte-order mark only
+      rel('⁦⁩', 'knows', 'bob'),              // an isolate pair only
+      rel(' 　', 'knows', 'bob'),              // no-break and ideographic spaces
+      rel('alice', '‍', 'bob'),                    // a zero-width joiner as the relation
+      rel('alice', 'knows', '​'),                  // an invisible target
+      rel('admin‮gpj.exe', 'knows', 'bob'),        // a name that LOOKS like admin"exe.jpg"
+      rel('alice', 'knows⁧', 'bob'),               // a direction isolate inside a type
+    ];
+    for (const f of refused) {
+      const what = JSON.stringify(f);
+      const byClient = client(f);
+      const byNode = await node(f);
+      assert.equal(byNode.status, 400, `${what}: the node admitted it`);
+      assert.equal(byNode.error, 'not_a_relation', what);
+      assert.deepEqual(byClient, { status: 400, error: 'not_a_relation', message: byNode.message }, `${what}: the client and the node disagree`);
+    }
+    assert.equal((await get(a.url, '/health')).body.facts, 0);
+    // Controls: visible names that use joiners or other scripts are names.
+    for (const f of [rel('\u{1F469}‍\u{1F4BB}', 'is', 'a coder'), rel('Ада', 'знает', 'Боба'), rel('مرحبا', 'means', 'hello')]) {
+      assert.equal(client(f), null, JSON.stringify(f));
+      assert.equal((await node(f)).status, 201, JSON.stringify(f));
+    }
+  } finally { await a.stop(); }
 });
