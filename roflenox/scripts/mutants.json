@@ -110,7 +110,7 @@
    "red": [
     "delete everything except the log, restart, and every ask returns the same answers",
     "a committed log file that cannot be read stops the node instead of an empty start",
-    "killed at jsonl:renamed: the node restarts at the previous state and stays writable"
+    "a node killed at each point of a later batch restarts with it or at the previous head"
    ]
   },
   {
@@ -128,9 +128,7 @@
     ]
    ],
    "red": [
-    "killed at manifest:temp-written: the node restarts at the previous state and stays writable",
-    "killed at manifest:renamed: the node restarts at the previous state and stays writable",
-    "killed at index:committed: the node restarts with the batch and stays writable"
+    "a node killed at each point of a later batch restarts with it or at the previous head"
    ]
   },
   {
@@ -144,7 +142,7 @@
     ]
    ],
    "red": [
-    "killed at index:half-written: the node restarts at the previous state and stays writable"
+    "a node killed at each point of a later batch restarts with it or at the previous head"
    ]
   },
   {
@@ -3250,6 +3248,63 @@
    ],
    "red": [
     "a publisher whose clock steps back publishes on without a refusal, each batch claiming no earlier than the one before"
+   ]
+  },
+  {
+   "id": "M242",
+   "title": "r_identity_names: the user part may start or end with a dot",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "    if (!/^[\\p{L}\\p{N}!#$%&'*+\\-/=?^_`{|}~.]+$/u.test(local) || local.startsWith('.') || local.endsWith('.') || local.includes('..')",
+     "    if (!/^[\\p{L}\\p{N}!#$%&'*+\\-/=?^_`{|}~.]+$/u.test(local) || local.includes('..')"
+    ]
+   ],
+   "red": [
+    "admin@example.org@evil.example, ada@@example.org and ada.@example.org are refused, so no name reads as an identity of a domain it does not belong to"
+   ]
+  },
+  {
+   "id": "M243",
+   "title": "r_identity_names: the user part may hold two dots in a row",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "    if (!/^[\\p{L}\\p{N}!#$%&'*+\\-/=?^_`{|}~.]+$/u.test(local) || local.startsWith('.') || local.endsWith('.') || local.includes('..')",
+     "    if (!/^[\\p{L}\\p{N}!#$%&'*+\\-/=?^_`{|}~.]+$/u.test(local) || local.startsWith('.') || local.endsWith('.')"
+    ]
+   ],
+   "red": [
+    "admin@example.org@evil.example, ada@@example.org and ada.@example.org are refused, so no name reads as an identity of a domain it does not belong to"
+   ]
+  },
+  {
+   "id": "M244",
+   "title": "r_identity_names: the user part may hold any printable ASCII",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "    if (!/^[\\p{L}\\p{N}!#$%&'*+\\-/=?^_`{|}~.]+$/u.test(local) || local.startsWith('.') || local.endsWith('.') || local.includes('..')",
+     "    if (!/^[\\p{L}\\p{N}!-~]+$/u.test(local) || local.startsWith('.') || local.endsWith('.') || local.includes('..')"
+    ]
+   ],
+   "red": [
+    "a user part holding any of < > ( ) [ ] : ; , a backslash or a double quote is refused, while one with + or ' is accepted, as email atext allows",
+    "admin@example.org@evil.example, ada@@example.org and ada.@example.org are refused, so no name reads as an identity of a domain it does not belong to"
+   ]
+  },
+  {
+   "id": "M245",
+   "title": "r_identity_names: the user part may not hold an apostrophe",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "    if (!/^[\\p{L}\\p{N}!#$%&'*+\\-/=?^_`{|}~.]+$/u.test(local) || local.startsWith('.') || local.endsWith('.') || local.includes('..')",
+     "    if (!/^[\\p{L}\\p{N}!#$%&*+\\-/=?^_`{|}~.]+$/u.test(local) || local.startsWith('.') || local.endsWith('.') || local.includes('..')"
+    ]
+   ],
+   "red": [
+    "a user part holding any of < > ( ) [ ] : ; , a backslash or a double quote is refused, while one with + or ' is accepted, as email atext allows"
    ]
   }
  ]

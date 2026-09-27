@@ -83,3 +83,10 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_identity_names`.
 - `roflenox_core` finished `r_identity_names` at "3afa102a9be65b5e69fc77ca7da2839d8684ba77".
 - `roflenox_core` takes `r_rotation`.
+- `roflenox_core` finished `r_rotation` at "4f7c3617e44a355a89ed563c133438d5e58bd6fe".
+- `roflenox_core` takes `r_identity_names`.
+- `roflenox_core` finished `r_identity_names` at "fd7980616c080677b958b90759493edde1012954".
+- `roflenox_core` takes `r_no_orphan_tests`.
+- `roflenox_core` finished `r_no_orphan_tests` at "34572fa77b7e52c361d36c2d705e18285bf84bf2".
+- `roflenox_core` takes `r_identity_names`.
+- `roflenox_core` takes `r_no_orphan_tests`.

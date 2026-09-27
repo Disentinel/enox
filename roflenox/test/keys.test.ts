@@ -578,3 +578,33 @@ test('ada@example.org, Ada@Example.ORG and a fullwidth spelling of it are one id
     assert.equal((await post(a.url, '/batches', batch(bot, [fact('bot', 'did', 'x')], null, iso(a.clock.t)), { as: null })).status, 201);
   } finally { await a.stop(); }
 });
+
+test('admin@example.org@evil.example, ada@@example.org and ada.@example.org are refused, so no name reads as an identity of a domain it does not belong to', async () => {
+  const a = await start(tmpDir('at-a'), 'hub');
+  try {
+    // Also: a fullwidth @ (＠) that NFKC would turn into a second one, and the other dot-atom breaks.
+    for (const bad of ['admin@example.org@evil.example', 'ada@@example.org', 'ada.@example.org', '.ada@example.org', 'a..da@example.org',
+      'admin\uff20example.org@evil.example', '@example.org']) {
+      assert.throws(() => checkName(bad), /identity name/, bad);
+      assert.throws(() => identityAt(tmpDir('at-bad'), bad), /identity name/, bad);
+      assert.equal((await post(a.url, '/identities', [docNamed(bad)])).status, 400, bad);
+    }
+    // Control: the dot-atom forms that are fine.
+    for (const ok of ['ada@example.org', 'a.da@example.org', 'ada+tag@example.org']) assert.equal(checkName(ok), ok);
+  } finally { await a.stop(); }
+});
+
+test('a user part holding any of < > ( ) [ ] : ; , a backslash or a double quote is refused, while one with + or \' is accepted, as email atext allows', async () => {
+  const a = await start(tmpDir('atext-a'), 'hub');
+  try {
+    for (const c of ['<', '>', '(', ')', '[', ']', ':', ';', ',', '\\', '"']) {
+      const bad = `ada${c}x@example.org`;
+      assert.throws(() => checkName(bad), /identity name/, bad);
+      assert.equal((await post(a.url, '/identities', [docNamed(bad)])).status, 400, bad);
+    }
+    for (const ok of ['ada+tag@example.org', "o'brien@example.org", "ada.o'neil+x@example.org"]) {
+      assert.equal(checkName(ok), ok);
+      assert.equal((await post(a.url, '/identities', identityAt(tmpDir('atext-ok'), ok).identityChain())).status, 200, ok);
+    }
+  } finally { await a.stop(); }
+});

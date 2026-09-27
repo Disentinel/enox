@@ -7,7 +7,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,7 +24,11 @@ const ROFL_DIR = process.env.ROFL_DIR;
 
 // ROFL_DIR is passed explicitly; env values of null remove the variable for the child.
 function runCheck(specPath, env = {}) {
-  const full = { ...process.env, SPEC_ROOT: ROOT, ROFL_DIR, ...env };
+  return runCheckAt(specPath, ROOT, env);
+}
+
+function runCheckAt(specPath, root, env = {}) {
+  const full = { ...process.env, SPEC_ROOT: root, ROFL_DIR, ...env };
   for (const k of Object.keys(full)) if (full[k] == null) delete full[k];
   return new Promise((res) => {
     execFile(process.execPath, [CHECK, specPath], {
@@ -44,6 +48,41 @@ async function withDefect(mutate) {
     return await runCheck(p);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// A copy of the repository's tests and code (the executors' installed
+// packages and models linked, not copied), with test files planted or
+// changed, checked against a spec (the real one, or one changed by `mutate`).
+async function withTree(plant, mutate = (x) => x) {
+  const root = mkdtempSync(join(tmpdir(), 'spec-tree-'));
+  try {
+    const heavy = (p) => /[\\/](node_modules|\.models)$/.test(p);
+    cpSync(join(ROOT, 'roflenox'), join(root, 'roflenox'), { recursive: true, filter: (p) => !heavy(p) });
+    for (const ex of readdirSync(join(ROOT, 'roflenox', 'executors'))) {
+      for (const h of ['node_modules', '.models']) {
+        const from = join(ROOT, 'roflenox', 'executors', ex, h);
+        if (existsSync(from)) symlinkSync(from, join(root, 'roflenox', 'executors', ex, h));
+      }
+    }
+    mkdirSync(join(root, 'spec'));
+    for (const f of ['check.test.mjs', 'check.mjs']) cpSync(join(HERE, f), join(root, 'spec', f));
+    const text = mutate(readFileSync(SPEC, 'utf8'));
+    // Every other file a guard lives in (outside roflenox), as it is.
+    for (const homes of parseSpec(text).lives.values()) {
+      for (const { file } of homes) {
+        if (!existsSync(join(root, file)) && existsSync(join(ROOT, file))) {
+          mkdirSync(dirname(join(root, file)), { recursive: true });
+          cpSync(join(ROOT, file), join(root, file));
+        }
+      }
+    }
+    for (const [rel, body] of Object.entries(plant)) writeFileSync(join(root, rel), body);
+    const spec = join(root, 'spec', 'enox.rofl.md');
+    writeFileSync(spec, text);
+    return await runCheckAt(spec, root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 }
 
@@ -108,7 +147,7 @@ describe('spec gate', { concurrency: true }, () => {
   test('the real spec passes', async () => {
     const { code, out } = await baseline();
     assert.equal(code, 0, out);
-    for (const n of [1, 2, 3, 4, 5]) assert.match(checkLine(out, n), /^PASS /, out);
+    for (const n of [1, 2, 3, 4, 5, 6]) assert.match(checkLine(out, n), /^PASS /, out);
   });
 
   test('a requirement with its `is of` line removed fails typing, in ROFL and textually', async () => {
@@ -217,5 +256,44 @@ describe('spec gate', { concurrency: true }, () => {
     assert.notEqual(code, 0);
     assert.match(checkLine(out, 1), /^FAIL 1 reader: unparsed 1,/);
     assert.match(out, /unparsed: .*`r_typed` frobnicates wildly into the purple/);
+  });
+
+  test('a test that guards no requirement fails the spec gate, and linking it passes', async () => {
+    const orphan = { 'roflenox/test/zz-orphan.test.ts': "import { test } from 'node:test';\ntest('an orphan case zq9', () => {});\n" };
+    const bad = await withTree(orphan);
+    assert.notEqual(bad.code, 0);
+    assert.match(checkLine(bad.out, 6), /^FAIL 6 cases: .* orphans 1,/, bad.out);
+    assert.ok(bad.out.includes('orphan: "an orphan case zq9" in roflenox/test/zz-orphan.test.ts guards no requirement'), bad.out);
+    // Linked by a guard that lives in that file: the same tree passes.
+    const good = await withTree(orphan, (src) => afterFirstGuard(src, [
+      '- "an orphan case zq9" guards `r_zero_deps`.', '- "an orphan case zq9" lives in "roflenox/test/zz-orphan.test.ts".']));
+    assert.match(checkLine(good.out, 6), /^PASS 6 cases: .* orphans 0,/, good.out);
+    assert.equal(good.code, 0, good.out);
+  });
+
+  test('a test the scanner cannot read, or one the runner lists and the scanner does not, fails the spec gate', async () => {
+    const head = "import { test } from 'node:test';\n";
+    // A generated name the scanner cannot read.
+    const tpl = await withTree({ 'roflenox/test/zz-tpl.test.ts': `${head}for (const n of [1, 2]) {\n  test(\`generated case \${n}\`, () => {});\n}\n` });
+    assert.notEqual(tpl.code, 0);
+    assert.match(checkLine(tpl.out, 6), /^FAIL 6 cases: .* unreadable 1,/, tpl.out);
+    assert.ok(tpl.out.includes('roflenox/test/zz-tpl.test.ts: test `generated case ${n}` has no static name'), tpl.out);
+    // A name only the runner sees: the case exists, the scanner is blind to it.
+    const hid = await withTree({ 'roflenox/test/zz-hidden.test.ts': `${head}const name = 'a hidden case zq10';\ntest(name, () => {});\n` });
+    assert.notEqual(hid.code, 0);
+    assert.match(checkLine(hid.out, 6), /^FAIL 6 cases: .* runner-only 1,/, hid.out);
+    assert.ok(hid.out.includes('roflenox/test/zz-hidden.test.ts: the runner lists "a hidden case zq10", the scanner does not'), hid.out);
+  });
+
+  test('an accepted requirement whose checks guard no existing test fails the spec gate', async () => {
+    // A requirement that says something but has no guard at all, marked accepted.
+    const src = readFileSync(SPEC, 'utf8');
+    const { says, guards } = parseSpec(src);
+    const id = [...says.keys()].find((r) => !guards.some((g) => g.id === r));
+    assert.ok(id, 'the spec has a requirement without guards to plant this on');
+    const { code, out } = await withDefect((s) => afterFirstGuard(s, [`- \`${id}\` is accepted at "deadbeef".`]));
+    assert.notEqual(code, 0);
+    assert.match(checkLine(out, 6), /^FAIL 6 cases: .* accepted unguarded 1$/, out);
+    assert.ok(out.includes(`accepted ${id} has no guard naming an existing test`), out);
   });
 });

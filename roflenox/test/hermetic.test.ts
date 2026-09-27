@@ -3,7 +3,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { isolated, nestedSuite, orphanEngines, sandboxEnv, suiteFiles, type Nested } from './sandbox.ts';
 
 const ROOT = path.join(import.meta.dirname, '..');
 
@@ -28,29 +27,5 @@ test('package.json declares no dependencies', () => {
   assert.deepEqual(foreignImports("import x from 'lodash';\nimport { y } from './y.ts';\nconst z = await import('" + "left-pad');"), ['lodash', 'left-pad']);
 });
 
-let nested: Nested | null = null;
-/** One nested run of the whole suite, shared by the checks below. */
-const suite = (): Nested => (nested ??= nestedSuite(suiteFiles()));
-
-test('the full test suite passes with no network and no model files', () => {
-  const env = sandboxEnv();
-  // Positive control: the isolation really does refuse the network (TEST-NET-1,
-  // a documentation address, so an unisolated run would not reach anyone).
-  // macOS answers EPERM; an empty Linux namespace has no route: ENETUNREACH.
-  const probe = isolated(['-e', `require('net').connect(80,'192.0.2.1').on('error',e=>{console.log(e.code);process.exit(0)}).on('connect',()=>{console.log('CONNECTED');process.exit(0)}).setTimeout(3000,()=>{console.log('TIMEOUT');process.exit(0)})`], env);
-  assert.equal(probe.status, 0, `the isolation itself failed to start: ${probe.stderr}${probe.error ?? ''}`);
-  assert.match(probe.stdout.trim(), /^(EPERM|ENETUNREACH)$/, `network probe inside isolation: ${probe.stdout}${probe.stderr}`);
-
-  const r = suite();
-  assert.equal(r.status, 0, `nested suite failed:\n${r.report}\n${r.stderr}`);
-  assert.equal(r.fail, 0);
-  assert.ok(r.pass >= 20, `the nested run actually ran the suite (pass ${r.pass})`);
-});
-
-test('every test file exits on its own without force-exit, leaving no engine process behind', () => {
-  const before = orphanEngines();
-  const r = suite();                                             // (run without --test-force-exit)
-  assert.equal(r.status, 0, `a file did not finish on its own:\n${r.report}\n${r.stderr}`);
-  const left = [...orphanEngines()].filter((p) => !before.has(p));
-  assert.deepEqual(left, [], 'engine processes left behind by the suite');
-});
+// The whole-suite nested runs (no network, no force-exit, five in a row) are
+// the hermetic5 gate's: test/hermetic5/hermetic5.test.ts.

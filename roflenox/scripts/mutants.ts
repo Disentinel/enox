@@ -50,9 +50,9 @@ function args(): { only: Set<string> | null; extra: string | null; workers: numb
  *  files largest-first onto the lightest shard, so shards come out even and
  *  deterministic. */
 /** What one mutant of a file costs, in ordinary mutants (~1.7 s), as measured
- *  2026-09-27: the hermetic file runs the whole suite nested (~30 s), the
- *  durability file kills and restarts child processes. */
-const COST: Record<string, number> = { 'test/hermetic.test.ts': 20, 'test/durability.test.ts': 3 };
+ *  2026-09-27: the durability file kills and restarts child processes. (The
+ *  whole-suite nested runs are the hermetic5 gate's.) */
+const COST: Record<string, number> = { 'test/durability.test.ts': 3 };
 
 function shardOf(list: Mutant[], n: number): Map<Mutant, number> {
   const byFile = new Map<string, Mutant[]>();
@@ -108,7 +108,7 @@ function suiteTestNames(suite: string): Set<string> {
   const dir = path.join(ROOT, 'test', suite);
   const names = new Set<string>();
   for (const f of fs.existsSync(dir) ? fs.readdirSync(dir).filter((x) => x.endsWith('.test.ts')) : []) {
-    for (const m of fs.readFileSync(path.join(dir, f), 'utf8').matchAll(/(?:^|[^.\w])test\('((?:[^'\\]|\\.)*)'/g)) names.add(m[1]!.replace(/\\'/g, "'"));
+    for (const m of fs.readFileSync(path.join(dir, f), 'utf8').matchAll(/^\s*test\('((?:[^'\\]|\\.)*)'/gm)) names.add(m[1]!.replace(/\\'/g, "'"));
   }
   return names;
 }
@@ -230,8 +230,11 @@ async function main(): Promise<number> {
   if (shard) { const of = shardOf(all, shard[1]); all = all.filter((m) => of.get(m) === shard[0]); }
   const survivors = all.filter((m) => m.survivor);
   const queue = all.filter((m) => !m.survivor);
-  // The baseline: every named red test, once, on the unmutated tree.
-  const reds = [...new Set(queue.flatMap((m) => m.red ?? []))];
+  // The baseline: every named red test, once, on the unmutated tree — and in
+  // a suite with a gate of its own, every test of that suite (its gate is the
+  // only place those tests run).
+  const own = suite !== 'test' && !only && !shard ? [...suiteTestNames(suite)] : [];
+  const reds = [...new Set([...queue.flatMap((m) => m.red ?? []), ...own])];
   if (reds.length) {
     const tree = copyTree();
     const b = await run(tree, reds, SLOW[suite] ?? 90_000);

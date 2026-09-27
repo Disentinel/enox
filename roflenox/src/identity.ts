@@ -71,8 +71,16 @@ export function checkName(name: string): string {
   if (host === '') throw refuse();
   let canonical = host;
   if (at >= 0) {
+    // One @ at most (atext below has none), and the user part a dot-atom
+    // (RFC 5321): no dot at
+    // its ends, no two dots in a row — so admin@example.org@evil.example can
+    // never read as example.org's admin.
     const local = name.slice(0, at).normalize('NFKC').toLowerCase().normalize('NFC');
-    if (!/^[\p{L}\p{N}!-~]+$/u.test(local) || !singleScript(local)) throw refuse();
+    // Letters and digits (any script, as SMTPUTF8 allows) and email atext's
+    // marks: no < > ( ) [ ] : ; , \\ " — the characters that make a quoted or
+    // bracketed part, which a name never has (RFC 5322 3.2.3).
+    if (!/^[\p{L}\p{N}!#$%&'*+\-/=?^_`{|}~.]+$/u.test(local) || local.startsWith('.') || local.endsWith('.') || local.includes('..')
+      || !singleScript(local)) throw refuse();
     canonical = `${local}@${host}`;
   }
   if (canonical.length > 253) throw refuse();

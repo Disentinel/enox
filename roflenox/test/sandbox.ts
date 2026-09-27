@@ -34,8 +34,9 @@ export function isolated(args: string[], env: Record<string, string>, timeout = 
 export const sandboxEnv = (): Record<string, string> =>
   ({ PATH: '/usr/sbin:/usr/bin:/sbin:/bin', HOME: tmpDir('empty-home'), TMPDIR: tmpDir('sandbox-tmp'), ROFL_BIN: DEFAULT_ROFL_BIN });
 
-/** Every test file but the hermetic ones. */
-export const suiteFiles = () => fs.readdirSync(path.join(ROOT, 'test')).filter((f) => f.endsWith('.test.ts') && f !== 'hermetic.test.ts').map((f) => `test/${f}`);
+/** Every test file of npm test (test/*.test.ts; the gates' own suites in its
+ *  subdirectories are not part of it). */
+export const suiteFiles = () => fs.readdirSync(path.join(ROOT, 'test')).filter((f) => f.endsWith('.test.ts')).map((f) => `test/${f}`);
 
 /** Each failing test of a TAP run with its OWN error block, so a nested
  *  failure is read where it happened, not as a bare exit code. */

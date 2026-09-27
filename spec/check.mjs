@@ -18,13 +18,20 @@
 //                have a `"T" lives in "P"`, P must exist and contain a test named exactly T.
 //   5. status    counts of ROFL `? R is ready`, `? R is unchecked`, `? R is underspecified`
 //                (reported, never failed — unless the query itself errors).
+//   6. cases     r_no_orphan_tests: the test files (roflenox/test/**, roflenox/executors/*/test,
+//                spec/check.test.mjs) are read twice — by a static scanner, and by the runner
+//                itself (spec/test-list: each file imported under a node:test shim that records
+//                every test() the module makes) — and the two lists must agree, file by file;
+//                a test() whose name is not a static string is unreadable. Every test case
+//                guards a requirement (a `guards` fact, or a plan that names it), and every
+//                ACCEPTED requirement has at least one verified `guards` fact.
 //
 // Env: ROFL_DIR   — required: a checkout of the rofl repo on origin/main (needs `npm run read`
 //                   and `npm run repl`); there is no default
 //      SPEC_ROOT  — repository root that guard paths and roflenox/test resolve against
 //                   (default: the parent of this script's directory)
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -59,6 +66,7 @@ export function parseSpec(src) {
   const plans = [];            // {id, text, n}
   const guards = [];           // {test, id, n}
   const lives = new Map();     // test -> [{file, n}]
+  const accepted = new Set();  // ids with an `is accepted at` line
   for (const { n, line } of factLines(src)) {
     let m;
     if ((m = line.match(/^- `(\w+)` says /))) {
@@ -72,18 +80,28 @@ export function parseSpec(src) {
       plans.push({ id: m[1], text: unq(m[2]), n });
     } else if ((m = line.match(new RegExp(`^- ${STR} guards \`(\\w+)\`\\.?$`)))) {
       guards.push({ test: unq(m[1]), id: m[2], n });
+    } else if ((m = line.match(/^- `(\w+)` is accepted at /))) {
+      accepted.add(m[1]);
     } else if ((m = line.match(new RegExp(`^- ${STR} lives in ${STR}\\.?$`)))) {
       const t = unq(m[1]);
       if (!lives.has(t)) lives.set(t, []);
       lives.get(t).push({ file: unq(m[2]), n });
     }
   }
-  return { says, kinds, badKindLines, plans, guards, lives };
+  return { says, kinds, badKindLines, plans, guards, lives, accepted };
 }
 
 // ---------- test names in a test file ----------
 
 const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** A JS string literal's content, unescaped as JS does (\uXXXX, \u{…}, \xXX, \n, \', …). */
+export function jsUnescape(body) {
+  const simple = { n: '\n', t: '\t', r: '\r', b: '\b', f: '\f', v: '\v', 0: '\0' };
+  return body.replace(/\\(u\{([0-9a-fA-F]+)\}|u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|\r?\n|.)/gs, (_, all, cp, u4, x2) =>
+    cp ? String.fromCodePoint(parseInt(cp, 16)) : u4 ? String.fromCharCode(parseInt(u4, 16)) : x2 ? String.fromCharCode(parseInt(x2, 16))
+      : /^\r?\n$/.test(all) ? '' : simple[all] ?? all);
+}
 
 // Returns [{name, match(text) -> bool, template}] for test('...') / it('...') calls.
 // A template literal with ${...} becomes a pattern where each substitution matches any text.
@@ -93,15 +111,51 @@ export function testNames(code) {
   let m;
   while ((m = re.exec(code))) {
     if (m[3] !== undefined && m[3].includes('${')) {
-      const parts = m[3].split(/\$\{[^}]*\}/).map((p) => escRe(unq(p)));
+      const parts = m[3].split(/\$\{[^}]*\}/).map((p) => escRe(jsUnescape(p)));
       const rx = new RegExp(`^${parts.join('.+?')}$`, 's');
       out.push({ name: m[3], template: true, match: (t) => rx.test(t) });
     } else {
-      const name = unq(m[1] ?? m[2] ?? m[3]);
+      const name = jsUnescape(m[1] ?? m[2] ?? m[3]);
       out.push({ name, template: false, match: (t) => t === name });
     }
   }
   return out;
+}
+
+// ---------- the test cases of the repository ----------
+
+/** The test CASES of a file as the scanner reads them: test()/it() calls that
+ *  open a line (a test() inside a string or an expression is code the file
+ *  writes, not a case of its own). {name, template}: a template name with
+ *  \${…} cannot be read statically. */
+export function scanCases(code) {
+  return testNames(code.split('\n').filter((l) => /^\s*(?:test|it)(?:\.(?:only|skip|todo))?\(/.test(l)).join('\n'))
+    .map(({ name, template }) => ({ name, template }));
+}
+
+/** Every test file the gate knows of, relative to root, sorted. */
+export function testFiles(root) {
+  const out = [];
+  const walk = (rel) => {
+    const abs = join(root, rel);
+    if (!existsSync(abs)) return;
+    for (const e of readdirSync(abs, { withFileTypes: true })) {
+      if (e.isDirectory() && e.name !== 'node_modules' && e.name !== 'fixtures') walk(join(rel, e.name));
+      else if (e.isFile() && /\.test\.(ts|mjs)$/.test(e.name)) out.push(join(rel, e.name));
+    }
+  };
+  walk(join('roflenox', 'test'));
+  const ex = join(root, 'roflenox', 'executors');
+  if (existsSync(ex)) for (const d of readdirSync(ex)) walk(join('roflenox', 'executors', d, 'test'));
+  if (existsSync(join(root, 'spec', 'check.test.mjs'))) out.push(join('spec', 'check.test.mjs'));
+  return out.sort();
+}
+
+/** The runner's own list: {file: [names]} or {file: {error}} (spec/test-list). */
+export function runnerList(root, files) {
+  const r = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', '--import', join(HERE, 'test-list', 'register.mjs'),
+    join(HERE, 'test-list', 'list.mjs'), ...files], { cwd: root, encoding: 'utf8', timeout: 60_000, maxBuffer: 16 << 20 });
+  try { return JSON.parse(r.stdout); } catch { return { error: `the lister did not answer (exit ${r.status}): ${(r.stderr ?? '').split('\n')[0]}` }; }
 }
 
 // ---------- ROFL tooling ----------
@@ -245,12 +299,8 @@ export function check(specPath, { roflDir, root } = {}) {
   // 4. links
   {
     const det = [];
-    const testDir = join(root, 'roflenox', 'test');
-    const suite = existsSync(testDir)
-      ? readdirSync(testDir).filter((f) => f.endsWith('.test.ts')).flatMap((f) =>
-          testNames(readFileSync(join(testDir, f), 'utf8')).map((t) => ({ ...t, file: `roflenox/test/${f}` })))
-      : [];
-    if (suite.length === 0) det.push(`no test names found under ${testDir} (cannot link anything)`);
+    const suite = testFiles(root).flatMap((f) => testNames(readFileSync(join(root, f), 'utf8')).map((t) => ({ ...t, file: f })));
+    if (suite.length === 0) det.push(`no test names found under ${root} (cannot link anything)`);
     const linked = [], unlinked = [];
     for (const p of spec.plans) (suite.some((t) => t.match(p.text)) ? linked : unlinked).push(p);
     for (const p of unlinked) det.push(`unlinked plan (reported): ${p.id}: "${p.text}"`);
@@ -290,7 +340,44 @@ export function check(specPath, { roflDir, root } = {}) {
       [...controlBad, ...errs.map((a) => `ROFL ? ${a.query} errored: ${a.error}`)]);
   }
 
-  return { ok: results.every(Boolean) && results.length === 5, lines };
+  // 6. cases
+  {
+    const det = [];
+    const files = testFiles(root);
+    const listed = runnerList(root, files);
+    let unreadable = 0, runnerOnly = 0, scannerOnly = 0, orphans = 0, scanned = 0, ran = 0;
+    const guarded = (name, file) => spec.guards.some((g) => g.test === name && (spec.lives.get(name) ?? []).some((h) => h.file === file))
+      || spec.plans.some((p) => p.text === name);
+    if (listed.error) det.push(`runner list: ${listed.error}`);
+    for (const f of files) {
+      const found = scanCases(readFileSync(join(root, f), 'utf8'));
+      for (const t of found.filter((x) => x.template)) { unreadable++; det.push(`${f}: test \`${t.name}\` has no static name (the scanner cannot read it; make it one static test with t.test subtests)`); }
+      const statics = found.filter((x) => !x.template).map((x) => x.name);
+      scanned += statics.length;
+      const run = listed.error ? null : listed[f];
+      if (run === undefined || run === null || !Array.isArray(run)) {
+        det.push(`${f}: the runner could not list it${run?.error ? `: ${run.error}` : ''}`);
+        runnerOnly++;
+        continue;
+      }
+      ran += run.length;
+      const left = [...statics];
+      for (const n of run) {
+        const i = left.indexOf(n);
+        if (i >= 0) left.splice(i, 1);
+        else { runnerOnly++; det.push(`${f}: the runner lists "${n}", the scanner does not`); }
+      }
+      for (const n of left) { scannerOnly++; det.push(`${f}: the scanner reads "${n}", the runner does not list it`); }
+      for (const n of new Set(statics)) if (!guarded(n, f)) { orphans++; det.push(`orphan: "${n}" in ${f} guards no requirement`); }
+    }
+    const unguarded = [...spec.accepted].filter((id) => !spec.guards.some((g) => g.id === id
+      && (spec.lives.get(g.test) ?? []).some((h) => existsSync(join(root, h.file)) && testNames(readFileSync(join(root, h.file), 'utf8')).some((t) => t.match(g.test)))));
+    for (const id of unguarded) det.push(`accepted ${id} has no guard naming an existing test`);
+    record(!listed.error && unreadable + runnerOnly + scannerOnly + orphans + unguarded.length === 0 && scanned > 0,
+      `6 cases: files ${files.length}, tests ${scanned} (runner ${ran}); unreadable ${unreadable}, runner-only ${runnerOnly}, scanner-only ${scannerOnly}, orphans ${orphans}, accepted unguarded ${unguarded.length}`, det);
+  }
+
+  return { ok: results.every(Boolean) && results.length === 6, lines };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

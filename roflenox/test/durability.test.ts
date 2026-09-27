@@ -86,8 +86,9 @@ const POINTS: [string, boolean][] = [
   ['index:half-written', false], ['index:committed', true],
 ];
 
-for (const [point, committed] of POINTS) {
-  test(`killed at ${point}: the node restarts ${committed ? 'with the batch' : 'at the previous state'} and stays writable`, async () => {
+// One static test (the unit a requirement links to), a subtest per point.
+test('a node killed at each point of a later batch restarts with it or at the previous head', async (tt) => {
+  for (const [point, committed] of POINTS) await tt.test(`killed at ${point}: the node restarts ${committed ? 'with the batch' : 'at the previous state'} and stays writable`, async () => {
     const dir = tmpDir('crash');
     const first = point.startsWith('identity:');
     let a = await start(dir, 'node-a');
@@ -131,7 +132,7 @@ for (const [point, committed] of POINTS) {
       assert.equal(rows.length, 1);
     } finally { await a.stop(); }
   });
-}
+});
 
 test('a node killed at each write step reopens with the whole batch or none of it', async () => {
   // The write steps are not listed here but found: every fault point one
