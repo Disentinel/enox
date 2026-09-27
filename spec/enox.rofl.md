@@ -428,9 +428,13 @@ Declared as facts:
 - `r_identity_names` binds as `must`.
 - `r_identity_names` says "users address identities by name; in normal operation no key, fingerprint or signature is shown or asked for".
 - `r_identity_names` is stated in "owner 2026-09-26".
-- `r_identity_names` says "a name is 1 to 128 lowercase ASCII letters, digits and the marks . _ @ -, starting with a letter or digit; one format for people, hosts and agents; no two names differ only in letter case, because an uppercase letter is refused rather than folded".
-- `r_identity_names` is to be checked by "a name with a space, a non-ASCII letter or an invisible mark is refused, and a name of 128 allowed characters is accepted".
-- `r_identity_names` is to be checked by "a name with an uppercase letter is refused by the client and by the node, so node-a and Node-A can never both be pinned".
+- `r_identity_names` says "a name is normalised by IDNA UTS 46 processing (NFC, case folding, punycode; the platform's domainToASCII) into its canonical ASCII form, which is the identity; its Unicode form is how it is shown; one format for people, hosts and agents".
+- `r_identity_names` says "a name is refused when normalisation refuses it, when a label mixes letters of more than one script, when a label is longer than 63 or the whole longer than 253 characters, or when a label starts or ends with a hyphen".
+- `r_identity_names` says "every door that compares names — pinning, grants, delegation, follows, invitations, books — compares canonical forms through one function".
+- `r_identity_names` is to be checked by "a name with a space or a text-direction mark is refused, and names at the label and total length limits are accepted".
+- `r_identity_names` is to be checked by "Node-A, node-a and NODE-A are one identity, and so are a composed and a decomposed accent and a name with a zero-width mark".
+- `r_identity_names` is to be checked by "a label mixing Cyrillic and Latin letters is refused, while an all-Cyrillic name is accepted and shown in Cyrillic".
+- `r_identity_names` is to be checked by "a grant, a delegation and a follow written with a differently cased or composed name act on the same identity".
 - `r_identity_names` is to be checked by "an end-to-end pull between two nodes whose transcript contains no key material".
 - `r_keys_automatic` is about `identity`.
 - `r_keys_automatic` binds as `must`.
