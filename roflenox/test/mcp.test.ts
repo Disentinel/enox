@@ -1,6 +1,9 @@
 // The MCP adapter: a thin JSON-RPC layer over the same admission and access.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { heldViews } from '../src/enox-ops.ts';
 import { bookOf } from '../src/identity.ts';
 import { get, identityAt, post, start, tmpDir } from './helpers.ts';
 
@@ -68,5 +71,48 @@ test('an MCP client lists the tools, asserts a fact, and asks it back with why, 
     assert.equal((await rpc('no/such', {})).body.error.code, -32601);
     assert.equal((await fetch(`${a.url}/mcp`)).status, 405);
     assert.equal((await get(a.url, '/health')).body.facts, 1, 'nothing else was admitted');
+  } finally { await a.stop(); }
+});
+
+test('the MCP endpoint issues no session id and keeps no state per client', async () => {
+  const a = await start(tmpDir('mcp-stateless'), 'node-a');
+  try {
+    const token = a.node.operatorToken();
+    const raw = async (msg: unknown, headers: Record<string, string> = {}) => {
+      const r = await fetch(`${a.url}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(msg) });
+      return { status: r.status, session: r.headers.get('mcp-session-id'), body: r.status === 202 ? null : await r.json() as Record<string, any> };
+    };
+    const init = { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 't', version: '0' } } };
+    const stats = { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'graph_stats', arguments: {} } };
+    // No session id is issued — to the operator, to nobody, on initialize or after.
+    for (const auth of [{ authorization: `Bearer ${token}` }, {}]) {
+      for (const m of [init, { jsonrpc: '2.0', method: 'notifications/initialized' }, stats]) {
+        const r = await raw(m, auth);
+        assert.equal(r.session, null, `no Mcp-Session-Id on ${JSON.stringify(m).slice(0, 40)}`);
+      }
+    }
+    // A client that never initialized is served; a made-up session id changes nothing.
+    const bare = await raw(stats, { authorization: `Bearer ${token}` });
+    const forged = await raw(stats, { authorization: `Bearer ${token}`, 'mcp-session-id': 'made-up-session' });
+    assert.equal(forged.status, 200);
+    assert.deepEqual(forged.body, bare.body);
+    // There is no session to end.
+    assert.equal((await fetch(`${a.url}/mcp`, { method: 'DELETE', headers: { 'mcp-session-id': 'made-up-session' } })).status, 405);
+    // Many distinct signed clients: none of them leaves anything behind.
+    const held0 = heldViews();
+    assert.ok(held0 <= 1, 'at most the node\'s own view');
+    for (let i = 0; i < 6; i++) {
+      const c = identityAt(tmpDir(`mcp-client-${i}`), `client-${i}`);
+      assert.equal((await post(a.url, '/identities', c.identityChain())).status, 200);
+      for (const m of [init, stats]) assert.equal((await post(a.url, '/mcp', m, { as: c })).status, 200);
+    }
+    assert.equal(heldViews(), held0, 'no view per client');
+    // And in the source: no session header, and no table at module level that
+    // could hold a client's state.
+    for (const f of ['src/mcp.ts', 'src/http.ts', 'src/enox-ops.ts']) {
+      const src = fs.readFileSync(path.join(import.meta.dirname, '..', f), 'utf8').replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+      assert.doesNotMatch(src, /session[-_]?id/i, f);
+      assert.doesNotMatch(src, /^(export )?(const|let|var)\s+\w+[^=\n]*=\s*new (Map|Set|WeakMap)\b/m, f);
+    }
   } finally { await a.stop(); }
 });

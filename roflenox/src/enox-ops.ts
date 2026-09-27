@@ -23,27 +23,33 @@ function node(ctx: Ctx): RoflenoxNode {
   return ctx.node;
 }
 
-/** The Enox view, per caller. For the node's OWN identity (what Enox clients
- *  reach with the operator token) a write is APPLIED to the cached view from
- *  the node's record of recent admissions — no rebuild (r_batch_write). Any
- *  other caller's view depends on grants and exports, and is rebuilt when the
- *  log moves. */
-const views = new Map<string | null, { g: Graph; version: number }>();
+/** The Enox view. Only the node's OWN identity's view is kept (what Enox
+ *  clients reach with the operator token): an admitted batch is APPLIED to it
+ *  from the node's record of recent admissions — no rebuild (r_batch_write).
+ *  Any other caller's view depends on its grants and exports and is built for
+ *  the call and dropped: the node keeps no state per client (r_session_eviction). */
+let kept: { owner: string; g: Graph; version: number } | null = null;
 async function graph(ctx: Ctx): Promise<Graph> {
   const n = node(ctx);
-  const cached = views.get(ctx.caller);
-  if (cached && cached.version === n.logVersion()) return cached.g.ensure();
-  if (cached && ctx.caller !== null && ctx.caller === n.identity?.name) {
-    const since = n.admittedSince(cached.version);
+  const own = n.identity?.name;
+  if (ctx.caller === null || ctx.caller !== own) return Graph.load(n, ctx.caller);
+  if (kept && kept.owner === own) {
+    if (kept.version === n.logVersion()) return kept.g.ensure();
+    const since = n.admittedSince(kept.version);
     if (since) {
-      for (const b of since) cached.g.apply(b.facts, b.seq);
-      cached.version = n.logVersion();
-      return cached.g.ensure();
+      for (const b of since) kept.g.apply(b.facts, b.seq);
+      kept.version = n.logVersion();
+      return kept.g.ensure();
     }
   }
-  const g = await Graph.load(n, ctx.caller);
-  views.set(ctx.caller, { g, version: n.logVersion() });
+  const g = await Graph.load(n, own);
+  kept = { owner: own, g, version: n.logVersion() };
   return g;
+}
+
+/** How many Enox views are held in memory (at most one: the node's own). */
+export function heldViews(): number {
+  return kept ? 1 : 0;
 }
 
 const agent = () => process.env.ENOX_AGENT_IDENTITY?.trim() || 'agent:unknown';

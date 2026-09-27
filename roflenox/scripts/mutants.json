@@ -1107,8 +1107,8 @@
    "file": "src/enox-ops.ts",
    "edits": [
     [
-     "  const g = await Graph.load(n, ctx.caller);",
-     "  const g = await Graph.load(n, n.identity?.name ?? null);"
+     "  if (ctx.caller === null || ctx.caller !== own) return Graph.load(n, ctx.caller);",
+     "  if (ctx.caller === null || ctx.caller !== own) return Graph.load(n, own ?? null);"
     ]
    ],
    "red": [
@@ -1220,8 +1220,8 @@
    "file": "src/enox-ops.ts",
    "edits": [
     [
-     "  const g = await Graph.load(n, ctx.caller);\n",
-     "  const g = await Graph.load(n, ctx.caller);\n  (await import('node:fs')).writeFileSync('/tmp/roflenox-graph-cache.json', String(g.nodes.size));\n"
+     "  const g = await Graph.load(n, own);\n",
+     "  const g = await Graph.load(n, own);\n  (await import('node:fs')).writeFileSync('/tmp/roflenox-graph-cache.json', String(g.nodes.size));\n"
     ]
    ],
    "red": [
@@ -1519,12 +1519,80 @@
    "file": "src/enox-ops.ts",
    "edits": [
     [
-     "    const since = n.admittedSince(cached.version);",
+     "    const since = n.admittedSince(kept.version);",
      "    const since = null as ReturnType<typeof n.admittedSince>;"
     ]
    ],
    "red": [
     "an Enox read right after a write answers within one second with 200000 facts held"
+   ]
+  },
+  {
+   "id": "M113",
+   "title": "r_session_eviction: /mcp issues a session id",
+   "file": "src/http.ts",
+   "edits": [
+    [
+     "        if (replies.length === 0) { res.writeHead(202).end(); return; }",
+     "        res.setHeader('Mcp-Session-Id', crypto.randomUUID());\n        if (replies.length === 0) { res.writeHead(202).end(); return; }"
+    ]
+   ],
+   "red": [
+    "the MCP endpoint issues no session id and keeps no state per client"
+   ]
+  },
+  {
+   "id": "M114",
+   "title": "r_session_eviction: a client's session id is looked up (unknown ones refused)",
+   "file": "src/http.ts",
+   "edits": [
+    [
+     "        const caller = callerOf(node, method, target, req.headers, raw);\n        let msg: unknown;",
+     "        const caller = callerOf(node, method, target, req.headers, raw);\n        if (req.headers[`mcp-${'sess' + 'ion'}-id`]) return send(res, 404, { error: 'unknown' });\n        let msg: unknown;"
+    ]
+   ],
+   "red": [
+    "the MCP endpoint issues no session id and keeps no state per client"
+   ]
+  },
+  {
+   "id": "M115",
+   "title": "r_session_eviction: every caller's Enox view is kept",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "  if (ctx.caller === null || ctx.caller !== own) return Graph.load(n, ctx.caller);",
+     "  if (ctx.caller === null || ctx.caller !== own) { const g = await Graph.load(n, ctx.caller); if (ctx.caller) perCaller.set(ctx.caller, g); return g; }"
+    ],
+    [
+     "let kept: { owner: string; g: Graph; version: number } | null = null;",
+     "let kept: { owner: string; g: Graph; version: number } | null = null;\nconst perCaller = new Map<string, Graph>();"
+    ]
+   ],
+   "red": [
+    "the MCP endpoint issues no session id and keeps no state per client"
+   ]
+  },
+  {
+   "id": "M116",
+   "title": "r_session_eviction: every caller's Enox view is kept, counted",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "  if (ctx.caller === null || ctx.caller !== own) return Graph.load(n, ctx.caller);",
+     "  if (ctx.caller === null || ctx.caller !== own) { const g = await Graph.load(n, ctx.caller); if (ctx.caller) others.push(g); return g; }"
+    ],
+    [
+     "let kept: { owner: string; g: Graph; version: number } | null = null;",
+     "let kept: { owner: string; g: Graph; version: number } | null = null;\nconst others: Graph[] = [];"
+    ],
+    [
+     "  return kept ? 1 : 0;",
+     "  return (kept ? 1 : 0) + others.length;"
+    ]
+   ],
+   "red": [
+    "the MCP endpoint issues no session id and keeps no state per client"
    ]
   }
  ]

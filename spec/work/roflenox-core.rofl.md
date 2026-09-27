@@ -23,3 +23,7 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_foreign_rules_opt_in`.
 - `roflenox_core` finished `r_foreign_rules_opt_in` at "092801d551b6840886541f5d5d2249e5c2fae1eb".
 - `roflenox_core` takes `r_batch_write`.
+- `roflenox_core` finished `r_batch_write` at "f8d14237e81c0e829d003203764242f18727e336".
+- `roflenox_core` takes `r_uri_prefix_stable`.
+- `roflenox_core` finished `r_uri_prefix_stable` at "8a03765e17e2a44a75ec811bfe911c30e25c16d1".
+- `roflenox_core` takes `r_session_eviction`.

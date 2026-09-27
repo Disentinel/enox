@@ -8,7 +8,8 @@
 // moved and the mutant would silently test nothing). Survivors by design are
 // listed with the reason and not run.
 //
-//   npm run mutants                         every mutant, 2 workers (or cpus/4, if fewer)
+//   npm run mutants                         every mutant except the perf ones, 2 workers (or cpus/4, if fewer)
+//   npm run mutants:perf                    the mutants whose red tests are in test/perf
 //   npm run mutants -- --only M2,M14        some of them
 //   npm run mutants -- --extra more.json    add mutants (same shape) — the gate's own test uses this
 //   npm run mutants -- --workers 8
@@ -24,17 +25,27 @@ const BUDGET_MS = 300_000;
 
 interface Mutant { id: string; title: string; file: string; edits: ([string, string] | [string, string, string])[]; red?: string[]; survivor?: string }
 
-function args(): { only: Set<string> | null; extra: string | null; workers: number } {
+function args(): { only: Set<string> | null; extra: string | null; workers: number; perf: boolean } {
   const a = process.argv.slice(2);
   const get = (k: string) => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] ?? null : null; };
   const only = get('--only');
-  return { only: only ? new Set(only.split(',')) : null, extra: get('--extra'), workers: Number(get('--workers') ?? Math.max(1, Math.min(2, Math.floor(os.cpus().length / 4)))) };
+  return { only: only ? new Set(only.split(',')) : null, extra: get('--extra'), perf: a.includes('--perf'), workers: Number(get('--workers') ?? Math.max(1, Math.min(2, Math.floor(os.cpus().length / 4)))) };
 }
 
 function load(extra: string | null): Mutant[] {
   const list = (JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts', 'mutants.json'), 'utf8')) as { mutants: Mutant[] }).mutants;
   if (extra) list.push(...(JSON.parse(fs.readFileSync(extra, 'utf8')) as { mutants: Mutant[] }).mutants);
   return list;
+}
+
+/** Names of the tests defined under test/perf. */
+function perfTestNames(): Set<string> {
+  const dir = path.join(ROOT, 'test', 'perf');
+  const names = new Set<string>();
+  for (const f of fs.existsSync(dir) ? fs.readdirSync(dir).filter((x) => x.endsWith('.test.ts')) : []) {
+    for (const m of fs.readFileSync(path.join(dir, f), 'utf8').matchAll(/(?:^|[^.\w])test\('((?:[^'\\]|\\.)*)'/g)) names.add(m[1]!.replace(/\\'/g, "'"));
+  }
+  return names;
 }
 
 /** A private copy of the tree for one worker; mutants never touch ROOT. */
@@ -118,8 +129,12 @@ async function judge(tree: string, m: Mutant): Promise<Verdict> {
 
 async function main(): Promise<number> {
   const t0 = Date.now();
-  const { only, extra, workers } = args();
-  const all = load(extra).filter((m) => !only || only.has(m.id));
+  const { only, extra, workers, perf } = args();
+  // Two gates, each within the budget: perf mutants (their red tests live in
+  // test/perf and build a 200 000-fact log) and everything else.
+  const perfNames = perfTestNames();
+  const isPerf = (m: Mutant) => (m.red ?? []).some((n) => perfNames.has(n));
+  const all = load(extra).filter((m) => (only ? only.has(m.id) : isPerf(m) === perf));
   const survivors = all.filter((m) => m.survivor);
   const queue = all.filter((m) => !m.survivor);
   const verdicts: Verdict[] = [];
@@ -138,7 +153,7 @@ async function main(): Promise<number> {
   const bad = verdicts.filter((v) => !v.ok);
   const ms = Date.now() - t0;
   process.stdout.write(`\n${verdicts.length - bad.length}/${verdicts.length} mutants killed, ${survivors.length} survivors by design, ${bad.length} failing; ${(ms / 1000).toFixed(1)} s\n`);
-  if (ms > BUDGET_MS) process.stdout.write(`OVER BUDGET: ${(ms / 1000).toFixed(1)} s > ${BUDGET_MS / 1000} s\n`);
+  if (ms > BUDGET_MS) process.stdout.write(`\n*** GATE OVER BUDGET: ${(ms / 1000).toFixed(1)} s > ${BUDGET_MS / 1000} s — the gate FAILS ***\n`);
   return bad.length === 0 && ms <= BUDGET_MS ? 0 : 1;
 }
 
