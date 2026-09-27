@@ -7,6 +7,8 @@ import { listen } from '../src/http.ts';
 import { batchDigest, factId, sha256hex, toJsonl } from '../src/facts.ts';
 import { signRequest } from '../src/httpsig.ts';
 import { publish } from '../src/client.ts';
+import { isLocal, OPS } from '../src/ops.ts';
+import { seal } from '../src/seal.ts';
 import type { Manifest } from '../src/identity.ts';
 import { batch, DAY, exportRule, fact, get, grant, identityAt, invitation, iso, post, start, T0, tmpDir, pull, vouch } from './helpers.ts';
 
@@ -51,7 +53,7 @@ test('a request signed by an identity with no grant is refused and whynot names 
     a.clock.t = T0;
 
     // Unsigned, unknown, tampered and replayed requests are not reads.
-    assert.equal((await post(a.url, '/ask', q, { as: null })).status, 401);
+    assert.equal((await post(a.url, '/ask', q, { as: null })).status, 404, 'anonymous: a book it may not read answers as absent (r_default_deny)');
     const stranger = identityAt(tmpDir('grant-s'), 'stranger');
     assert.equal((await post(a.url, '/ask', q, { as: stranger })).body.error, 'unknown_requester');
     const body = JSON.stringify(q);
@@ -120,7 +122,8 @@ test('a fact with no export rule never appears in a published batch', async () =
 test('a guessed secret cannot be confirmed from a withheld manifest', async () => {
   const a = await start(tmpDir('guess-a'), 'node-a');
   try {
-    const policy = batch(a.me, [exportRule('knows', 'public')], null, iso(a.clock.t));
+    // (One public fact, so the book shows in the feed at all: r_default_deny.)
+    const policy = batch(a.me, [exportRule('knows', 'public'), fact('alice', 'knows', 'bob')], null, iso(a.clock.t));
     assert.equal((await post(a.url, '/batches', policy)).status, 201);
     const secret = batch(a.me, [fact('alice', 'salary', '5000')], policy.manifest.digest, iso(a.clock.t));
     // Positive control 1: the secret batch is admitted.
@@ -230,5 +233,65 @@ test('a revoked grant answers 410 on the next read, while facts read before the 
     // Positive control of the check: one changed byte no longer verifies.
     const x0 = feed.batches[0]!;
     assert.notEqual(batchDigest(x0.salt, x0.jsonl.replace('alice', 'alicf')), x0.manifest.digest);
+  } finally { await a.stop(); }
+});
+
+test('an anonymous caller of every open endpoint learns the node\'s own name and liveness and nothing about the identities, facts or batches it holds', async () => {
+  const a = await start(tmpDir('dd-a'), 'node-a');
+  const bob = identityAt(tmpDir('dd-bob'), 'bob');
+  try {
+    await vouch(a, bob);
+    await publish(a.url, a.me, [fact('alice', 'owns', 'secret-a')], () => a.clock.t);
+    await publish(a.url, bob, [fact('bob', 'owns', 'secret-b')], () => a.clock.t);
+    const full = (await get(a.url, '/health')).body;                 // the operator's view: what there is to leak
+    const heads = Object.values(full.heads as Record<string, string>);
+    assert.equal(heads.length, 2);
+    const secrets = ['secret-a', 'secret-b', ...heads, String(full.log_head)];
+
+    // Every network operation, called anonymously about a name — once one
+    // this node holds (bob), once one it does not (carol). Each op must be listed.
+    const args = (H: string, fake: LocalIdentity): Record<string, unknown> => {
+      const B = bookOf(H);
+      const b = batch(fake, [fact(H, 'x', 'y')], null, iso(a.clock.t));
+      return {
+        health: {}, identity: {}, identity_chain: { identity: H }, chain: { identity: H }, feed: { identity: H }, challenge: {},
+        ask: { query: `edge[${B}](F, S, R, T)` }, why: { literal: `edge[${B}]("f", "a", "b", "c")` }, whynot: { literal: `edge[${B}]("f", "a", "b", "c")` },
+        admit: b, introduce: { chain: fake.identityChain() },
+        admit_feed: { identity: fake.identityChain(), batches: [{ manifest: b.manifest, jsonl: b.jsonl, salt: b.salt }], checkpoint: fake.checkpoint(b.manifest.digest, iso(a.clock.t)) },
+        admit_sealed: seal(b, [{ identity: 'node-a', enc_public_key: a.me.identityDoc().doc.enc.public_key }]),
+        query_graph: { query: H }, graph_stats: {}, explore: { entity: H }, traverse: { entity: H }, recall: { query: H }, semantic_search: { query: H },
+        recent_activity: {}, decide: { task: H }, list_artifacts: {}, get_artifact: { id: H }, list_shares: {},
+        // The operator's own: refused to anyone else, the same way whatever the name.
+        assert: { facts: [fact(H, 'x', 'y')] }, add_assertion: { source: H, target: 'y', relation: 'x' }, batch_assertions: { assertions: [] },
+        remember: { subject: H, fact: 'x' }, update_assertion: { fact_id: H }, delete_assertion: { fact_id: H }, update_node: { node_id: H },
+        create_artifact: { title: H, domain: 'd', content_type: 'text/plain', body: 'x' }, create_share: { name: H, domains: [] }, revoke_share: { id: H },
+      };
+    };
+    const network = OPS.filter((o) => !isLocal(o));
+    const probe = async (H: string) => {
+      const fake = identityAt(tmpDir('dd-fake'), H);
+      const table = args(H, fake);
+      assert.deepEqual(network.map((o) => o.name).filter((n) => !(n in table)), [], 'every open endpoint is probed');
+      const out: string[] = [];
+      for (const o of network) {
+        const r = await post(a.url, `/op/${o.name}`, table[o.name], { as: null });
+        out.push(`${o.name} ${r.status} ${JSON.stringify(r.body)}`);
+        // Its HTTP alias too, where it has one.
+        if (o.http) {
+          const p = o.http.path.replace(/:(\w+)/g, (_, k: string) => encodeURIComponent(String(table[o.name]![k])));
+          const alias = o.http.method === 'GET' ? await get(a.url, p, { as: null })
+            : await post(a.url, p, o.http.body ? table[o.name]![o.http.body] : table[o.name], { as: null });
+          out.push(`${o.http.method} ${o.http.path} ${alias.status} ${JSON.stringify(alias.body)}`);
+        }
+      }
+      // (A challenge is fresh randomness each time: its value is not compared.)
+      return out.map((l) => l.split(H).join('<name>').split(bookOf(H)).join('<book>').replace(/"nonce":"[\w-]+"/g, '"nonce":"<random>"'));
+    };
+    const held = await probe('bob');
+    const absent = await probe('carol');
+    held.forEach((l, i) => assert.equal(l, absent[i], 'a held name answers exactly as an absent one'));
+    for (const l of held) for (const s of secrets) assert.ok(!l.includes(s), `${l.slice(0, 120)} shows ${s}`);
+    // What an anonymous caller does learn: the node's name, and that it is up.
+    assert.deepEqual((await get(a.url, '/health', { as: null })).body, { identity: 'node-a', engine: { up: true } });
   } finally { await a.stop(); }
 });

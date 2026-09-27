@@ -140,6 +140,12 @@ export const DEFAULT_RULE_BUDGET = 50_000;
  *  behind than this rebuilds. */
 const RECENT_FACTS = 50_000;
 
+/** What a stranger's failed admission may say about a held identity:
+ *  exactly what it would say about an unknown one (RoflenoxNode.asStranger). */
+const STRANGER_SEES = new Set(['key_changed', 'unknown_key', 'bad_signature', 'unknown_identity', 'bad_identity_doc', 'identity_mismatch']);
+const notVouched = (identity: string) => new Refusal(403, 'not_vouched',
+  `${identity} is not known here and nobody this node trusts vouched for it: its operator introduces it or pulls it by invitation, or an identity pinned here delegates to it`);
+
 export class RoflenoxNode {
   readonly dataDir: string;
   private ownCache: { mtimeMs: number; id: LocalIdentity | null } | null = null;
@@ -298,6 +304,30 @@ export class RoflenoxNode {
     return this.ownCache.id;
   }
 
+  /** Does `caller` learn that this node holds `identity` (r_default_deny)?
+   *  The operator and the identity itself do; anyone else only where some of
+   *  its book is readable to them — whole by a grant, in part by an export. */
+  private async visible(identity: string, caller: string | null): Promise<boolean> {
+    if (caller !== null && (caller === this.identity?.name || caller === identity)) return true;
+    return (await this.scopeFor(caller)).has(bookOf(identity));
+  }
+
+  /** An identity's document chain, as `caller` may learn it: an identity it
+   *  may not see answers as an unknown one. The node's own is public. */
+  readIdentityChain(identity: string, caller: string | null): Promise<IdentityDoc[]> {
+    return this.serial(async () => {
+      if (identity !== this.identity?.name && !(await this.visible(identity, caller))) {
+        throw new Refusal(404, 'unknown_identity', `${identity} is not known here`);
+      }
+      return this.identityChain(identity);
+    }, true);
+  }
+
+  /** An identity's batch digests as `caller` may learn them ([] if not). */
+  readChain(identity: string, caller: string | null): Promise<string[]> {
+    return this.serial(async () => ((await this.visible(identity, caller)) ? this.chainOf(identity) : []), true);
+  }
+
   /** An identity's document chain as this node holds it. */
   identityChain(identity: string): IdentityDoc[] {
     const d = this.idDocs.get(identity);
@@ -401,19 +431,31 @@ export class RoflenoxNode {
       const until = (await this.engine.sysRows(`delegate[${bookOf(parent)}](${roflString(identity)}, U)`)).map((r) => Number(r[0]));
       if (until.some((u) => at < u)) return;
     }
-    throw new Refusal(403, 'not_vouched',
-      `${identity} is not known here and nobody this node trusts vouched for it: its operator introduces it or pulls it by invitation, or an identity pinned here delegates to it`);
+    throw notVouched(identity);
+  }
+
+  /** An admission by anyone but the operator: a refusal that would tell the
+   *  caller about an identity held here — its keys, its documents — says
+   *  exactly what the same attempt for an identity NOT held here says
+   *  (r_default_deny): a stranger learns nothing by writing. */
+  private asStranger<T>(identity: unknown, by: string | null, p: Promise<T>): Promise<T> {
+    if (by !== null && by === this.identity?.name) return p;
+    return p.catch((e: unknown) => {
+      if (e instanceof Refusal && typeof identity === 'string' && STRANGER_SEES.has(e.reason)) throw notVouched(identity);
+      throw e;
+    });
   }
 
   /** POST /identities: introduce an identity. Its first document is pinned
    *  only as `by` allows (vouch); a known one's updates by rule. Idempotent. */
   introduce(raw: unknown, by: string | null = null): Promise<{ identity: string; pinned: boolean }> {
-    return this.serial(async () => {
+    const who = Array.isArray(raw) ? (raw[0] as IdentityDoc | undefined)?.doc?.identity : (raw as IdentityDoc | undefined)?.doc?.identity;
+    return this.asStranger(who, by, this.serial(async () => {
       const first = checkIdentityDoc(Array.isArray(raw) ? raw[0] : raw);
       const before = this.idDocs.get(first.doc.identity)?.length ?? 0;
       await this.applyChain(first.doc.identity, raw, new Date(this.now()).toISOString(), false, by);
       return { identity: first.doc.identity, pinned: (this.idDocs.get(first.doc.identity)?.length ?? 0) > before };
-    });
+    }));
   }
 
   /** Who signed this request (RFC 9421), or null for an unsigned one. */
@@ -614,16 +656,9 @@ export class RoflenoxNode {
       reattest = { identity: r.identity, key_id: r.key_id, digest: r.digest, attested_at: r.attested_at, sig: r.sig };
     }
 
-    // 3. chain.
-    const chain = this.chains.get(m.identity) ?? [];
-    if (chain.includes(m.digest)) throw new Refusal(409, 'duplicate', 'this batch is already in the chain');
-    const head = chain.length ? chain[chain.length - 1]! : null;
-    if (m.prev !== head) {
-      throw new Refusal(409, 'chain_mismatch',
-        `prev must be the head of ${m.identity}'s chain (${head ?? 'null: this is its first batch'})`);
-    }
-
-    // 4. freshness, of whichever signature vouches for this receipt.
+    // 3. freshness, of whichever signature vouches for this receipt — before
+    // the chain, so a replayed old batch learns nothing of what is held here
+    // (r_default_deny).
     if (mode === 'post') {
       if (reattest) {
         this.checkFresh(reattest.attested_at, receivedAt, 'the re-attestation', 're-attest again with a current time');
@@ -631,6 +666,15 @@ export class RoflenoxNode {
         this.checkFresh(m.claimed_at, receivedAt, 'claimed_at',
           're-attestation requested: the publisher signs the same digest again with a current claimed_at');
       }
+    }
+
+    // 4. chain.
+    const chain = this.chains.get(m.identity) ?? [];
+    if (chain.includes(m.digest)) throw new Refusal(409, 'duplicate', 'this batch is already in the chain');
+    const head = chain.length ? chain[chain.length - 1]! : null;
+    if (m.prev !== head) {
+      throw new Refusal(409, 'chain_mismatch',
+        `prev must be the head of ${m.identity}'s chain (${head ?? 'null: this is its first batch'})`);
     }
     // User rules are checked here, with the batch: a rule that would conclude
     // outside its author's book refuses the whole batch.
@@ -640,7 +684,8 @@ export class RoflenoxNode {
 
   /** Admit one batch, serialised against every other admission. */
   admit(body: BatchBody, by: string | null = null): Promise<Receipt> {
-    return this.serial(() => this.admitNow(body, 'post', new Date(this.now()).toISOString(), [], by));
+    return this.asStranger((body?.manifest as Manifest | undefined)?.identity, by,
+      this.serial(() => this.admitNow(body, 'post', new Date(this.now()).toISOString(), [], by)));
   }
 
   /** One operation at a time. A dead engine is rebuilt first; an engine that
@@ -765,9 +810,8 @@ export class RoflenoxNode {
     if (sc && (sc.only === null || !whole)) return;
     const owner = [...this.chains.keys()].find((id) => bookOf(id) === book);
     if (!owner) throw new Refusal(404, 'unknown_book', `no book ${book} here`);
-    if (requester === null) {
-      throw new Refusal(401, 'unsigned', `${owner}'s book is not public; sign the request as an identity it grants`);
-    }
+    // Anonymous: a book it may not read answers as one that is not here.
+    if (requester === null) throw new Refusal(404, 'unknown_book', `no book ${book} here`);
     const whynot = await whyNotReadable(this.engine, requester, book, owner, Math.floor(this.now() / 1000));
     // A grant its owner retired (confidence 0) is GONE, not missing
     // (r_revocation_receipt): what was read before stays attested by its
@@ -1001,7 +1045,8 @@ export class RoflenoxNode {
       if (!me) throw new Refusal(404, 'no_identity', 'this node has no identity to open envelopes with');
       const inner = openSealed(envelope as Envelope, me.name, me.encPrivateKey());
       const receivedAt = new Date(this.now()).toISOString();
-      return this.admitNow({ manifest: inner.manifest, jsonl: inner.jsonl, salt: inner.salt, identity: inner.identity }, 'offline', receivedAt, [], by);
+      return this.asStranger(inner.manifest?.identity, by,
+        this.admitNow({ manifest: inner.manifest, jsonl: inner.jsonl, salt: inner.salt, identity: inner.identity }, 'offline', receivedAt, [], by));
     });
   }
 
@@ -1093,6 +1138,11 @@ export class RoflenoxNode {
    *  consumed once the publisher's answer to it VERIFIES; a refused feed
    *  leaves nothing behind. */
   admitFeed(body: FeedBody, by: string | null = null): Promise<{ admitted: number }> {
+    const who = ((body?.attestation ?? body?.checkpoint) as { identity?: unknown } | undefined)?.identity;
+    return this.asStranger(who, by, this.admitFeedNow(body, by));
+  }
+
+  private admitFeedNow(body: FeedBody, by: string | null): Promise<{ admitted: number }> {
     return this.serial(async () => {
       const receivedAt = new Date(this.now()).toISOString();
       if (!body || typeof body !== 'object' || !Array.isArray(body.batches)) {
@@ -1183,7 +1233,7 @@ export class RoflenoxNode {
     return this.serial(async () => {
       const chain = this.chains.get(identity);
       const doc = this.idDocs.get(identity);
-      if (!chain || !doc) throw new Refusal(404, 'unknown_identity', `no feed for ${identity}`);
+      if (!chain || !doc || !(await this.visible(identity, reader))) throw new Refusal(404, 'unknown_identity', `no feed for ${identity}`);
       let from = 0;
       if (after !== null) {
         const i = chain.indexOf(after);
@@ -1240,7 +1290,10 @@ export class RoflenoxNode {
     }
   }
 
-  health(): Record<string, unknown> {
+  /** `full` for the operator (and the node's own callers); anyone else
+   *  learns the node's name and that it is up, nothing it holds. */
+  health(full = true): Record<string, unknown> {
+    if (!full) return { identity: this.identity?.name ?? null, engine: { up: !this.engine.dead } };
     return {
       identity: this.identity?.name ?? null,
       heads: Object.fromEntries([...this.chains.keys()].sort().map((id) => [id, this.head(id)])),

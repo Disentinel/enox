@@ -421,3 +421,30 @@ function keyOfDir(dir: string): crypto.KeyObject {
   const j = JSON.parse(fs.readFileSync(LocalIdentity.keyPath(dir), 'utf8')) as { private_key: string };
   return crypto.createPrivateKey({ key: Buffer.from(j.private_key, 'base64'), format: 'der', type: 'pkcs8' });
 }
+
+test('a name with a space, a non-ASCII letter or an invisible mark is refused, and a name of 128 allowed characters is accepted', async () => {
+  const a = await start(tmpDir('names-a'), 'node-a');
+  // Each bad name, once through the client (making a key) and once at the
+  // node (a validly signed identity document that carries it).
+  const signedAs = (name: string) => {
+    const dir = tmpDir('names-doc');
+    const good = identityAt(dir, 'placeholder').identityDoc();
+    return signDoc({ ...good.doc, identity: name }, keyOfDir(dir));
+  };
+  const long = `a${'b._@-9'.repeat(21)}c`;                       // 1 + 126 + 1 = 128
+  assert.equal(long.length, 128);
+  try {
+    for (const bad of ['alice smith', 'аlice', 'alice​', 'alice‮', `${long}d`]) {
+      assert.throws(() => identityAt(tmpDir('names-bad'), bad), /bad_identity_name|identity names are/, JSON.stringify(bad));
+      const r = await post(a.url, '/identities', [signedAs(bad)]);
+      assert.equal(r.status, 400, JSON.stringify(bad));
+      assert.equal(r.body.error, 'bad_identity_name', JSON.stringify(bad));
+    }
+    // 128 allowed characters: a key is made, and the node pins it.
+    const ok = identityAt(tmpDir('names-long'), long);
+    assert.equal(ok.name, long);
+    assert.equal((await post(a.url, '/identities', ok.identityChain())).status, 200);
+    const other = `z${long.slice(1)}`;                          // another 128, through the node's own check
+    assert.equal((await post(a.url, '/identities', [signedAs(other)])).status, 200);
+  } finally { await a.stop(); }
+});

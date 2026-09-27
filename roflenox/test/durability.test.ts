@@ -213,8 +213,8 @@ test('a node rebuilt from its latest backup answers every question the same as t
     try {
       const want = await answers(oracle.url, { as: reader });
       assert.deepEqual(await answers(restored.url, { as: reader }), want);
-      assert.equal((await get(restored.url, '/health')).body.log_head, r.log_head);
-      assert.equal((await get(oracle.url, '/health')).body.log_head, r.log_head);
+      assert.equal(restored.node.health().log_head, r.log_head);
+      assert.equal(oracle.node.health().log_head, r.log_head);
       assert.deepEqual(want, upToBackup, 'the oracle is the node up to the backup');
     } finally { await restored.stop(); await oracle.stop(); }
     // Control: after the backup the node moved on; its backup did not.
@@ -260,7 +260,7 @@ test('a backup killed between any two of its steps leaves a readable backup at t
     const meta = JSON.parse(fs.readFileSync(path.join(to, 'latest', 'backup.json'), 'utf8')) as { log_head: string };
     const restored = await serveAsIs(path.join(to, 'latest'));
     try {
-      const head = (await get(restored.url, '/health')).body.log_head as string;
+      const head = restored.node.health().log_head as string;
       assert.equal(head, meta.log_head, `killed at ${step}: latest rebuilds to what it says it is`);
       assert.ok(head === before || head === after, `killed at ${step}: latest is a backup of this log`);
       heads.push(head);

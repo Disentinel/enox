@@ -214,7 +214,8 @@ test('a followed feed that no rule reads is reported as unknown, never as all-cl
     // Control: once it speaks (and nothing else is followed silent), no unknown.
     const quiet = await start(tmpDir('fleet-quiet'), 'quiet-host');
     try {
-      await publish(quiet.url, quiet.me, [f('quiet-host', 'host_role', 'prod')], () => quiet.clock.t);
+      await vouch(quiet, ops.me);
+      await publish(quiet.url, quiet.me, [grant('ops', iso(T0 + 30 * DAY)), f('quiet-host', 'host_role', 'prod')], () => quiet.clock.t);
       await pull(ops, invitation(quiet), 'quiet-host', ops.me);
       assert.deepEqual(await unknownOf('watched(H)'), []);
       // And silence returns when the window passes with no word.

@@ -113,7 +113,7 @@ const FACT_ITEMS = { type: 'object', required: ['source', 'relation', 'target', 
 export const OPS: Op[] = [
   // ---- reading -------------------------------------------------------------
   { name: 'health', description: 'The node\'s heads, counts and engine state.', input: obj({}), access: 'anyone',
-    http: { method: 'GET', path: '/health' }, run: async (ctx) => needNode(ctx).health() },
+    http: { method: 'GET', path: '/health' }, run: async (ctx) => needNode(ctx).health(ctx.caller !== null && ctx.caller === needNode(ctx).identity?.name) },
   { name: 'identity', description: 'This node\'s signed identity document chain.', input: obj({}), access: 'anyone',
     http: { method: 'GET', path: '/.well-known/roflenox/identity' },
     run: async (ctx) => {
@@ -123,7 +123,7 @@ export const OPS: Op[] = [
     } },
   { name: 'identity_chain', description: 'An identity\'s document chain as this node holds it.', input: obj({ identity: str() }, ['identity']),
     access: 'anyone', positional: ['identity'], http: { method: 'GET', path: '/identities/:identity' },
-    run: async (ctx, a) => needNode(ctx).identityChain(a.identity as string) },
+    run: async (ctx, a) => needNode(ctx).readIdentityChain(a.identity as string, ctx.caller) },
   { name: 'ask', description: `Ask one ROFL literal, e.g. edge(F, S, R, T); optional perspective restricts edge questions. At most \`limit\` rows (default ${DEFAULT_LIMIT}); a longer answer is marked cut, with a cursor for the next page.`,
     input: obj({ query: str('one ROFL literal'), perspective: str(), limit: { type: 'number' }, cursor: str('from the previous page') }, ['query']),
     access: 'anyone', positional: ['query'], http: { method: 'POST', path: '/ask' }, say: rowsSay,
@@ -134,7 +134,7 @@ export const OPS: Op[] = [
     access: 'anyone', positional: ['literal'], say: explainSay, run: async (ctx, a) => needNode(ctx).whynot(a.literal as string, ctx.caller) },
   { name: 'chain', description: 'The digests of an identity\'s batches, in chain order (what any feed shows of it).',
     input: obj({ identity: str() }, ['identity']), access: 'anyone', positional: ['identity'],
-    run: async (ctx, a) => ({ identity: a.identity, digests: needNode(ctx).chainOf(a.identity as string) }) },
+    run: async (ctx, a) => ({ identity: a.identity, digests: await needNode(ctx).readChain(a.identity as string, ctx.caller) }) },
   { name: 'feed', description: 'An identity\'s batches after a digest, as signed; withheld where the reader may not have them.',
     input: obj({ identity: str(), after: str(), challenge: str() }, ['identity']), access: 'anyone', positional: ['identity'],
     http: { method: 'GET', path: '/feeds/:identity' },

@@ -100,7 +100,7 @@ export function batch(me: LocalIdentity, facts: Fact[], prev: string | null, cla
 type As = { as?: LocalIdentity | null; now?: number };
 
 function signed(url: string, p: string, method: string, body: string | null, o: As): Record<string, string> {
-  const who = o.as === undefined ? (/^\/(ask|feeds\/|op\/|identities|batches|sealed)/.test(p) && operators.has(url) ? LocalIdentity.load(operators.get(url)!) ?? undefined : undefined) : o.as;
+  const who = o.as === undefined ? (/^\/(ask|feeds\/|op\/|identities|batches|sealed|health)/.test(p) && operators.has(url) ? LocalIdentity.load(operators.get(url)!) ?? undefined : undefined) : o.as;
   return who ? signRequest(who, method, (origins.get(url) ?? url) + p, body, o.now ?? clocks.get(url)?.t ?? T0) : {};
 }
 

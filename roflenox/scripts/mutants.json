@@ -2631,6 +2631,174 @@
    "red": [
     "a checkpoint one second past the window is refused and one second inside it mirrors"
    ]
+  },
+  {
+   "id": "M191",
+   "title": "r_identity_names: a space is allowed in a name",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "const NAME = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;",
+     "const NAME = /^[A-Za-z0-9][A-Za-z0-9._@ -]{0,127}$/;"
+    ]
+   ],
+   "red": [
+    "a name with a space, a non-ASCII letter or an invisible mark is refused, and a name of 128 allowed characters is accepted"
+   ]
+  },
+  {
+   "id": "M192",
+   "title": "r_identity_names: any Unicode letter is allowed in a name",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "const NAME = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;",
+     "const NAME = /^[\\p{L}0-9][\\p{L}0-9._@-]{0,127}$/u;"
+    ]
+   ],
+   "red": [
+    "a name with a space, a non-ASCII letter or an invisible mark is refused, and a name of 128 allowed characters is accepted"
+   ]
+  },
+  {
+   "id": "M193",
+   "title": "r_identity_names: an invisible mark is allowed in a name",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "const NAME = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;",
+     "const NAME = /^[A-Za-z0-9][A-Za-z0-9._@\\u200b\\u202e-]{0,127}$/;"
+    ]
+   ],
+   "red": [
+    "a name with a space, a non-ASCII letter or an invisible mark is refused, and a name of 128 allowed characters is accepted"
+   ]
+  },
+  {
+   "id": "M194",
+   "title": "r_identity_names: names stop at 127 characters",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "const NAME = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;",
+     "const NAME = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,126}$/;"
+    ]
+   ],
+   "red": [
+    "a name with a space, a non-ASCII letter or an invisible mark is refused, and a name of 128 allowed characters is accepted"
+   ]
+  },
+  {
+   "id": "M195",
+   "title": "r_identity_names: names run to 129 characters",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "const NAME = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;",
+     "const NAME = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,128}$/;"
+    ]
+   ],
+   "red": [
+    "a name with a space, a non-ASCII letter or an invisible mark is refused, and a name of 128 allowed characters is accepted"
+   ]
+  },
+  {
+   "id": "M196",
+   "title": "r_identity_names: the node does not check the name in an identity document",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "  checkName(x.doc.identity);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a name with a space, a non-ASCII letter or an invisible mark is refused, and a name of 128 allowed characters is accepted"
+   ]
+  },
+  {
+   "id": "M197",
+   "title": "r_default_deny: anyone gets the full health",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (!full) return { identity:",
+     "    if (false) return { identity:"
+    ]
+   ],
+   "red": [
+    "an anonymous caller of every open endpoint learns the node's own name and liveness and nothing about the identities, facts or batches it holds"
+   ]
+  },
+  {
+   "id": "M198",
+   "title": "r_default_deny: anyone reads any identity's document chain",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (identity !== this.identity?.name && !(await this.visible(identity, caller))) {",
+     "      if (false) {"
+    ]
+   ],
+   "red": [
+    "an anonymous caller of every open endpoint learns the node's own name and liveness and nothing about the identities, facts or batches it holds"
+   ]
+  },
+  {
+   "id": "M199",
+   "title": "r_default_deny: anyone reads any identity's batch digests",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "((await this.visible(identity, caller)) ? this.chainOf(identity) : [])",
+     "this.chainOf(identity)"
+    ]
+   ],
+   "red": [
+    "an anonymous caller of every open endpoint learns the node's own name and liveness and nothing about the identities, facts or batches it holds"
+   ]
+  },
+  {
+   "id": "M200",
+   "title": "r_default_deny: anyone reads any identity's feed of withheld manifests",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (!chain || !doc || !(await this.visible(identity, reader)))",
+     "if (!chain || !doc)"
+    ]
+   ],
+   "red": [
+    "an anonymous caller of every open endpoint learns the node's own name and liveness and nothing about the identities, facts or batches it holds"
+   ]
+  },
+  {
+   "id": "M201",
+   "title": "r_default_deny: an anonymous ask names the owner of an unreadable book",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (requester === null) throw new Refusal(404, 'unknown_book', `no book ${book} here`);",
+     "    if (requester === null) throw new Refusal(401, 'unsigned', `${owner}'s book is not public`);"
+    ]
+   ],
+   "red": [
+    "an anonymous caller of every open endpoint learns the node's own name and liveness and nothing about the identities, facts or batches it holds"
+   ]
+  },
+  {
+   "id": "M202",
+   "title": "r_default_deny: a stranger's failed write says what the node holds",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (by !== null && by === this.identity?.name) return p;\n    return p.catch(",
+     "    return p;\n    return p.catch("
+    ]
+   ],
+   "red": [
+    "an anonymous caller of every open endpoint learns the node's own name and liveness and nothing about the identities, facts or batches it holds"
+   ]
   }
  ]
 }

@@ -45,7 +45,7 @@ test('a meaning search returns a fact after the embedder answers its intent, and
     return JSON.parse(j.result.content[0]!.text) as { index: string; message: string; nodes: { name: string; similarity: number }[];
       edges: { source_name: string; relation: string; target_name: string; similarity: number }[] };
   };
-  const batches = async () => ((await (await fetch(`${a.url}/health`)).json()) as { batches: number }).batches;
+  const batches = async () => ((await get(a.url, '/health', { as: a.me, now: wall.t })).body as { batches: number }).batches;   // the operator's view
   const Q = 'a machine that tabulates polynomial tables';
   try {
     await publish(a.url, a.me, [

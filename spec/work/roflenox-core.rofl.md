@@ -61,3 +61,7 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_rotation`.
 - `roflenox_core` finished `r_rotation` at "db71b41d7281fe72aae5d4d4302303045a5fb4ce".
 - `roflenox_core` takes `r_static_feed`.
+- `roflenox_core` finished `r_static_feed` at "c42404137f12fcbf7962f8fc936c480bb83f3e13".
+- `roflenox_core` takes `r_identity_names`.
+- `roflenox_core` finished `r_identity_names` at "4800a6841d8476258cb98c07a16cfaf815353c4e".
+- `roflenox_core` takes `r_default_deny`.

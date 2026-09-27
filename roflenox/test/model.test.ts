@@ -78,7 +78,7 @@ test('each control fact retired at confidence 0 stops acting: a retired grant re
     const r = await post(a.url, '/ask', { query }, as === undefined ? {} : { as });
     return r.status === 200 ? (r.body.rows as unknown[]).length : 0;
   };
-  const anonymousFeed = async () => ((await get(a.url, '/feeds/node-a', { as: null })).body.batches as { jsonl?: string }[]).filter((x) => x.jsonl !== undefined).length;
+  const anonymousFeed = async () => (((await get(a.url, '/feeds/node-a', { as: null })).body.batches ?? []) as { jsonl?: string }[]).filter((x) => x.jsonl !== undefined).length;
   try {
     await vouch(a, bob, alice);
     await publish(a.url, a.me, [fact('ada', 'knows', 'grace'), ...Object.values(control)], () => a.clock.t);

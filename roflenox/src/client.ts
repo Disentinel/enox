@@ -54,6 +54,19 @@ export async function headOf(node: string | OpCaller, identity: string): Promise
   return ((await via(node)('health', {})).heads as Record<string, string>)[identity] ?? null;
 }
 
+/** `me`'s own chain head at `node`, asked as `me` (a node tells an identity
+ *  its own chain); null before its first batch, or while `node` does not
+ *  know it yet (its first batch is its introduction). */
+async function ownHead(node: OpCaller, me: LocalIdentity): Promise<string | null> {
+  try {
+    const d = ((await node('chain', { identity: me.name })) as { digests: string[] }).digests;
+    return d.length ? d[d.length - 1]! : null;
+  } catch (e) {
+    if (e instanceof RemoteRefusal && e.status === 401) return null;
+    throw e;
+  }
+}
+
 /** Make sure `node` knows `me` (trust on first use); idempotent. */
 export async function introduce(node: string | OpCaller, me: LocalIdentity): Promise<void> {
   await via(node)('introduce', { chain: me.identityChain() });
@@ -71,7 +84,7 @@ export function readFacts(text: string): Fact[] {
 /** Sign `facts` as `me` and admit them at a node. */
 export async function publishVia(node: OpCaller, me: LocalIdentity, facts: Fact[], now: () => number = Date.now) {
   const jsonl = toJsonl(facts);
-  const prev = await headOf(node, me.name);
+  const prev = await ownHead(node, me);
   const salt = newSalt();
   const manifest = me.signBatch(jsonl, prev, new Date(now()).toISOString(), salt);
   const r = await node('admit', { manifest, jsonl, salt, identity: me.identityChain() });
@@ -79,7 +92,7 @@ export async function publishVia(node: OpCaller, me: LocalIdentity, facts: Fact[
 }
 
 export const publish = (url: string, me: LocalIdentity, facts: Fact[], now: () => number = Date.now) =>
-  publishVia(httpCaller(url, undefined, now), me, facts, now);
+  publishVia(httpCaller(url, me, now), me, facts, now);
 
 /** Pull `identity`'s feed from `peer` after what the local node already has,
  *  and admit it there. The local node issues a one-time challenge; the peer
@@ -156,7 +169,7 @@ export async function ask(url: string, body: { query?: string; why?: string; why
  *  signed batch to `recipients`, whose encryption keys the node knows. */
 export async function publishSealedVia(node: OpCaller, me: LocalIdentity, facts: Fact[], recipients: string[], now: () => number = Date.now): Promise<Envelope> {
   const jsonl = toJsonl(facts);
-  const prev = await headOf(node, me.name);
+  const prev = await ownHead(node, me);
   const salt = newSalt();
   const manifest = me.signBatch(jsonl, prev, new Date(now()).toISOString(), salt);
   await node('admit', { manifest, jsonl, salt, identity: me.identityChain() });
@@ -169,7 +182,7 @@ export async function publishSealedVia(node: OpCaller, me: LocalIdentity, facts:
 }
 
 export const publishSealed = (url: string, me: LocalIdentity, facts: Fact[], recipients: string[], now: () => number = Date.now) =>
-  publishSealedVia(httpCaller(url, undefined, now), me, facts, recipients, now);
+  publishSealedVia(httpCaller(url, me, now), me, facts, recipients, now);
 
 /** Hand an envelope to the node, which opens it with its own identity's key
  *  and admits it offline (no freshness; key validity at claimed_at). */
