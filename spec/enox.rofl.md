@@ -274,6 +274,7 @@ Declared as facts:
 - `r_no_orphan_tests` is stated in "owner 2026-09-27: a scanner lists every test case, and no test case is unlinked".
 - `r_no_orphan_tests` is to be checked by "a test that guards no requirement fails the spec gate, and linking it passes".
 - `r_no_orphan_tests` is to be checked by "a test the scanner cannot read, or one the runner lists and the scanner does not, fails the spec gate".
+- `r_no_orphan_tests` is to be checked by "an accepted requirement whose checks guard no existing test fails the spec gate".
 - `r_typed` says "every requirement is of exactly one kind from the closed list".
 - `r_typed` is stated in "owner 2026-09-26".
 - `r_typed` is to be checked by "a requirement with an unknown kind fails typing".
@@ -455,6 +456,8 @@ Declared as facts:
 - `r_admit_by_signer` is to be checked by "a batch signed by B that writes into the book of A is refused".
 - `r_freshness` is about `identity`.
 - `r_freshness` binds as `must`.
+- `r_freshness` says "stale means claimed EARLIER than the receipt minus the freshness window; a claimed time later than the receipt plus the allowed skew is refused as future-dated by every door, live, mirrored or sealed, and is never kept as stale".
+- `r_freshness` is to be checked by "a live batch dated 301 seconds ahead of its receipt is refused as future-dated and not kept, while one dated 301 seconds behind is kept as stale".
 - `r_freshness` says "a signature whose claimed time is further from the time we received it than the freshness window is stale; a stale batch is not trusted until the publisher re-attests it; a live pull uses a fresh challenge from the reader instead of a clock".
 - `r_freshness` is stated in "owner 2026-09-26".
 - `r_freshness` is to be checked by "a batch claiming a time outside the window is marked stale and a re-attestation is requested".
@@ -469,6 +472,8 @@ Declared as facts:
 - `r_rotation` is stated in "owner 2026-09-26".
 - `r_rotation` says "a key's validity is judged at the time its signer claims, and a claimed time later than the receipt plus 300 seconds is refused".
 - `r_rotation` is to be checked by "a batch signed after its key's invalid_from is refused, and one dated 301 seconds past its receipt is refused as future-dated".
+- `r_rotation` says "claimed times within one identity's chain never go backwards, and once a batch signed by a newer key stands in the chain, no older key appends to it".
+- `r_rotation` is to be checked by "after a batch signed by the new key, a batch signed by the rotated key is refused whatever time it claims, and a batch claiming a time earlier than its predecessor is refused".
 - `r_rotation` is to be checked by "a rotation in the middle of a chain is followed without a warning".
 - `r_recovery` is about `identity`.
 - `r_recovery` binds as `must`.
@@ -532,6 +537,7 @@ Declared as facts:
 - `r_mutation_gate` binds as `must`.
 - `r_mutation_gate` is to be checked by "every test file exits on its own without force-exit, leaving no engine process behind".
 - `r_mutation_gate` is to be checked by "a failing mutant shard fails the whole mutant gate".
+- `r_mutation_gate` is to be checked by "the hermetic suite passes five runs in a row, and a nested failure prints the failing test's own error".
 - `r_mutation_gate` says "the mutation harness lives in the repository and runs as a gate: every listed mutant must turn at least one test red, except the ones marked as surviving by design with a reason".
 - `r_mutation_gate` is stated in "owner rule: a gate that never said no is an assumption".
 - `r_mutation_gate` is to be checked by "the mutation gate fails when a listed mutant survives".
@@ -679,8 +685,9 @@ The queue:
 - `r_backup` is queued at 79.
 - `r_confidence` is queued at 69.
 - `r_enox_compat` is queued at 80.
-- `r_mutation_gate` is queued at 81.
 - `r_no_orphan_tests` is queued at 76.
+- `r_freshness` is queued at 77.
+- `r_mutation_gate` is queued at 73.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 - `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
 - `r_key_change_loud` is rejected at "6bfb1bbf0121614ca309293042adf2231ecc31d1".
@@ -689,6 +696,8 @@ The queue:
 - `r_asserted_by` is accepted at "47c198a247231c85bf38ef70395a3fb9514f5306".
 - `r_confidence` is accepted at "27f4b5e57621eae2ebf937f99d7cf3540c766a1e".
 - `r_revocation_receipt` is accepted at "85443bd2b257d98972e1de35b2ad3b5feace3e36".
+- `r_static_feed` is accepted at "c42404137f12fcbf7962f8fc936c480bb83f3e13".
+- `r_rotation` is rejected at "db71b41d7281fe72aae5d4d4302303045a5fb4ce".
 
 Rejected after verification:
 
