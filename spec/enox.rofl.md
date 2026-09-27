@@ -435,6 +435,8 @@ Declared as facts:
 - `r_identity_names` says "a name is refused when normalisation refuses it, when a label mixes letters of more than one script, when a label is longer than 63 or the whole longer than 253 characters, or when a label starts or ends with a hyphen".
 - `r_identity_names` says "every door that compares names — pinning, grants, delegation, follows, invitations, books — compares canonical forms through one function".
 - `r_identity_names` is to be checked by "a name with a space or a text-direction mark is refused, and names at the label and total length limits are accepted".
+- `r_identity_names` says "a name holds at most one @; the part before it is a dot-atom as in email (RFC 5321): no @, no leading or trailing dot and no two dots in a row, so no name can read as one identity while belonging to another domain".
+- `r_identity_names` is to be checked by "admin@example.org@evil.example, ada@@example.org and ada.@example.org are refused, so no name reads as an identity of a domain it does not belong to".
 - `r_identity_names` is to be checked by "Node-A, node-a and NODE-A are one identity, and so are a composed and a decomposed accent and a name with a zero-width mark".
 - `r_identity_names` is to be checked by "a label mixing Cyrillic and Latin letters is refused, while an all-Cyrillic name is accepted and shown in Cyrillic".
 - `r_identity_names` is to be checked by "a grant, a delegation and a follow written with a differently cased or composed name act on the same identity".
@@ -726,6 +728,7 @@ The queue:
 - `r_enox_compat` is accepted at "047c616173ff5b28ed1f33cfb24ff4aec1d7febc".
 - `r_mutation_gate` is accepted at "3ca019fb84ae9d2aaeea0979e21e86715ec0b8b8".
 - `r_rotation` is rejected at "07e4c49652e4dc5c8277573a363ecbdeecb2ef6d".
+- `r_identity_names` is rejected at "3afa102a9be65b5e69fc77ca7da2839d8684ba77".
 - `r_enox_compat` is rejected at "63f344e6d8b0cc2c6b578bbd558a2dbaad21e357".
 - `r_mutation_gate` is rejected at "b6b67403f2e7a5c645be914d5f45754273e77418".
 - `r_identity_names` is rejected at "4800a6841d8476258cb98c07a16cfaf815353c4e".
