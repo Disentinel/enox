@@ -553,6 +553,8 @@ Declared as facts:
 - `r_mutation_gate` binds as `must`.
 - `r_mutation_gate` is to be checked by "every test file exits on its own without force-exit, leaving no engine process behind".
 - `r_mutation_gate` is to be checked by "a failing mutant shard fails the whole mutant gate".
+- `r_mutation_gate` says "before any mutant, the gate runs every named red test on the unmutated tree; a red test that already fails there is a broken baseline and fails the gate, never counting as a kill".
+- `r_mutation_gate` is to be checked by "a mutant whose red test already fails on the unmutated tree is reported as a broken baseline, never as killed".
 - `r_mutation_gate` is to be checked by "the hermetic suite passes five runs in a row, and a nested failure prints the failing test's own error".
 - `r_mutation_gate` says "the mutation harness lives in the repository and runs as a gate: every listed mutant must turn at least one test red, except the ones marked as surviving by design with a reason".
 - `r_mutation_gate` is stated in "owner rule: a gate that never said no is an assumption".
@@ -720,6 +722,7 @@ The queue:
 - `r_chain` is accepted at "68809976741d5ab863ba19d57a9920566d4afa60".
 - `r_backup` is accepted at "d8f57a54ae23621d1c63757978d8ee7b69098e18".
 - `r_enox_compat` is rejected at "63f344e6d8b0cc2c6b578bbd558a2dbaad21e357".
+- `r_mutation_gate` is rejected at "b6b67403f2e7a5c645be914d5f45754273e77418".
 - `r_identity_names` is rejected at "4800a6841d8476258cb98c07a16cfaf815353c4e".
 - `r_rotation` is rejected at "db71b41d7281fe72aae5d4d4302303045a5fb4ce".
 
