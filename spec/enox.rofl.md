@@ -437,6 +437,7 @@ Declared as facts:
 - `r_identity_names` is to be checked by "a name with a space or a text-direction mark is refused, and names at the label and total length limits are accepted".
 - `r_identity_names` says "a name holds at most one @; the part before it is a dot-atom as in email (RFC 5321): no @, no leading or trailing dot and no two dots in a row, so no name can read as one identity while belonging to another domain".
 - `r_identity_names` is to be checked by "admin@example.org@evil.example, ada@@example.org and ada.@example.org are refused, so no name reads as an identity of a domain it does not belong to".
+- `r_identity_names` is to be checked by "a user part holding any of < > ( ) [ ] : ; , a backslash or a double quote is refused, while one with + or ' is accepted, as email atext allows".
 - `r_identity_names` is to be checked by "Node-A, node-a and NODE-A are one identity, and so are a composed and a decomposed accent and a name with a zero-width mark".
 - `r_identity_names` is to be checked by "a label mixing Cyrillic and Latin letters is refused, while an all-Cyrillic name is accepted and shown in Cyrillic".
 - `r_identity_names` is to be checked by "a grant, a delegation and a follow written with a differently cased or composed name act on the same identity".
@@ -728,6 +729,7 @@ The queue:
 - `r_enox_compat` is accepted at "047c616173ff5b28ed1f33cfb24ff4aec1d7febc".
 - `r_mutation_gate` is accepted at "3ca019fb84ae9d2aaeea0979e21e86715ec0b8b8".
 - `r_rotation` is accepted at "4f7c3617e44a355a89ed563c133438d5e58bd6fe".
+- `r_identity_names` is rejected at "fd7980616c080677b958b90759493edde1012954".
 - `r_rotation` is rejected at "07e4c49652e4dc5c8277573a363ecbdeecb2ef6d".
 - `r_identity_names` is rejected at "3afa102a9be65b5e69fc77ca7da2839d8684ba77".
 - `r_enox_compat` is rejected at "63f344e6d8b0cc2c6b578bbd558a2dbaad21e357".
