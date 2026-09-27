@@ -36,7 +36,12 @@ Declared as facts:
 
 <a id="review"></a>A requirement R awaits review if some worker finished R at a revision V, unless R is settled at V.
 
-<a id="progress"></a>A requirement R is in progress by a worker W if W takes R, unless W finished R at some revision.
+<a id="delivered"></a>A worker W delivered a requirement R if W finished R at a revision V, unless R is rejected at V.
+
+> Сдача, которую ведущий отклонил, не считается сдачей: доработка после
+> отказа снова «в работе», а не пропадает с доски.
+
+<a id="progress"></a>A requirement R is in progress by a worker W if W takes R, unless W delivered R.
 
 <a id="stuck"></a>A requirement R is stuck for a worker W by a text T if W is blocked on R by T, unless R is accepted at some revision.
 
