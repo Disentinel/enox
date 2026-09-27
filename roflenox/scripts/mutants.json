@@ -2378,6 +2378,62 @@
    "red": [
     "a delegation to a name outside the parent's own names pins nothing, and the invited pull of that name's real owner still pins"
    ]
+  },
+  {
+   "id": "M172",
+   "title": "r_asserted_by: an edge reads back the asserted_by its batch claims",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "asserted_by: [...(this.by.get(a.F) ?? [])].sort().join(', ') || null,",
+     "asserted_by: attr(a.F, 'asserted_by') ?? null,"
+    ]
+   ],
+   "red": [
+    "every admitted fact reads back asserted by the identity that signed its batch, whatever the batch claims"
+   ]
+  },
+  {
+   "id": "M173",
+   "title": "r_asserted_by: an Enox write answers with the claimed asserted_by",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "relation: a.relation, asserted_by: signer, confidence,",
+     "relation: a.relation, asserted_by: by, confidence,"
+    ]
+   ],
+   "red": [
+    "every admitted fact reads back asserted by the identity that signed its batch, whatever the batch claims"
+   ]
+  },
+  {
+   "id": "M174",
+   "title": "r_asserted_by: a loaded view credits the reader, not the signer",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "g.signedBy(F!, identity); }",
+     "g.signedBy(F!, caller ?? ''); }"
+    ]
+   ],
+   "red": [
+    "every admitted fact reads back asserted by the identity that signed its batch, whatever the batch claims"
+   ]
+  },
+  {
+   "id": "M175",
+   "title": "r_asserted_by: an applied batch credits the node, not its signer",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "kept.g.apply(b.facts, b.seq, b.identity);",
+     "kept.g.apply(b.facts, b.seq, own);"
+    ]
+   ],
+   "red": [
+    "every admitted fact reads back asserted by the identity that signed its batch, whatever the batch claims"
+   ]
   }
  ]
 }

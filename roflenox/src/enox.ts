@@ -7,7 +7,10 @@
 //              [E, enox:alias, a]… or [E, enox:aliases, <JSON list>] (update_node)
 //   assertion  [S, rel, T] with its current confidence (conf 0 = deleted), and
 //              [F, enox:asserted_by|context|proof_depth|created_at|updated_at|fact_id, v]
-//              about it (F = its roflenox fact_id)
+//              about it (F = its roflenox fact_id). An edge reads back asserted
+//              by the identities whose signed batches hold it (r_asserted_by);
+//              an enox:asserted_by a batch writes is its claim, kept in the
+//              log and never shown as who asserted.
 // Single-valued attributes resolve to the latest assertion in the chain.
 // Updates and deletes are NEW assertions that supersede — the log stays
 // append-only; a delete is the triple re-asserted with confidence 0.
@@ -61,27 +64,35 @@ export class Graph {
   private readonly raw = new Map<string, { S: string; R: string; T: string }>();
   private readonly conf = new Map<string, number>();
   private readonly seq = new Map<string, number>();
+  /** Who signed each fact: the identities whose books hold it. */
+  private readonly by = new Map<string, Set<string>>();
   private dirty = true;
 
   static async load(node: RoflenoxNode, caller: string | null): Promise<Graph> {
     const g = new Graph();
-    const facts = (await node.ask('edge(F, S, R, T)', caller)).rows as { cells: string[] }[];
+    const facts = (await node.ask('edge(F, S, R, T)', caller)).rows as { identity: string; cells: string[] }[];
     const seqRows = await node.ask('asserted(F, P, C, S)', caller).catch((e: unknown) => {
       if (e instanceof Refusal && e.reason === 'engine_down') throw e;     // never a plain answer from a dead engine
       return { rows: [] };
     });
     for (const r of seqRows.rows as { cells: [string, string, number, number] }[]) g.seq.set(r.cells[0], Math.max(g.seq.get(r.cells[0]) ?? -1, r.cells[3]));
     for (const r of (await node.ask('conf(F, C)', caller)).rows as { cells: [string, number] }[]) g.conf.set(r.cells[0], r.cells[1]);
-    for (const { cells: [F, S, R, T] } of facts) g.raw.set(F!, { S: S!, R: R!, T: T! });
+    for (const { identity, cells: [F, S, R, T] } of facts) { g.raw.set(F!, { S: S!, R: R!, T: T! }); g.signedBy(F!, identity); }
     g.derive();
     return g;
   }
 
-  /** Apply an admitted batch (its facts, at its chain position). */
-  apply(facts: { source: string; relation: string; target: string; confidence: number }[], seq: number): void {
+  private signedBy(F: string, identity: string): void {
+    const s = this.by.get(F);
+    if (s) s.add(identity); else this.by.set(F, new Set([identity]));
+  }
+
+  /** Apply an admitted batch (its facts, at its chain position, signed by `identity`). */
+  apply(facts: { source: string; relation: string; target: string; confidence: number }[], seq: number, identity: string): void {
     for (const f of facts) {
       const F = factId(f);
       this.raw.set(F, { S: f.source, R: f.relation, T: f.target });
+      this.signedBy(F, identity);
       this.conf.set(F, Math.round(f.confidence * 1000));
       this.seq.set(F, seq);
     }
@@ -133,7 +144,7 @@ export class Graph {
       if (!this.nodes.has(a.S) || !this.nodes.has(a.T)) continue;
       this.edges.push({
         F: a.F, fact_id: attr(a.F, 'fact_id') ?? enoxFactId(a.S, a.R, a.T), source: a.S, target: a.T, relation: a.R,
-        confidence: c / 1000, asserted_by: attr(a.F, 'asserted_by') ?? null, context: attr(a.F, 'context') ?? '',
+        confidence: c / 1000, asserted_by: [...(this.by.get(a.F) ?? [])].sort().join(', ') || null, context: attr(a.F, 'context') ?? '',
         proof_depth: Number(attr(a.F, 'proof_depth') ?? 0), created_at: attr(a.F, 'created_at') ?? null, updated_at: attr(a.F, 'updated_at') ?? null,
       });
     }
@@ -187,7 +198,9 @@ export interface AddArgs {
 }
 
 /** add_assertion's resolution and facts (shared with batch_assertions). */
-export function addFacts(g: Graph, a: AddArgs, agent: string, created: Map<string, Node>) {
+/** `signer` is the identity the batch will be signed as — who the result says
+ *  asserted it; `a.asserted_by` (or `agent`) is kept as the batch's claim. */
+export function addFacts(g: Graph, a: AddArgs, agent: string, created: Map<string, Node>, signer: string) {
   const t = now();
   const facts: Fact[] = [];
   const res = (name: string, type: string, domain: string) => {
@@ -210,7 +223,7 @@ export function addFacts(g: Graph, a: AddArgs, agent: string, created: Map<strin
     meta(F, 'asserted_by', by), meta(F, 'fact_id', fid), meta(F, 'updated_at', t));
   if (a.context) facts.push(meta(F, 'context', a.context));
   if (!existing) facts.push(meta(F, 'created_at', t), meta(F, 'proof_depth', a.proof_depth ?? 0));
-  const result = { fact_id: fid, source: sid, target: tid, relation: a.relation, asserted_by: by, confidence,
+  const result = { fact_id: fid, source: sid, target: tid, relation: a.relation, asserted_by: signer, confidence,
     proof_depth: existing ? existing.proof_depth : a.proof_depth ?? 0, context: a.context ?? '', created: !existing, updated: !!existing };
   return { facts, result, inverse: g.edges.find((e) => e.source === tid && e.target === sid && e.relation === a.relation) };
 }

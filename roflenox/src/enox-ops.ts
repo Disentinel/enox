@@ -39,7 +39,7 @@ async function graph(ctx: Ctx): Promise<Graph> {
     if (kept.version === n.logVersion()) return kept.g.ensure();
     const since = n.admittedSince(kept.version);
     if (since) {
-      for (const b of since) kept.g.apply(b.facts, b.seq);
+      for (const b of since) kept.g.apply(b.facts, b.seq, b.identity);
       kept.version = n.logVersion();
       return kept.g.ensure();
     }
@@ -55,6 +55,8 @@ export function heldViews(): number {
 }
 
 const agent = () => process.env.ENOX_AGENT_IDENTITY?.trim() || 'agent:unknown';
+/** The identity every Enox write is signed as: the node's own. */
+const self = (ctx: Ctx) => node(ctx).identity!.name;
 
 async function write(ctx: Ctx, facts: Fact[]): Promise<void> {
   if (facts.length) await node(ctx).assertAsSelf(uniq(facts));
@@ -280,7 +282,7 @@ export const ENOX_OPS: Op[] = [
     input: obj(ASSERTION, ['source', 'target', 'relation']), access: 'operator', text: pretty,
     run: async (ctx, a) => {
       const g = await graph(ctx);
-      const { facts, result, inverse } = addFacts(g, a as unknown as AddArgs, agent(), new Map());
+      const { facts, result, inverse } = addFacts(g, a as unknown as AddArgs, agent(), new Map(), self(ctx));
       await write(ctx, facts);
       const warn = inverse && ['supersedes', 'outperforms', 'contradicts'].includes(result.relation)
         ? { warnings: [`Potential contradiction: inverse "${result.relation}" assertion exists from target to source (fact_id: ${inverse.fact_id})`] } : {};
@@ -295,7 +297,7 @@ export const ENOX_OPS: Op[] = [
       const results = (a.assertions as AddArgs[]).map((x) => {
         try {
           if (!x.source || !x.target || !x.relation) throw new Error('source, target and relation are required');
-          const r = addFacts(g, x, agent(), created);
+          const r = addFacts(g, x, agent(), created, self(ctx));
           all.push(...r.facts);
           return { fact_id: r.result.fact_id, source: r.result.source, target: r.result.target, relation: r.result.relation, asserted_by: r.result.asserted_by, ok: true, created: r.result.created };
         } catch (e) {
@@ -325,7 +327,7 @@ export const ENOX_OPS: Op[] = [
       const fid = `${uriPrefix()}/${domain}/fact_${slugify(fact.substring(0, 60))}_${createHash('sha256').update(fact).digest('hex').slice(0, 8)}`;
       if (!g.nodes.has(fid)) facts.push(...entityFacts(fid, truncateAtWordBoundary(fact, 300), factType, domain, fact, t));
       const r = addFacts(g, { source: subj!.id, target: fid, relation, confidence: (a.confidence as number | undefined) ?? 0.9, context: fact,
-        asserted_by: a.asserted_by as string | undefined }, agent(), new Map([[fid, { id: fid } as never], [subj!.id, { id: subj!.id } as never]]));
+        asserted_by: a.asserted_by as string | undefined }, agent(), new Map([[fid, { id: fid } as never], [subj!.id, { id: subj!.id } as never]]), self(ctx));
       facts.push(...r.facts);
       await write(ctx, facts);
       return { subject: { id: subj!.id, name: subj!.name }, fact: { id: fid, text: truncateAtWordBoundary(fact, 300) }, relation,
@@ -344,7 +346,7 @@ export const ENOX_OPS: Op[] = [
       if (a.asserted_by !== undefined) facts.push(meta(e.F, 'asserted_by', a.asserted_by as string));
       if (a.proof_depth !== undefined) facts.push(meta(e.F, 'proof_depth', a.proof_depth as number));
       await write(ctx, facts);
-      return { fact_id: e.fact_id, source: e.source, target: e.target, relation: e.relation, asserted_by: (a.asserted_by as string | undefined) ?? e.asserted_by,
+      return { fact_id: e.fact_id, source: e.source, target: e.target, relation: e.relation, asserted_by: self(ctx),
         confidence, proof_depth: (a.proof_depth as number | undefined) ?? e.proof_depth, context: (a.context as string | undefined) ?? e.context, updated_at: t };
     } },
   { name: 'delete_assertion', description: 'Retire an assertion: re-asserted with confidence 0 (the log keeps its history).',
@@ -402,7 +404,7 @@ export const ENOX_OPS: Op[] = [
       for (const l of (a.links as { entity_id: string; relation?: string }[] | undefined) ?? []) {
         if (!g.nodes.has(l.entity_id)) continue;
         const r = addFacts(g, { source: eid, target: l.entity_id, relation: l.relation ?? 'describes', confidence: 1, context: '', asserted_by: `artifact:${id}:link` },
-          agent(), new Map([[eid, { id: eid, name: a.title } as never]]));
+          agent(), new Map([[eid, { id: eid, name: a.title } as never]]), self(ctx));
         facts.push(...r.facts);
         links++;
       }

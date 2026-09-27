@@ -6,7 +6,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { httpCaller } from '../src/client.ts';
 import { importEnox } from '../src/import.ts';
-import { get, start, tmpDir } from './helpers.ts';
+import { batch, fact, get, identityAt, iso, post, start, tmpDir, vouch } from './helpers.ts';
+import { factId } from '../src/facts.ts';
 
 const FIXTURE = path.join(import.meta.dirname, 'fixtures', 'enox-snapshot.jsonl');
 
@@ -84,5 +85,42 @@ test('the tool calls an Enox client made on 2026-09-26 run unchanged against a n
     const anon = await call('remember', { subject: 'x', fact: 'y' }, '');
     assert.equal(anon.isError, true);
     assert.match(anon.text, /not_operator/);
+  } finally { await a.stop(); }
+});
+
+test('every admitted fact reads back asserted by the identity that signed its batch, whatever the batch claims', async () => {
+  const a = await start(tmpDir('by-a'), 'node-a');
+  const b = identityAt(tmpDir('by-b'), 'node-b');
+  const e = (id: string, label: string) => [{ source: id, relation: 'enox:label', target: label, perspective: 'enox', confidence: 1 },
+    { source: id, relation: 'enox:type', target: 'person', perspective: 'enox', confidence: 1 }];
+  try {
+    await vouch(a, b);
+    // node-b's batch says, in every way a batch can, that node-a asserted it.
+    const knows = { source: 'urn:t:babbage', relation: 'knows', target: 'urn:t:ada', perspective: 'enox', confidence: 1 };
+    const claims = [...e('urn:t:babbage', 'Babbage'), ...e('urn:t:ada', 'Ada'), knows,
+      { source: factId(knows), relation: 'enox:asserted_by', target: 'node-a', perspective: 'enox', confidence: 1 },
+      { source: 'node-a', relation: 'asserted', target: 'this batch', perspective: 'enox', confidence: 1 }];
+    const signed = batch(b, claims, null, iso(a.clock.t));
+    assert.equal((await post(a.url, '/batches', signed)).status, 201);
+    // Nor does a manifest that names node-a make node-b's signature node-a's.
+    const forged = batch(b, [fact('node-a', 'says', 'so')], null, iso(a.clock.t));
+    assert.ok((await post(a.url, '/batches', { ...forged, manifest: { ...forged.manifest, identity: 'node-a' } })).status >= 400);
+    // node-a's operator writes through Enox, claiming an agent label.
+    const w = (await post(a.url, '/op/add_assertion', { source: 'Ada', target: 'Babbage', relation: 'corresponds_with', asserted_by: 'agent:someone-else' })).body;
+    assert.equal(w.asserted_by, 'node-a', 'the write answers with its signer');
+    // And node-b again, after the operator's view of the graph was built.
+    const admires = { source: 'urn:t:ada', relation: 'admires', target: 'urn:t:babbage', perspective: 'enox', confidence: 1 };
+    const later = [admires, { source: factId(admires), relation: 'enox:asserted_by', target: 'node-a', perspective: 'enox', confidence: 1 }];
+    assert.equal((await post(a.url, '/batches', batch(b, later, signed.manifest.digest, iso(a.clock.t)))).status, 201);
+
+    // Every row of the core answers as the book that signed it.
+    const rows = (await post(a.url, '/ask', { query: 'edge(F, S, R, T)' })).body.rows as { identity: string; cells: string[] }[];
+    const ids = new Set([...claims, ...later].map((c) => factId(c)));
+    for (const r of rows) assert.equal(r.identity, ids.has(r.cells[0]!) ? 'node-b' : 'node-a', JSON.stringify(r.cells));
+    assert.equal(rows.filter((r) => r.identity === 'node-b').length, claims.length + later.length);
+    // The Enox view says the same, whatever enox:asserted_by claimed.
+    const recall = (await post(a.url, '/op/recall', { query: 'Babbage' })).body as { edges: { source: string; relation: string; target: string; asserted_by: string }[] };
+    const by = Object.fromEntries(recall.edges.map((x) => [x.relation, x.asserted_by]));
+    assert.deepEqual(by, { knows: 'node-b', admires: 'node-b', corresponds_with: 'node-a' });
   } finally { await a.stop(); }
 });

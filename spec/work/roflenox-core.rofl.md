@@ -51,3 +51,5 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_atomic_write`.
 - `roflenox_core` finished `r_atomic_write` at "cb8730b753d33b9d28115ad4db650776d2c5a154".
 - `roflenox_core` takes `r_key_change_loud`.
+- `roflenox_core` finished `r_key_change_loud` at "2873ca82a93a210e7954cd7dc7e6d9f33d604569".
+- `roflenox_core` takes `r_asserted_by`.
