@@ -1594,6 +1594,53 @@
    "red": [
     "the MCP endpoint issues no session id and keeps no state per client"
    ]
+  },
+  {
+   "id": "M117",
+   "title": "r_bounded_memory: no declared heap budget",
+   "file": "src/cli.ts",
+   "edits": [
+    [
+     "#!/usr/bin/env -S node --experimental-strip-types --no-warnings --max-old-space-size=1024",
+     "#!/usr/bin/env -S node --experimental-strip-types --no-warnings"
+    ],
+    [
+     "\"node --experimental-strip-types --no-warnings --max-old-space-size=1024 src/cli.ts\"",
+     "\"node --experimental-strip-types --no-warnings src/cli.ts\"",
+     "package.json"
+    ]
+   ],
+   "red": [
+    "a node holding 200000 facts stays under 1.5 GB of resident memory while idle"
+   ]
+  },
+  {
+   "id": "M118",
+   "title": "r_bounded_memory: the engine a rebuild replaced is left running",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    await old.stop().catch(() => {});",
+     "    void old;"
+    ]
+   ],
+   "red": [
+    "a node holding 200000 facts stays under 1.5 GB of resident memory while idle"
+   ]
+  },
+  {
+   "id": "M119",
+   "title": "r_bounded_memory: recent admissions remembered by batch count, not facts",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    while (this.recentFacts > RECENT_FACTS) this.recentFacts -= this.recent.shift()!.facts.length;",
+     "    while (this.recent.length > 1000) this.recentFacts -= this.recent.shift()!.facts.length;"
+    ]
+   ],
+   "red": [
+    "a node holding 200000 facts stays under 1.5 GB of resident memory while idle"
+   ]
   }
  ]
 }

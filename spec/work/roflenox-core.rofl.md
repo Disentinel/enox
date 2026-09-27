@@ -27,3 +27,5 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_uri_prefix_stable`.
 - `roflenox_core` finished `r_uri_prefix_stable` at "8a03765e17e2a44a75ec811bfe911c30e25c16d1".
 - `roflenox_core` takes `r_session_eviction`.
+- `roflenox_core` finished `r_session_eviction` at "4bed1e467dd5b09c5d04ffb0b83aa0fbb9d05056".
+- `roflenox_core` takes `r_bounded_memory`.

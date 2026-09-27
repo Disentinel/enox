@@ -1,4 +1,4 @@
-#!/usr/bin/env -S node --experimental-strip-types --no-warnings
+#!/usr/bin/env -S node --experimental-strip-types --no-warnings --max-old-space-size=1024
 // roflenox — the CLI, GENERATED from the operation table (src/ops.ts):
 //
 //   roflenox <operation> [--<property> <value>]... [positional...]
@@ -17,6 +17,12 @@
 // material the CLI ever shows, and `recover` the only operation that takes
 // any (r_recovery). --data DIR (ROFLENOX_DATA, default ~/.roflenox) is the
 // data directory; --url U (ROFLENOX_URL, default http://127.0.0.1:7380) the node.
+//
+// The memory budget is declared on the #! line (and in `npm run roflenox`):
+// the node's JavaScript heap is capped at 1 GB, so V8 collects instead of
+// growing, and a node past it fails loudly rather than swelling. The engine
+// is a separate process; together a node holding 200000 facts stays under
+// 1.5 GB resident while idle (r_bounded_memory, test/perf/memory.test.ts).
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { LocalIdentity } from './identity.ts';

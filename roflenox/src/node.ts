@@ -115,7 +115,11 @@ function programOf(v: Verified, seq: number): string {
 }
 
 export const DEFAULT_RULE_BUDGET = 50_000;
-const RECENT = 1000;
+/** How many admitted facts are remembered for views that apply writes
+ *  (admittedSince). Counted in facts, not batches: a thousand batches of 2000
+ *  would hold two million facts in memory (r_bounded_memory). A view further
+ *  behind than this rebuilds. */
+const RECENT_FACTS = 50_000;
 
 export class RoflenoxNode {
   readonly dataDir: string;
@@ -156,6 +160,7 @@ export class RoflenoxNode {
   private version = 0;
   /** The last admissions, for views that apply writes instead of rebuilding. */
   private readonly recent: { version: number; identity: string; facts: Fact[]; seq: number }[] = [];
+  private recentFacts = 0;
   /** RFC 9421 nonces seen on signed requests: nonce → expiry (ms). */
   private readonly requestNonces = new Map<string, number>();
 
@@ -385,7 +390,8 @@ export class RoflenoxNode {
     if (v.rules.length) this.userRules.set(id, [...(this.userRules.get(id) ?? []), ...v.rules.map((text) => ({ text, mirrored }))]);
     this.version++;
     this.recent.push({ version: this.version, identity: id, facts: v.facts, seq });
-    if (this.recent.length > RECENT) this.recent.shift();
+    this.recentFacts += v.facts.length;
+    while (this.recentFacts > RECENT_FACTS) this.recentFacts -= this.recent.shift()!.facts.length;
     if (v.pin) this.idDocs.set(id, [v.pin]);
     const chain = this.chains.get(id) ?? [];
     chain.push(v.manifest.digest);
@@ -644,8 +650,13 @@ export class RoflenoxNode {
       entries.push({ rofl: this.assertions.lines(id, bookOf(id)), who: id, rules: null });
     }
     await e.replay(entries);
+    // A stale engine is alive (an aborted admission left it holding what the
+    // log does not): it is stopped, or every abort would leave a whole engine
+    // process behind (r_bounded_memory).
+    const old = this.engine;
     this.engine = e;
     this.engineRestarts++;
+    await old.stop().catch(() => {});
   }
 
   /** The engine process id — for tests that kill it. */
@@ -1097,6 +1108,7 @@ export class RoflenoxNode {
       warnings: this.warnings,
       recovered: this.log.recovered,
       challenges_remembered: this.consumed.size,
+      recent_facts_remembered: this.recentFacts,
     };
   }
 
