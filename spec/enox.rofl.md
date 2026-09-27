@@ -524,6 +524,8 @@ Declared as facts:
 - `r_offline_admission` is to be checked by "a sealed batch opened a day later is admitted, and one signed by a key revoked before it was sealed is refused".
 - `r_mutation_gate` is about `architecture`.
 - `r_mutation_gate` binds as `must`.
+- `r_mutation_gate` is to be checked by "every test file exits on its own without force-exit, leaving no engine process behind".
+- `r_mutation_gate` is to be checked by "a failing mutant shard fails the whole mutant gate".
 - `r_mutation_gate` says "the mutation harness lives in the repository and runs as a gate: every listed mutant must turn at least one test red, except the ones marked as surviving by design with a reason".
 - `r_mutation_gate` is stated in "owner rule: a gate that never said no is an assumption".
 - `r_mutation_gate` is to be checked by "the mutation gate fails when a listed mutant survives".
@@ -670,6 +672,7 @@ The queue:
 - `r_backup` is queued at 79.
 - `r_confidence` is queued at 69.
 - `r_enox_compat` is queued at 80.
+- `r_mutation_gate` is queued at 81.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 - `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
 - `r_key_change_loud` is rejected at "6bfb1bbf0121614ca309293042adf2231ecc31d1".
