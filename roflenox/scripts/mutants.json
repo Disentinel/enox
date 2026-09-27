@@ -1093,12 +1093,13 @@
    "file": "src/enox-ops.ts",
    "edits": [
     [
-     "    run: async (_ctx, a) => ({ nodes: [],",
-     "    run: async (ctx, a) => ({ nodes: [...(await graph(ctx)).nodes.values()].slice(0, 1).map((x) => ({ id: x.id })),"
+     "      const none = (index: string, message: string) => ({ nodes: [],",
+     "      const none = (index: string, message: string) => ({ nodes: [{ id: 'a guess' }],"
     ]
    ],
    "red": [
-    "the tool calls an Enox client made on 2026-09-26 run unchanged against a node and get answers of the same shape"
+    "the tool calls an Enox client made on 2026-09-26 run unchanged against a node and get answers of the same shape",
+    "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent"
    ]
   },
   {
@@ -1710,6 +1711,76 @@
    ],
    "red": [
     "a batch line that is not a relation between two entities is refused"
+   ]
+  },
+  {
+   "id": "M125",
+   "title": "r_semantic_search: anyone's search writes a fact",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (found.state !== 'not_asked' || requester === null || requester !== this.identity?.name) return found;",
+     "    if (found.state !== 'not_asked') return found;"
+    ]
+   ],
+   "red": [
+    "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent"
+   ]
+  },
+  {
+   "id": "M126",
+   "title": "r_semantic_search: an embedder no longer named still answers",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      const embedders = [...new Set(named.filter((r) => (cur.get(String(r[0]))?.C ?? 0) > 0).map((r) => String(r[1])))].sort();",
+     "      const embedders = [...new Set(named.map((r) => String(r[1])))].sort();"
+    ]
+   ],
+   "red": [
+    "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent"
+   ]
+  },
+  {
+   "id": "M127",
+   "title": "r_semantic_search: hits are shown through the operator's view, not the caller's",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "      // Hits the CALLER may not read are not in its view, and so not answered.\n      const g = await graph(ctx);",
+     "      const g = await graph({ ...ctx, caller: node(ctx).identity?.name ?? null });"
+    ]
+   ],
+   "red": [
+    "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent"
+   ]
+  },
+  {
+   "id": "M128",
+   "title": "r_semantic_search: no rule makes a search an intent",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "    `intent[${book}](K, E, \"search\", Q) :- edge[${book}](F, K, \"roflenox:search\", Q), edge[${book}](G, E, \"roflenox:embedder\", \"search\").`,",
+     "    `intent[${book}](K, E, \"search\", Q) :- edge[${book}](F, K, \"roflenox:search\", Q), edge[${book}](G, E, \"roflenox:embedder\", \"never\").`,"
+    ]
+   ],
+   "red": [
+    "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent"
+   ]
+  },
+  {
+   "id": "M129",
+   "title": "r_derived_rebuildable: the embedder does not rebuild its index from its book",
+   "file": "executors/embedder/embedder.ts",
+   "edits": [
+    [
+     "  for (const { cells } of own) {",
+     "  for (const { cells } of own.slice(0, 0)) {"
+    ]
+   ],
+   "red": [
+    "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent"
    ]
   }
  ]

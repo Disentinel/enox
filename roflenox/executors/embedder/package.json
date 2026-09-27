@@ -1,0 +1,16 @@
+{
+  "name": "roflenox-embedder",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The embedder executor for ROFLENOX: answers search-by-meaning intents in its own book. A separate package: it may take dependencies (a model) that the core never does.",
+  "type": "module",
+  "bin": {
+    "roflenox-embedder": "embedder.ts"
+  },
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "start": "node --experimental-strip-types --no-warnings embedder.ts"
+  }
+}

@@ -200,10 +200,34 @@ export const ENOX_OPS: Op[] = [
       }
       return { nodes, edges, seeds: hits.slice(0, 5).map((h) => h.x.name), budget_used: Math.ceil(used / 4), budget_total: budget };
     } },
-  { name: 'semantic_search', description: 'Search by meaning. Needs the embedder executor\'s index; without it the answer says so, and never guesses.',
+  { name: 'semantic_search', description: 'Search by meaning. The embedder executor answers (r_semantic_search); until it has, the answer says so and never guesses. An answer is in the log: it stays when the embedder is gone.',
     input: obj({ query: s(), top_k: n(), domain: s(), include_edges: b() }, ['query']), access: 'anyone', text: pretty,
-    run: async (_ctx, a) => ({ nodes: [], ...(a.include_edges ? { edges: [] } : {}), index: 'absent',
-      message: 'no semantic index on this node: search by meaning is the embedder executor\'s, which has not answered yet (r_semantic_search). Use recall or query_graph for text matches.' }) },
+    run: async (ctx, a) => {
+      const r = await node(ctx).meaningSearch(a.query as string, ctx.caller);
+      const none = (index: string, message: string) => ({ nodes: [], ...(a.include_edges ? { edges: [] } : {}), index, message });
+      if (r.state === 'no_embedder') {
+        return none('absent', 'no semantic index on this node: search by meaning is the embedder executor\'s, and none is named (a roflenox:embedder fact). Use recall or query_graph for text matches.');
+      }
+      if (r.state !== 'answered') {
+        return none('pending', r.state === 'pending'
+          ? `asked ${r.embedder} to search by meaning; it has not answered yet — ask again shortly.`
+          : 'this search has not been asked by the node\'s operator; nothing to answer yet.');
+      }
+      // Hits the CALLER may not read are not in its view, and so not answered.
+      const g = await graph(ctx);
+      const topK = (a.top_k as number | undefined) ?? 10;
+      const domain = a.domain as string | undefined;
+      const sim = (x: number) => Math.round(x * 1000) / 1000;
+      const nodes = r.hits.filter((h) => h.kind === 'node').map((h) => ({ h, nd: g.nodes.get(h.id) }))
+        .filter(({ nd }) => nd && (domain === undefined || nd.domain.startsWith(domain)))
+        .slice(0, topK).map(({ h, nd }) => ({ ...g.record(nd!), similarity: sim(h.score) }));
+      const byF = new Map(g.edges.map((e) => [e.F, e]));
+      const edges = r.hits.filter((h) => h.kind === 'fact').map((h) => ({ h, e: byF.get(h.id) }))
+        .filter(({ e }) => e && (domain === undefined || (g.nodes.get(e.source)?.domain ?? '').startsWith(domain)))
+        .slice(0, topK).map(({ h, e }) => ({ ...g.row(e!), similarity: sim(h.score) }));
+      return { nodes, ...(a.include_edges ? { edges } : {}), index: `embedder:${r.embedder}`,
+        message: `${nodes.length} entities${a.include_edges ? ` and ${edges.length} assertions` : ''} by meaning, answered by ${r.embedder}` };
+    } },
   { name: 'recent_activity', description: 'The most recently updated assertions.', input: obj({ since: s(), limit: n() }), access: 'anyone', text: pretty,
     run: async (ctx, a) => {
       const g = await graph(ctx);

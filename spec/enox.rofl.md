@@ -224,6 +224,8 @@ Declared as facts:
 - `r_semantic_search` says "search by meaning is an executor that embeds facts into its own book; the core answers without it and a lost index is rebuilt from the log".
 - `r_semantic_search` is stated in "Enox today; incident 2026-09-18".
 - `r_semantic_search` is to be checked by "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent".
+- `r_semantic_search` is to be checked by "a meaning search finds a fact that shares none of the query's words".
+- `r_semantic_search` is to be checked by "a search the operator asks is never published by a wildcard export".
 - `r_uc_observability` is about `hybrid`.
 - `r_uc_observability` binds as `must`.
 - `r_uc_observability` says "hosts publish facts about themselves as feeds; a reader derives fleet invariants with rules and explains each finding; a silent feed gives unknown, never all-clear".
@@ -618,10 +620,12 @@ The queue:
 
 Rejected after verification:
 
+- `r_semantic_search` is rejected at "4170fad256ebfbac06d77bc0fefac9d2fac388d2".
 - `r_relation_primary` is rejected at "c7f2ea68049192b5ad4dffb5164ae8ef10fd14a3".
 
 Accepted after verification:
 
+- `r_derived_rebuildable` is accepted at "4170fad256ebfbac06d77bc0fefac9d2fac388d2".
 - `r_bounded_memory` is accepted at "fe6c2b55716d73ef8889f3d3ae57a74eae083063".
 - `r_uri_prefix_stable` is accepted at "8a03765e17e2a44a75ec811bfe911c30e25c16d1".
 - `r_session_eviction` is accepted at "4bed1e467dd5b09c5d04ffb0b83aa0fbb9d05056".

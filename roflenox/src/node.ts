@@ -19,7 +19,7 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { canonicalize } from './jcs.ts';
-import { batchDigest, decodeCell, factId, isSalt, newSalt, parseJsonl, Refusal, roflString, sha256hex, toJsonl, toRofl, type Fact } from './facts.ts';
+import { batchDigest, decodeCell, EMBEDDER, factId, isSalt, newSalt, parseJsonl, Refusal, roflString, SEARCH, sha256hex, toJsonl, toRofl, type Fact } from './facts.ts';
 import {
   bookOf, CHECKPOINT_CONTEXT, checkIdentityDoc, checkManifest, docHash, docSignedBy, FEED_CONTEXT, isTime, keyValidAt, LocalIdentity,
   REATTEST_CONTEXT, verifyIdentityDoc, verifyManifestSig, verifySigned,
@@ -112,6 +112,20 @@ function programOf(v: Verified, seq: number): string {
   // The asserted[] rows are not here: they are the CURRENT assertions, kept by
   // src/assertions.ts (it replaces the superseded/current/view rules).
   return toRofl(v.facts, bookOf(v.manifest.identity), seq, false);
+}
+
+/** One hit of a search by meaning: an entity ("node") or a fact, by id. */
+export interface SearchHit { kind: 'node' | 'fact'; id: string; score: number }
+export interface MeaningSearch {
+  state: 'answered' | 'pending' | 'not_asked' | 'no_embedder';
+  key: string;
+  embedder?: string;
+  hits: SearchHit[];
+}
+
+/** A search's key: the query, trimmed and case-folded, hashed. */
+export function searchKey(query: string): string {
+  return `search:${sha256hex(query.trim().toLowerCase().replace(/\s+/g, ' ')).slice(0, 32)}`;
 }
 
 export const DEFAULT_RULE_BUDGET = 50_000;
@@ -908,6 +922,41 @@ export class RoflenoxNode {
       const manifest = me.signBatch(jsonl, this.head(me.name), new Date(this.now()).toISOString(), salt);
       return this.admitNow({ manifest, jsonl, salt, identity: me.identityChain() }, 'post', new Date(this.now()).toISOString());
     });
+  }
+
+  /** Search by meaning (r_semantic_search, r_derived_rebuildable). The node
+   *  embeds nothing: a search is a fact in the operator's book, a rule makes
+   *  it an intent to the embedder the book names, and the embedder answers
+   *  with a result fact in ITS book. An answer is therefore in the log — the
+   *  node gives the same one with the embedder gone, and after a rebuild.
+   *  Only the operator asks (a read by anyone else never writes); anyone gets
+   *  what was answered, and the caller filters hits by what it may read. */
+  async meaningSearch(query: string, requester: string | null): Promise<MeaningSearch> {
+    const key = searchKey(query);
+    const found = await this.serial(async () => {
+      const op = this.identity?.name;
+      if (!op || !this.chains.has(op)) return { state: 'no_embedder' as const, key, hits: [] };
+      const b = bookOf(op);
+      const cur = this.assertions.of(op);
+      const named = await this.engine.sysRows(`edge[${b}](F, E, ${roflString(EMBEDDER)}, "search")`);
+      const embedders = [...new Set(named.filter((r) => (cur.get(String(r[0]))?.C ?? 0) > 0).map((r) => String(r[1])))].sort();
+      if (embedders.length === 0) return { state: 'no_embedder' as const, key, hits: [] };
+      for (const e of embedders.filter((x) => this.chains.has(x))) {
+        const theirs = this.assertions.of(e);
+        const rows = (await this.engine.sysRows(`edge[${bookOf(e)}](F, ${roflString(key)}, ${roflString(RESULT)}, V)`))
+          .map((r) => ({ c: theirs.get(String(r[0])), v: String(r[1]) }))   // cells are the variables: F, V.filter((r) => (r.c?.C ?? 0) > 0)
+          .sort((x, y) => y.c!.S - x.c!.S);
+        if (rows.length === 0) continue;
+        let hits: SearchHit[];
+        try { hits = (JSON.parse(rows[0]!.v) as { hits: SearchHit[] }).hits; } catch { continue; }
+        return { state: 'answered' as const, key, embedder: e, hits: Array.isArray(hits) ? hits : [] };
+      }
+      const asked = (await this.engine.sysRows(`edge[${b}](F, ${roflString(key)}, ${roflString(SEARCH)}, Q)`)).length > 0;
+      return { state: asked ? 'pending' as const : 'not_asked' as const, key, embedder: embedders[0], hits: [] };
+    });
+    if (found.state !== 'not_asked' || requester === null || requester !== this.identity?.name) return found;
+    await this.assertAsSelf([{ source: key, relation: SEARCH, target: query, perspective: 'search', confidence: 1 }]);
+    return { ...found, state: 'pending' };
   }
 
   /** The operator's bearer token (see operatorTokenOf). */

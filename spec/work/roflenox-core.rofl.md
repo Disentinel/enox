@@ -31,3 +31,6 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_bounded_memory`.
 - `roflenox_core` finished `r_bounded_memory` at "fe6c2b55716d73ef8889f3d3ae57a74eae083063".
 - `roflenox_core` takes `r_relation_primary`.
+- `roflenox_core` finished `r_relation_primary` at "c7f2ea68049192b5ad4dffb5164ae8ef10fd14a3".
+- `roflenox_core` takes `r_semantic_search`.
+- `roflenox_core` takes `r_derived_rebuildable`.

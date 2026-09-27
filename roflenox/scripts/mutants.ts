@@ -51,7 +51,7 @@ function perfTestNames(): Set<string> {
 /** A private copy of the tree for one worker; mutants never touch ROOT. */
 function copyTree(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'roflenox-mutant-'));
-  for (const d of ['src', 'test', 'vendor', 'scripts']) fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true });
+  for (const d of ['src', 'test', 'vendor', 'scripts', 'executors']) fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true });
   fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(dir, 'package.json'));
   return dir;
 }

@@ -40,6 +40,10 @@ export function bookRules(book: string, owner: string): string {
     // intent addressed to the follower itself — its own executor keeps the
     // mirror current; there is no second scheduler.
     `intent[${book}](P, ${roflString(owner)}, "follow", U) :- edge[${book}](F, P, "roflenox:follow", U).`,
+    // A search by meaning (r_semantic_search) is a fact of the asker's too:
+    // an intent to whichever embedder its book names. The embedder answers in
+    // its own book; the node never embeds anything.
+    `intent[${book}](K, E, "search", Q) :- edge[${book}](F, K, "roflenox:search", Q), edge[${book}](G, E, "roflenox:embedder", "search").`,
     // Who may read this book, and until when (r_grants); who acts for its
     // owner, and until when (r_agents_as_identities). The expiry is a COLUMN,
     // compared with the node's clock when a decision is made (src/expiry.ts):

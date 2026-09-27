@@ -32,6 +32,16 @@ export const GRANT = 'roflenox:grant';
  *  — the parent lets that identity act as its agent until then. */
 export const DELEGATE = 'roflenox:delegate';
 export const EXPORT = 'roflenox:export';
+/** Search by meaning (r_semantic_search), all as facts:
+ *    {source: <embedder identity>, relation: "roflenox:embedder", target: "search"}
+ *      — the operator names who answers its searches;
+ *    {source: <search key>, relation: "roflenox:search", target: <query>}
+ *      — a search asked (a rule makes it an intent to that embedder);
+ *    {source: <n:|f:id:text hash>, relation: "roflenox:embedding", target: <vector>}
+ *      — the embedder's derived data, in the EMBEDDER's book. */
+export const EMBEDDER = 'roflenox:embedder';
+export const SEARCH = 'roflenox:search';
+export const EMBEDDING = 'roflenox:embedding';
 const TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 export class Refusal extends Error {
