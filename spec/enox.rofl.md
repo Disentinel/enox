@@ -472,7 +472,7 @@ Declared as facts:
 - `r_freshness` is about `identity`.
 - `r_freshness` binds as `must`.
 - `r_freshness` says "stale means claimed EARLIER than the receipt minus the freshness window; a claimed time later than the receipt plus the allowed skew is refused as future-dated by every door, live, mirrored or sealed, and is never kept as stale".
-- `r_freshness` is to be checked by "a live batch dated 301 seconds ahead of its receipt is refused as future-dated and not kept, while one dated 301 seconds behind is kept as stale".
+- `r_freshness` is to be checked by "a live batch dated 301 seconds ahead of its receipt is refused as future-dated, while one dated 301 seconds behind is refused as stale with a request to re-attest".
 - `r_freshness` says "a signature whose claimed time is further from the time we received it than the freshness window is stale; a stale batch is not trusted until the publisher re-attests it; a live pull uses a fresh challenge from the reader instead of a clock".
 - `r_freshness` is stated in "owner 2026-09-26".
 - `r_freshness` is to be checked by "a batch claiming a time outside the window is marked stale and a re-attestation is requested".
@@ -732,6 +732,8 @@ The queue:
 - `r_enox_compat` is accepted at "047c616173ff5b28ed1f33cfb24ff4aec1d7febc".
 - `r_mutation_gate` is accepted at "3ca019fb84ae9d2aaeea0979e21e86715ec0b8b8".
 - `r_rotation` is accepted at "4f7c3617e44a355a89ed563c133438d5e58bd6fe".
+- `r_identity_names` is accepted at "2db9e9f9d7518478a277e98369bccc38681654b1".
+- `r_no_orphan_tests` is rejected at "2db9e9f9d7518478a277e98369bccc38681654b1".
 - `r_identity_names` is rejected at "fd7980616c080677b958b90759493edde1012954".
 - `r_no_orphan_tests` is rejected at "34572fa77b7e52c361d36c2d705e18285bf84bf2".
 - `r_rotation` is rejected at "07e4c49652e4dc5c8277573a363ecbdeecb2ef6d".
@@ -1042,6 +1044,20 @@ The checks that exist:
 - "a guard naming a test that does not exist fails links" lives in "spec/check.test.mjs".
 - "a guard with no `lives in` fact fails links" guards `r_no_orphan_tests`.
 - "a guard with no `lives in` fact fails links" lives in "spec/check.test.mjs".
+- "a name with a space or a text-direction mark is refused, and names at the label and total length limits are accepted" guards `r_identity_names`.
+- "a name with a space or a text-direction mark is refused, and names at the label and total length limits are accepted" lives in "roflenox/test/keys.test.ts".
+- "admin@example.org@evil.example, ada@@example.org and ada.@example.org are refused, so no name reads as an identity of a domain it does not belong to" guards `r_identity_names`.
+- "admin@example.org@evil.example, ada@@example.org and ada.@example.org are refused, so no name reads as an identity of a domain it does not belong to" lives in "roflenox/test/keys.test.ts".
+- "a user part holding any of < > ( ) [ ] : ; , a backslash or a double quote is refused, while one with + or ' is accepted, as email atext allows" guards `r_identity_names`.
+- "a user part holding any of < > ( ) [ ] : ; , a backslash or a double quote is refused, while one with + or ' is accepted, as email atext allows" lives in "roflenox/test/keys.test.ts".
+- "Node-A, node-a and NODE-A are one identity, and so are a composed and a decomposed accent and a name with a zero-width mark" guards `r_identity_names`.
+- "Node-A, node-a and NODE-A are one identity, and so are a composed and a decomposed accent and a name with a zero-width mark" lives in "roflenox/test/keys.test.ts".
+- "a label mixing Cyrillic and Latin letters is refused, while an all-Cyrillic name is accepted and shown in Cyrillic" guards `r_identity_names`.
+- "a label mixing Cyrillic and Latin letters is refused, while an all-Cyrillic name is accepted and shown in Cyrillic" lives in "roflenox/test/keys.test.ts".
+- "a grant, a delegation and a follow written with a differently cased or composed name act on the same identity" guards `r_identity_names`.
+- "a grant, a delegation and a follow written with a differently cased or composed name act on the same identity" lives in "roflenox/test/keys.test.ts".
+- "ada@example.org, Ada@Example.ORG and a fullwidth spelling of it are one identity; ada@пример.рф is accepted and shown in Cyrillic; bot.ada@example.org is its delegated agent's name" guards `r_identity_names`.
+- "ada@example.org, Ada@Example.ORG and a fullwidth spelling of it are one identity; ada@пример.рф is accepted and shown in Cyrillic; bot.ada@example.org is its delegated agent's name" lives in "roflenox/test/keys.test.ts".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" guards `r_asserted_by`.
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" lives in "personal-node/src/mcp/main-graph.test.ts".
 
