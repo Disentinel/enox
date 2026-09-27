@@ -75,7 +75,7 @@ test('a static host holding a private batch cannot decrypt it, a recipient can',
     // A recipient fetches it from the host, opens it, and its node admits the
     // batch as node-a's — the signature inside still decides.
     const fetched = JSON.parse(await (await fetch(`${host.url}/batch.sealed`)).text()) as Envelope;
-    const receipt = await admitSealed(r.url, fetched);
+    const receipt = await admitSealed(r.url, fetched, r.me, () => r.clock.t);   // its operator hands it over
     assert.equal((receipt.receipt as { identity: string }).identity, 'node-a');
     const rows = (await post(r.url, '/ask', { query: 'edge(F, S, R, T)' })).body.rows as { identity: string; cells: string[] }[];
     assert.deepEqual(rows.map((x) => [x.identity, ...x.cells.slice(1)]), [['node-a', 'alice', 'salary', '100']]);

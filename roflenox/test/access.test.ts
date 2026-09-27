@@ -7,7 +7,7 @@ import { listen } from '../src/http.ts';
 import { batchDigest, sha256hex, toJsonl } from '../src/facts.ts';
 import { signRequest } from '../src/httpsig.ts';
 import { mirror } from '../src/client.ts';
-import { batch, DAY, exportRule, fact, get, grant, identityAt, iso, post, start, T0, tmpDir } from './helpers.ts';
+import { batch, DAY, exportRule, fact, get, grant, identityAt, invitation, iso, post, start, T0, tmpDir, pull } from './helpers.ts';
 
 const BOOK_A = bookOf('node-a');
 
@@ -98,7 +98,7 @@ test('a fact with no export rule never appears in a published batch', async () =
     assert.ok(!JSON.stringify(pub.body).includes('salary'), 'no salary fact left the node');
 
     // Mirrored anonymously: the chain converges, the private facts never arrive.
-    assert.deepEqual(await mirror(b.url, a.url, 'node-a', undefined, () => b.clock.t), { identity: 'node-a', batches: 4 });
+    assert.deepEqual(await pull(b, invitation(a), 'node-a'), { identity: 'node-a', batches: 4 });
     assert.deepEqual((await get(b.url, '/health')).body.heads, (await get(a.url, '/health')).body.heads);
     const onB = (await post(b.url, '/ask', { query: 'edge(F, S, R, T)' })).body.rows as { cells: string[] }[];
     assert.ok(onB.length > 0 && !JSON.stringify(onB).includes('salary'));

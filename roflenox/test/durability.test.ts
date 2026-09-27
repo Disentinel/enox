@@ -133,6 +133,50 @@ for (const [point, committed] of POINTS) {
   });
 }
 
+test('a node killed at each write step reopens with the whole batch or none of it', async () => {
+  // The write steps are not listed here but found: every fault point one
+  // admission passes on disk, so a step added later is covered by this test.
+  // (The engine's staging is not a write: it lives in a process that dies too.)
+  const steps: string[] = [];
+  const probe = await start(tmpDir('whole-probe'), 'node-a', { fault: (p) => { if (!p.startsWith('engine:')) steps.push(p); } });
+  const facts = [fact('alice', 'knows', 'bob'), fact('alice', 'owns', 'x'), fact('alice', 'likes', 'tea')];
+  try {
+    assert.equal((await post(probe.url, '/batches', batch(probe.me, facts, null, iso(probe.clock.t)))).status, 201);
+  } finally { await probe.stop(); }
+  assert.ok(steps.length >= 8 && steps.includes('index:half-written'), steps.join(' '));
+
+  const seen: boolean[] = [];
+  for (const step of steps) {
+    const dir = tmpDir('whole');
+    let a = await start(dir, 'node-a');
+    const t = a.clock.t;
+    await a.stop();
+    const b1 = batch(a.me, facts, null, iso(t));   // the first batch: it also pins the identity
+    const bodyPath = path.join(tmpDir('whole-body'), 'b.json');
+    fs.writeFileSync(bodyPath, JSON.stringify(b1));
+    const child = spawnSync(process.execPath,
+      ['--experimental-strip-types', '--no-warnings', path.join(import.meta.dirname, 'crash-child.ts'), dir, step, bodyPath, String(t)],
+      { encoding: 'utf8', timeout: 20_000 });
+    assert.equal(child.signal, 'SIGKILL', `the child died at ${step} (stderr ${child.stderr})`);
+
+    a = await start(dir, 'node-a');
+    try {
+      const head = ((await get(a.url, '/health')).body.heads as Record<string, string>)['node-a'];
+      const held = ((await post(a.url, '/ask', { query: 'edge(F, "alice", R, T)' })).body.rows as unknown[]).length;
+      const whole = head === b1.manifest.digest;
+      assert.equal(held, whole ? facts.length : 0, `killed at ${step}: ${held} of ${facts.length} facts, head ${head ?? 'none'}`);
+      if (!whole) {
+        assert.equal(head, undefined, `killed at ${step}: the head is the previous one`);
+        assert.equal((await post(a.url, '/batches', b1)).status, 201, `killed at ${step}: the same batch is admitted after the restart`);
+        assert.equal(((await post(a.url, '/ask', { query: 'edge(F, "alice", R, T)' })).body.rows as unknown[]).length, facts.length);
+      }
+      seen.push(whole);
+    } finally { await a.stop(); }
+  }
+  // Both outcomes occur: dying before the commit loses the batch, after it keeps it.
+  assert.ok(seen.includes(false) && seen[seen.length - 1] === true, seen.join(' '));
+});
+
 test('a node rebuilt from its latest backup answers every question the same as the node up to that backup', async () => {
   const dir = tmpDir('backup');
   const to = tmpDir('backup-to');
@@ -182,6 +226,50 @@ test('a node rebuilt from its latest backup answers every question the same as t
     const again = await serveAsIs(path.join(to, 'latest'));
     try { assert.deepEqual(await answers(again.url, { as: reader }), after); } finally { await again.stop(); }
   } finally { await a.stop(); }
+});
+
+test('a backup killed between any two of its steps leaves a readable backup at the latest path', async () => {
+  const dir = tmpDir('bk-kill');
+  const a = await start(dir, 'node-a');
+  const base = tmpDir('bk-kill-base');
+  let before: string, after: string;
+  try {
+    const b1 = batch(a.me, [fact('alice', 'knows', 'bob')], null, iso(a.clock.t));
+    assert.equal((await post(a.url, '/batches', b1)).status, 201);
+    before = (await backup(dir, base, { now: () => a.clock.t })).log_head;
+    assert.equal((await post(a.url, '/batches', batch(a.me, [fact('alice', 'knows', 'carol')], b1.manifest.digest, iso(a.clock.t)))).status, 201);
+    after = (await get(a.url, '/health')).body.log_head as string;
+  } finally { await a.stop(); }
+  assert.notEqual(after, before);
+  const withPrevious = () => { const to = tmpDir('bk-kill-to'); fs.cpSync(base, to, { recursive: true, verbatimSymlinks: true }); return to; };
+
+  // The steps are found, not listed: every fault point a backup passes when
+  // a previous one is in place.
+  const steps: string[] = [];
+  await backup(dir, withPrevious(), { now: () => T0, fault: (p) => { steps.push(p); } });
+  assert.deepEqual(steps, ['backup:staged', 'backup:link-written', 'backup:swapped', 'backup:old-removed']);
+
+  const heads: string[] = [];
+  for (const step of steps) {
+    const to = withPrevious();
+    const child = spawnSync(process.execPath,
+      ['--experimental-strip-types', '--no-warnings', path.join(import.meta.dirname, 'backup-child.ts'), dir, to, step, String(T0)],
+      { encoding: 'utf8', timeout: 30_000 });
+    assert.equal(child.signal, 'SIGKILL', `the backup died at ${step} (stderr ${child.stderr})`);
+    // Whatever latest names is a whole backup that a node opens: the previous one or the new one.
+    const meta = JSON.parse(fs.readFileSync(path.join(to, 'latest', 'backup.json'), 'utf8')) as { log_head: string };
+    const restored = await serveAsIs(path.join(to, 'latest'));
+    try {
+      const head = (await get(restored.url, '/health')).body.log_head as string;
+      assert.equal(head, meta.log_head, `killed at ${step}: latest rebuilds to what it says it is`);
+      assert.ok(head === before || head === after, `killed at ${step}: latest is a backup of this log`);
+      heads.push(head);
+    } finally { await restored.stop(); }
+    // And the next scheduled run installs the new one over what the kill left.
+    assert.equal((await backup(dir, to, { now: () => T0 })).log_head, after, `after a kill at ${step}`);
+  }
+  // Both outcomes occur: killed before the swap keeps the previous, after it the new.
+  assert.deepEqual(heads, [before, before, after, after]);
 });
 
 test('killing the engine during an admission leaves the log consistent, refuses that batch, and the node answers after it rebuilds', async () => {

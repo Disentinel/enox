@@ -6,24 +6,25 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { bookOf, recoveryKeyFromCode } from '../src/identity.ts';
 import { mirror, publish } from '../src/client.ts';
-import { answers, DAY, fact, get, grant, iso, post, start, T0, tmpDir } from './helpers.ts';
+import { answers, DAY, fact, get, grant, invitation, iso, post, start, T0, tmpDir, pull, vouch } from './helpers.ts';
 
 test('two nodes: publish on A, mirror into B, identical ask answers; mirrored batches keep their original signer\'s book on B', async () => {
   const a = await start(tmpDir('fed-a'), 'node-a');
   const b = await start(tmpDir('fed-b'), 'node-b');
   const now = () => a.clock.t;
   try {
-    // node-a lets node-b read its whole book for a day.
+    // node-a lets node-b read its whole book for a day (and its operator knows node-b).
+    await vouch(a, b.me);
     await publish(a.url, a.me, [fact('alice', 'knows', 'bob'), fact('alice', 'owns', 'x', 0.3, 'work'),
       grant('node-b', iso(T0 + DAY))], now);
     await publish(a.url, a.me, [fact('bob', 'knows', 'carol', 1)], now);
-    assert.deepEqual(await mirror(b.url, a.url, 'node-a', b.me, now), { identity: 'node-a', batches: 2 });
+    assert.deepEqual(await pull(b, invitation(a), 'node-a', b.me), { identity: 'node-a', batches: 2 });
     assert.deepEqual(await answers(b.url), await answers(a.url));
 
     // Incremental: only what B does not have yet travels.
     await publish(a.url, a.me, [fact('carol', 'knows', 'dave')], now);
-    assert.deepEqual(await mirror(b.url, a.url, 'node-a', b.me, now), { identity: 'node-a', batches: 1 });
-    assert.deepEqual(await mirror(b.url, a.url, 'node-a', b.me, now), { identity: 'node-a', batches: 0 });
+    assert.deepEqual(await pull(b, a.url, 'node-a', b.me), { identity: 'node-a', batches: 1 });
+    assert.deepEqual(await pull(b, a.url, 'node-a', b.me), { identity: 'node-a', batches: 0 });
     const onA = await answers(a.url);
     assert.deepEqual(await answers(b.url), onA);
     assert.equal(((onA[0] as { rows: unknown[] }).rows).length, 5);
@@ -82,7 +83,11 @@ test('an end-to-end pull between two nodes whose transcript contains no key mate
       + '{ "target": "enox", "source": "alice", "relation": "works_on", "confidence": 1, "perspective": "work" }\n'
       + '{"source":"*","relation":"roflenox:export","target":"public","perspective":"policy","confidence":1}\n');
     transcript += cli(da, ['publish', file], A.url);
-    transcript += cli(db, ['mirror', A.url, 'alice-laptop'], B.url);
+    // Setup too: A's invitation link, copied once to B like an address. It
+    // carries A's key id inside a link; normal operation shows none.
+    const link = cli(da, ['invite', A.url]).trim();
+    assert.ok(link.startsWith(`${A.url}#key=`), link);
+    transcript += cli(db, ['mirror', link, 'alice-laptop'], B.url);
     const askA = cli(da, ['ask', 'edge(F, S, R, T)'], A.url);
     const askB = cli(db, ['ask', 'edge(F, S, R, T)'], B.url);
     transcript += askA + askB;

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import * as path from 'node:path';
 import { publish } from '../src/client.ts';
-import { exportRule, fact, get, start, tmpDir, type Clock } from './helpers.ts';
+import { exportRule, fact, get, invitation, start, tmpDir, type Clock } from './helpers.ts';
 
 const CLI = path.join(import.meta.dirname, '..', 'src', 'cli.ts');
 const wall = () => ({ get t() { return Date.now(); }, set t(_v: number) { /* wall clock */ } }) as Clock;
@@ -29,7 +29,7 @@ test('a follower converges to the publisher\'s head after new batches without a 
   try {
     await publish(p.url, p.me, [fact('p', 'says', '1'), exportRule('*', 'public')]);
     // The follow is a fact of the follower's; nothing else is configured.
-    await publish(f.url, f.me, [{ source: 'publisher', relation: 'roflenox:follow', target: p.url, perspective: 'follows', confidence: 1 }]);
+    await publish(f.url, f.me, [{ source: 'publisher', relation: 'roflenox:follow', target: invitation(p), perspective: 'follows', confidence: 1 }]);
     assert.ok(await converged(), `first sync: ${log}`);
     for (const i of [2, 3]) await publish(p.url, p.me, [fact('p', 'says', String(i))]);
     assert.ok(await converged(), `after new batches: ${log}`);

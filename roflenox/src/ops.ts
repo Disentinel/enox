@@ -145,7 +145,7 @@ export const OPS: Op[] = [
     input: obj({ manifest: { type: 'object' }, jsonl: str(), salt: str(), identity: { description: 'the signer\'s document chain (or one document)' },
       reattest: { type: 'object' }, withheld: { type: 'boolean' } }, ['manifest']),
     access: 'anyone', http: { method: 'POST', path: '/batches', status: 201 },
-    run: async (ctx, a) => ({ admitted: true, receipt: await needNode(ctx).admit(a as never) }) },
+    run: async (ctx, a) => ({ admitted: true, receipt: await needNode(ctx).admit(a as never, ctx.caller) }) },
   { name: 'assert', description: 'Publish facts as this node\'s own identity: a signed batch through normal admission.',
     input: obj({ facts: { type: 'array', items: FACT_ITEMS } }, ['facts']), access: 'operator',
     run: async (ctx, a) => {
@@ -153,20 +153,20 @@ export const OPS: Op[] = [
       const r = await needNode(ctx).assertAsSelf(facts);
       return { admitted: true, identity: r.identity, facts: facts.length };
     } },
-  { name: 'introduce', description: 'Introduce an identity by its document chain (trust on first use; rotations by rule).',
+  { name: 'introduce', description: 'Introduce an identity by its document chain (pinned only on the operator\'s word or a delegation; rotations by rule).',
     input: obj({ chain: { description: 'a document chain, oldest first (or one document)' } }, ['chain']), access: 'anyone',
     http: { method: 'POST', path: '/identities', body: 'chain' },
-    run: async (ctx, a) => needNode(ctx).introduce(a.chain) },
+    run: async (ctx, a) => needNode(ctx).introduce(a.chain, ctx.caller) },
   { name: 'challenge', description: 'A one-time challenge for pulling a feed into this node.', input: obj({}), access: 'anyone',
     http: { method: 'POST', path: '/challenges', status: 201 }, run: async (ctx) => ({ nonce: needNode(ctx).issueChallenge() }) },
   { name: 'admit_feed', description: 'Admit a peer\'s feed under this node\'s challenge, or under a static checkpoint.',
     input: obj({ identity: { description: 'the publisher\'s document chain' }, batches: { type: 'array' }, attestation: { type: 'object' },
       nonce: str(), checkpoint: { type: 'object' } }, ['batches']),
-    access: 'anyone', http: { method: 'POST', path: '/feeds/admit', status: 201 }, run: async (ctx, a) => needNode(ctx).admitFeed(a as never) },
+    access: 'anyone', http: { method: 'POST', path: '/feeds/admit', status: 201 }, run: async (ctx, a) => needNode(ctx).admitFeed(a as never, ctx.caller) },
   { name: 'admit_sealed', description: 'Admit a sealed batch addressed to this node\'s identity (offline admission).',
     input: obj({ v: str(), epk: str(), recipients: { type: 'array' }, iv: str(), ciphertext: str() }, ['v', 'epk', 'recipients', 'iv', 'ciphertext']),
     access: 'anyone', http: { method: 'POST', path: '/sealed', status: 201 },
-    run: async (ctx, a) => ({ admitted: true, receipt: await needNode(ctx).admitSealed(a) }) },
+    run: async (ctx, a) => ({ admitted: true, receipt: await needNode(ctx).admitSealed(a, ctx.caller) }) },
   // ---- local: they need the key, the code or the disk of this machine ---------
   { name: 'init', description: 'Create this machine\'s identity (the recovery code is shown once).', input: obj({ name: str() }),
     access: { local: 'it creates the private key on this machine' },
@@ -182,12 +182,20 @@ export const OPS: Op[] = [
       const { publishVia, readFacts } = await import('./client.ts');
       return publishVia(ctx.call, localIdentity(ctx), readFacts(fs.readFileSync(a.file as string, 'utf8')), ctx.now);
     } },
-  { name: 'mirror', description: 'Pull an identity\'s feed from a peer URL and admit it here.', input: obj({ peer: str(), identity: str() }, ['peer', 'identity']),
+  { name: 'mirror', description: 'Pull an identity\'s feed from a peer URL (or its invitation link, the first time over plain HTTP) and admit it here.', input: obj({ peer: str(), identity: str() }, ['peer', 'identity']),
     access: { local: 'it signs its requests to the peer with the private key on this machine' }, positional: ['peer', 'identity'],
     say: (r) => `mirrored ${r.batches} batches of ${r.identity}`,
     run: async (ctx, a) => {
       const { mirrorVia } = await import('./client.ts');
-      return mirrorVia(ctx.call, (a.peer as string).replace(/\/$/, ''), a.identity as string, LocalIdentity.load(ctx.dataDir!) ?? undefined, ctx.now);
+      return mirrorVia(ctx.call, a.peer as string, a.identity as string, LocalIdentity.load(ctx.dataDir!) ?? undefined, ctx.now);
+    } },
+  { name: 'invite', description: 'The link a reader copies to pull this identity\'s feed the first time, over plain HTTP too.',
+    input: obj({ at: str('the URL readers reach this node at') }, ['at']), access: { local: 'it reads the identity on this machine' },
+    positional: ['at'], say: (r) => r.link,
+    run: async (ctx, a) => {
+      const { invitationLink } = await import('./client.ts');
+      const me = localIdentity(ctx);
+      return { identity: me.name, link: invitationLink(a.at as string, me) };
     } },
   { name: 'rotate', description: 'A new key, signed over by the current one.', input: obj({}),
     access: { local: 'it replaces the private key on this machine' }, say: (r) => `rotated ${r.identity}'s key`,

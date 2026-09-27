@@ -87,13 +87,28 @@ export const publish = (url: string, me: LocalIdentity, facts: Fact[], now: () =
  *  local node re-verifies every batch from scratch. The PEER is always spoken
  *  to over its wire path, GET /feeds/<identity>, which a static directory
  *  serves too. */
-export async function mirrorVia(local: OpCaller, peer: string, identity: string, as?: LocalIdentity, now: () => number = Date.now): Promise<{ identity: string; batches: number }> {
+export async function mirrorVia(local: OpCaller, link: string, identity: string, as?: LocalIdentity, now: () => number = Date.now): Promise<{ identity: string; batches: number }> {
+  const { peer, invited } = parseInvitation(link);
+  // FIRST CONTACT (r_key_change_loud): what is pinned now is trusted from then
+  // on. Over HTTPS the transport vouches for it; over plain HTTP only an
+  // invitation link does — the key id it carries must sign the first document.
+  const known = await identityChain(local, identity).then(() => true, (e: unknown) => {
+    if ((e as { status?: number }).status === 404) return false;
+    throw e;
+  });
+  if (!known && invited === null && new URL(peer).protocol !== 'https:') {
+    throw new Refusal(403, 'invitation_required',
+      `${identity} is not known here and ${peer} is plain HTTP: the first pull needs ${identity}'s invitation link (roflenox invite)`);
+  }
   const after = await headOf(local, identity);
   const { nonce } = await local('challenge', {}) as { nonce: string };
   const q = new URLSearchParams({ challenge: nonce, ...(after ? { after } : {}) });
   if (as) {
     await introduce(httpCaller(peer), as).catch((e: unknown) => {
-      if (!(e instanceof RemoteRefusal && e.status === 404)) throw e;   // a static peer takes no introductions
+      // A static peer takes no introductions; a peer whose operator has not
+      // vouched for us does not know us, and we read there as anyone.
+      if (e instanceof RemoteRefusal && e.reason === 'not_vouched') as = undefined;
+      else if (!(e instanceof RemoteRefusal && e.status === 404)) throw e;
     });
   }
   const feedUrl = (query: URLSearchParams) => `${peer}/feeds/${encodeURIComponent(identity)}?${query}`;
@@ -103,11 +118,28 @@ export async function mirrorVia(local: OpCaller, peer: string, identity: string,
     if (!(e instanceof RemoteRefusal) || e.reason !== 'unknown_after') throw e;
     return call(feedUrl(new URLSearchParams({ challenge: nonce })), undefined, as, now);
   });
+  if (!known && invited !== null && ([feed.identity].flat()[0] as { key_id?: string } | undefined)?.key_id !== invited) {
+    throw new Refusal(409, 'invitation_mismatch',
+      `the ${identity} at ${peer} is not the one the invitation names; nothing is pinned`);
+  }
   // A live answer when the publisher gives one; otherwise a static copy's checkpoint.
   const r = await local('admit_feed', {
     identity: feed.identity, batches: feed.batches, attestation: feed.attestation, checkpoint: feed.checkpoint, nonce,
   });
   return { identity, batches: r.admitted as number };
+}
+
+/** An invitation link: the node's URL with `#key=<key id>` — the key that
+ *  signed the identity's first document. The user copies it; nothing in it is
+ *  shown as a key, and the fragment never goes over the wire. */
+export function invitationLink(url: string, me: LocalIdentity): string {
+  return `${url.replace(/\/$/, '')}#key=${me.identityChain()[0]!.key_id}`;
+}
+
+function parseInvitation(link: string): { peer: string; invited: string | null } {
+  const i = link.indexOf('#');
+  if (i < 0) return { peer: link.replace(/\/$/, ''), invited: null };
+  return { peer: link.slice(0, i).replace(/\/$/, ''), invited: new URLSearchParams(link.slice(i + 1)).get('key') };
 }
 
 export const mirror = (local: string, peer: string, identity: string, as?: LocalIdentity, now: () => number = Date.now) =>
@@ -141,8 +173,8 @@ export const publishSealed = (url: string, me: LocalIdentity, facts: Fact[], rec
 
 /** Hand an envelope to the node, which opens it with its own identity's key
  *  and admits it offline (no freshness; key validity at claimed_at). */
-export async function admitSealed(url: string, e: Envelope): Promise<Record<string, unknown>> {
-  return httpCaller(url)('admit_sealed', e as never);
+export async function admitSealed(url: string, e: Envelope, as?: LocalIdentity, now: () => number = Date.now): Promise<Record<string, unknown>> {
+  return httpCaller(url, as, now)('admit_sealed', e as never);
 }
 
 /** Write a static copy of `me`'s public feed into `dir` (as feeds/<name>),

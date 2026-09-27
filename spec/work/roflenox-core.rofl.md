@@ -43,3 +43,9 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_uc_observability` at "ef2147d2f7ff0e6faa68971239964306da5a4c0d".
 - `roflenox_core` finished `r_uc_observability` at "1ab2863c26a2db55074d9d7dbd4a72bcf4f46aa0".
 - `roflenox_core` finished `r_uc_observability` at "6f0bfeb26babcdf43d877d105c1a011a8efec47f".
+- `roflenox_core` takes `r_key_change_loud`.
+- `roflenox_core` finished `r_key_change_loud` at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
+- `roflenox_core` takes `r_atomic_write`.
+- `roflenox_core` finished `r_atomic_write` at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
+- `roflenox_core` finished `r_key_change_loud` at "6bfb1bbf0121614ca309293042adf2231ecc31d1".
+- `roflenox_core` takes `r_atomic_write`.

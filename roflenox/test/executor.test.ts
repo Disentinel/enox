@@ -6,7 +6,7 @@ import * as crypto from 'node:crypto';
 import * as path from 'node:path';
 import { spawnExecutor } from '../src/executor.ts';
 import { publish } from '../src/client.ts';
-import { DAY, fact, grant, identityAt, iso, post, start, tmpDir, type Clock, type Running } from './helpers.ts';
+import { DAY, fact, grant, identityAt, iso, post, start, tmpDir, vouch, type Clock, type Running } from './helpers.ts';
 
 const SCRIPT = path.join(import.meta.dirname, 'fixtures', 'burn-executor.ts');
 const wall = { get t() { return Date.now(); }, set t(_v: number) { /* the wall clock */ } } as Clock;
@@ -70,6 +70,7 @@ test('an intent derived by a rule is answered by an executor and why of the resu
     // Only the addressed executor answers: a result for the same key from
     // another book is not an answer.
     const mallory = identityAt(tmpDir('loop-m'), 'mallory');
+    await vouch(a, mallory);                    // known to the node, and still not the addressed executor
     await publish(a.url, mallory, [{ source: k, relation: 'roflenox:result', target: 'forged', perspective: 'x', confidence: 1 }]);
     const after = (await post(a.url, '/ask', { query: 'answered(K, E, V)' })).body.rows as unknown[];
     assert.equal(after.length, 2);

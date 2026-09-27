@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mirror, publish } from '../src/client.ts';
 import type { Fact } from '../src/facts.ts';
-import { DAY, exportRule, grant, iso, post, serveAsIs, start, T0, tmpDir, type Running } from './helpers.ts';
+import { DAY, exportRule, grant, invitation, iso, post, serveAsIs, start, T0, tmpDir, type Running, pull, vouch } from './helpers.ts';
 
 const f = (source: string, relation: string, target: string): Fact => ({ source, relation, target, perspective: 'host-report', confidence: 1 });
 const rule = (name: string, text: string): Fact => ({ source: name, relation: 'roflenox:rule', target: text, perspective: 'fleet', confidence: 1 });
@@ -67,10 +67,11 @@ type Answer = { rows: { identity: string; cells: string[] }[]; unknown?: { ident
 const findings = async (ops: Running): Promise<Answer> => (await post(ops.url, '/ask', { query: 'finding(H, K, S)' })).body as unknown as Answer;
 
 /** Start the hosts, each reporting about itself and granting "ops" its book. */
-async function hostsReporting(names: string[]): Promise<Record<string, Running>> {
+async function hostsReporting(names: string[], ops: Running): Promise<Record<string, Running>> {
   const hosts: Record<string, Running> = {};
   for (const name of names) {
     const h = hosts[name] = await start(tmpDir(`fleet-${name}`), name);
+    await vouch(h, ops.me);                     // each host's operator knows the reader it grants
     await publish(h.url, h.me, [exportRule('*', 'public'), grant('ops', iso(T0 + 30 * DAY)), ...REPORTS[name]!], () => h.clock.t);
   }
   return hosts;
@@ -79,7 +80,7 @@ async function hostsReporting(names: string[]): Promise<Record<string, Running>>
 test('rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why', async () => {
   const LATER = 20 * 60_000;                                   // the stale host last spoke 20 min before the others
   const ops = await start(tmpDir('fleet-ops'), 'ops', { silenceSec: 600 });
-  const hosts = await hostsReporting(Object.keys(REPORTS));
+  const hosts = await hostsReporting(Object.keys(REPORTS), ops);
   try {
     // Everyone but the stale host speaks again, later; the clocks move on.
     for (const r of [ops, ...Object.values(hosts)]) r.clock.t = T0 + LATER;
@@ -94,7 +95,7 @@ test('rules over host feeds rediscover the four host findings of 2026-09-26 and 
       ...fleet.map((n) => f(n, 'roflenox:follow', hosts[n]?.url ?? 'http://127.0.0.1:9/quiet-host')),
       ...FLEET,
     ], () => ops.clock.t);
-    for (const [name, h] of Object.entries(hosts)) await mirror(ops.url, h.url, name, ops.me, () => ops.clock.t);
+    for (const [name, h] of Object.entries(hosts)) await pull(ops, invitation(h), name, ops.me);
 
     const ans = await findings(ops);
     // The four findings, and nothing about the clean host.
@@ -134,7 +135,7 @@ test('rules over host feeds rediscover the four host findings of 2026-09-26 and 
 
     // When the stale host speaks again, it is no longer unknown.
     await publish(hosts['stale-host']!.url, hosts['stale-host']!.me, [f('stale-host', 'reported_at', String(Math.floor((T0 + LATER) / 1000)))], () => T0 + LATER);
-    await mirror(ops.url, hosts['stale-host']!.url, 'stale-host', ops.me, () => ops.clock.t);
+    await pull(ops, hosts['stale-host']!.url, 'stale-host', ops.me);
     const again = await findings(ops);
     assert.deepEqual((again.unknown ?? []).map((u) => u.identity), ['quiet-host']);
   } finally {
@@ -145,7 +146,7 @@ test('rules over host feeds rediscover the four host findings of 2026-09-26 and 
 
 test('a fleet rule written once covers every followed host, including a host followed after the rule was written', async () => {
   const ops = await start(tmpDir('fleet-once-ops'), 'ops');
-  const hosts = await hostsReporting(['proxy-host', 'old-node-host', 'dev-host', 'clean-host']);
+  const hosts = await hostsReporting(['proxy-host', 'old-node-host', 'dev-host', 'clean-host'], ops);
   try {
     // The rules first, following nobody: no findings, and nothing unknown.
     await publish(ops.url, ops.me, FLEET, () => ops.clock.t);
@@ -154,7 +155,7 @@ test('a fleet rule written once covers every followed host, including a host fol
     // Follow two hosts: their findings appear.
     const follow = async (...names: string[]) => {
       await publish(ops.url, ops.me, names.map((n) => f(n, 'roflenox:follow', hosts[n]!.url)), () => ops.clock.t);
-      for (const n of names) await mirror(ops.url, hosts[n]!.url, n, ops.me, () => ops.clock.t);
+      for (const n of names) await pull(ops, invitation(hosts[n]!), n, ops.me);
     };
     await follow('proxy-host', 'clean-host');
     assert.deepEqual((await findings(ops)).rows.map((r) => r.cells).sort(), [
@@ -180,7 +181,7 @@ test('a fleet rule written once covers every followed host, including a host fol
     try {
       await publish(loner.url, loner.me, [exportRule('*', 'public'), ...REPORTS['dev-host']!.map((x) => (x.source === 'dev-host' ? { ...x, source: 'loner-host' } : x))], () => loner.clock.t);
       await publish(ops.url, ops.me, [f('loner-host', 'roflenox:follow', loner.url)], () => ops.clock.t);
-      await mirror(ops.url, loner.url, 'loner-host', ops.me, () => ops.clock.t);
+      await pull(ops, invitation(loner), 'loner-host', ops.me);
       assert.ok(!(await findings(ops)).rows.some((r) => r.cells[0] === 'loner-host'), 'no grant, no reading');
       const why = (await post(ops.url, '/op/whynot', { literal: 'finding("loner-host", "prod_on_non_prod", "pod:x-prod/api")' })).body as unknown as { text: string }[];
       assert.match(JSON.stringify(why), /may_read_book/, 'whynot names the missing permission');
@@ -193,7 +194,7 @@ test('a fleet rule written once covers every followed host, including a host fol
 
 test('a followed feed that no rule reads is reported as unknown, never as all-clear', async () => {
   const ops = await start(tmpDir('fleet-unread-ops'), 'ops', { silenceSec: 600 });
-  const hosts = await hostsReporting(['clean-host']);
+  const hosts = await hostsReporting(['clean-host'], ops);
   try {
     // ops follows two feeds — one that reports, one that never has — and has
     // a rule that reads NEITHER (only its own book).
@@ -202,7 +203,7 @@ test('a followed feed that no rule reads is reported as unknown, never as all-cl
       f('quiet-host', 'roflenox:follow', 'http://127.0.0.1:9/quiet-host'),
       rule('mine', 'watched(H) :- edge(F, H, "roflenox:follow", U).'),
     ], () => ops.clock.t);
-    await mirror(ops.url, hosts['clean-host']!.url, 'clean-host', ops.me, () => ops.clock.t);
+    await pull(ops, invitation(hosts['clean-host']!), 'clean-host', ops.me);
     const unknownOf = async (query: string) =>
       (((await post(ops.url, '/ask', { query })).body as unknown as Answer).unknown ?? []).map((u) => [u.identity, u.reason.split(':')[0]]);
     // The rule's own answer, a plain ask over the book, and a question about
@@ -214,7 +215,7 @@ test('a followed feed that no rule reads is reported as unknown, never as all-cl
     const quiet = await start(tmpDir('fleet-quiet'), 'quiet-host');
     try {
       await publish(quiet.url, quiet.me, [f('quiet-host', 'host_role', 'prod')], () => quiet.clock.t);
-      await mirror(ops.url, quiet.url, 'quiet-host', ops.me, () => ops.clock.t);
+      await pull(ops, invitation(quiet), 'quiet-host', ops.me);
       assert.deepEqual(await unknownOf('watched(H)'), []);
       // And silence returns when the window passes with no word.
       ops.clock.t += 601_000;
@@ -229,7 +230,7 @@ test('a followed feed that no rule reads is reported as unknown, never as all-cl
 test('a follow retired with confidence 0 stops every rule ranging over that host\'s book', async () => {
   const dir = tmpDir('fleet-retire-ops');
   let ops = await start(dir, 'ops');
-  const hosts = await hostsReporting(['proxy-host', 'dev-host']);
+  const hosts = await hostsReporting(['proxy-host', 'dev-host'], ops);
   try {
     const follow = (name: string, url: string, confidence = 1): Fact => ({ ...f(name, 'roflenox:follow', url), confidence });
     // Asked as ops (signed), so the same calls work after the restart below.
@@ -239,7 +240,7 @@ test('a follow retired with confidence 0 stops every rule ranging over that host
     await publish(ops.url, ops.me, [...FLEET, rule('ranged', 'ranged(H) :- follows(H, B).'),
       follow('proxy-host', hosts['proxy-host']!.url), follow('proxy-host', 'https://mirror.example.org/proxy-host'),
       follow('dev-host', hosts['dev-host']!.url)], () => ops.clock.t);
-    for (const n of ['proxy-host', 'dev-host']) await mirror(ops.url, hosts[n]!.url, n, ops.me, () => ops.clock.t);
+    for (const n of ['proxy-host', 'dev-host']) await pull(ops, invitation(hosts[n]!), n, ops.me);
     assert.deepEqual(await ranged(), ['dev-host', 'proxy-host']);
     assert.deepEqual(await hostsFound(), ['dev-host', 'proxy-host']);
 

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mirror, publish } from '../src/client.ts';
 import { bookOf } from '../src/identity.ts';
-import { batch, DAY, exportRule, fact, grant, identityAt, iso, post, start, T0, tmpDir, type Running } from './helpers.ts';
+import { batch, DAY, exportRule, fact, grant, identityAt, invitation, iso, post, start, T0, tmpDir, type Running, pull, vouch } from './helpers.ts';
 import type { LocalIdentity } from '../src/identity.ts';
 
 const rule = (name: string, text: string) => ({ source: name, relation: 'roflenox:rule', target: text, perspective: 'rules', confidence: 1 });
@@ -92,6 +92,7 @@ test('an unbounded rule yields unknown with its budget named, and another identi
   const bob = identityAt(tmpDir('budget-bob'), 'bob');
   const timed = async <T>(f: () => Promise<T>) => { const t = performance.now(); const r = await f(); return [r, performance.now() - t] as const; };
   try {
+    await vouch(n, alice, bob);
     await publish(n.url, n.me, [trust('alice')], () => n.clock.t);
     // Baselines on this machine, now (the suite runs under load): one ordinary admission.
     const [, bobAlone] = await timed(() => publish(n.url, bob, [fact('bob', 'knows', 'dave')], () => n.clock.t));
@@ -134,7 +135,7 @@ test('a mirrored rule does not run until the reader trusts its author for rules,
     const knowers = async (url: string) => ((await post(url, '/ask', { query: 'knower(X)' })).body.rows as { cells: string[] }[]).map((r) => r.cells[0]);
     assert.deepEqual(await knowers(a.url), ['ada'], 'control: at home, the operator\'s own rule runs');
 
-    assert.deepEqual(await mirror(b.url, a.url, 'pubr', undefined, () => b.clock.t), { identity: 'pubr', batches: 1 });
+    assert.deepEqual(await pull(b, invitation(a), 'pubr'), { identity: 'pubr', batches: 1 });
     // The facts came; the code did not run.
     assert.equal(((await post(b.url, '/ask', { query: 'edge(F, "ada", "knows", T)' })).body.rows as unknown[]).length, 1);
     assert.deepEqual(await knowers(b.url), []);
@@ -149,6 +150,7 @@ test('a mirrored rule does not run until the reader trusts its author for rules,
     // POSTED is no different: a never-seen identity that posts a rule to the
     // reader is admitted (facts), but its rule does not run until trusted.
     const stranger = identityAt(tmpDir('trust-s'), 'stranger');
+    await vouch(b, stranger);
     await publish(b.url, stranger, [fact('sam', 'knows', 'kim'), rule('knowers', 'knower(X) :- edge(F, X, "knows", T).')], () => b.clock.t);
     assert.equal(((await post(b.url, '/ask', { query: 'edge(F, "sam", "knows", T)' })).body.rows as unknown[]).length, 1);
     assert.deepEqual(await knowers(b.url), []);

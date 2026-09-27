@@ -9,7 +9,7 @@ import { bookOf } from '../src/identity.ts';
 import * as http from 'node:http';
 import { listen } from '../src/http.ts';
 import { mirror, publish, RemoteRefusal, writeStaticFeed } from '../src/client.ts';
-import { answers, batch, DAY, exportRule, fact, get, identityAt, iso, post, start, T0, tmpDir } from './helpers.ts';
+import { answers, batch, DAY, exportRule, fact, get, identityAt, invitation, iso, post, start, T0, tmpDir, pull } from './helpers.ts';
 
 const WEEK = 7 * DAY;
 
@@ -31,7 +31,7 @@ test('a batch a week old mirrors from a live peer, and the same feed replayed wi
     assert.equal(direct.body.error, 'stale');
 
     // From the live publisher, under B's challenge: admitted, a week old or not.
-    assert.deepEqual(await mirror(b.url, a.url, 'node-a', b.me, () => b.clock.t), { identity: 'node-a', batches: 2 });
+    assert.deepEqual(await pull(b, invitation(a), 'node-a', b.me), { identity: 'node-a', batches: 2 });
     assert.deepEqual(await answers(b.url), await answers(a.url));
 
     // Capture one answered feed, as C would receive it.
@@ -158,7 +158,7 @@ test('a flood of challenge requests neither grows memory nor stops an honest mir
     // noisy to be the measurement.
     assert.equal((await get(b.url, '/health')).body.challenges_remembered, 0, 'issuing stores nothing');
     // An honest mirror goes through in the middle of it.
-    assert.deepEqual(await mirror(b.url, a.url, 'node-a', undefined, () => b.clock.t), { identity: 'node-a', batches: 1 });
+    assert.deepEqual(await pull(b, invitation(a), 'node-a'), { identity: 'node-a', batches: 1 });
     assert.equal((await get(b.url, '/health')).body.challenges_remembered, 1, 'only the verified feed\'s challenge is remembered');
     // What a challenge must be: issued here, untampered, unexpired, unused.
     const n = (await post(b.url, '/challenges', {})).body.nonce as string;
@@ -205,13 +205,13 @@ test('a feed copied to a static directory mirrors under a fresh checkpoint and i
 
     // An hour later, inside the 24 h window: B mirrors from the directory.
     b.clock.t = T0 + 3_600_000;
-    assert.deepEqual(await mirror(b.url, host.url, 'node-a', undefined, () => b.clock.t), { identity: 'node-a', batches: 2 });
+    assert.deepEqual(await pull(b, invitation(a, host.url), 'node-a'), { identity: 'node-a', batches: 2 });
     const rows = (await post(b.url, '/ask', { query: 'edge(F, S, R, T)' })).body.rows as unknown[];
     assert.equal(rows.length, 3);
 
     // A day and an hour later, the same copy: the checkpoint has expired.
     c.clock.t = T0 + DAY + 3_600_000;
-    const err = await mirror(c.url, host.url, 'node-a', undefined, () => c.clock.t).then(() => null, (e: unknown) => e);
+    const err = await pull(c, invitation(a, host.url), 'node-a').then(() => null, (e: unknown) => e);
     assert.ok(err instanceof RemoteRefusal);
     assert.equal(err.reason, 'checkpoint_expired');
     assert.deepEqual((await get(c.url, '/health')).body.heads, {});

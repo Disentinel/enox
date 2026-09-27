@@ -6,8 +6,8 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { docHash, keyIdOf, LocalIdentity, signDoc, type IdentityDoc } from '../src/identity.ts';
-import { mirror, publish, RemoteRefusal } from '../src/client.ts';
-import { answers, batch, exportRule, fact, get, identityAt, iso, post, start, T0, tmpDir } from './helpers.ts';
+import { publish, publishSealed, RemoteRefusal } from '../src/client.ts';
+import { answers, batch, DAY, exportRule, fact, get, identityAt, invitation, iso, post, start, T0, tmpDir, pull, vouch } from './helpers.ts';
 
 const CLI = path.join(import.meta.dirname, '..', 'src', 'cli.ts');
 
@@ -69,7 +69,7 @@ test('a rotation in the middle of a chain is followed without a warning', async 
     assert.match(String(rf.body.whynot), /failed premise: follows\[sys_roflenox\]\("node-a",1\)/);
 
     // B follows: two documents, two keys, one chain, nothing to report.
-    assert.deepEqual(await mirror(b.url, a.url, 'node-a', undefined, () => b.clock.t), { identity: 'node-a', batches: 2 });
+    assert.deepEqual(await pull(b, invitation(a), 'node-a'), { identity: 'node-a', batches: 2 });
     const hb = (await get(b.url, '/health')).body;
     assert.deepEqual(hb.recovered, []);
     assert.deepEqual(hb.heads, { 'node-a': head });
@@ -157,7 +157,7 @@ test('a backdated batch received after revocation is rejected', async () => {
   try {
     const b1 = batch(a.me, [fact('alice', 'knows', 'bob'), exportRule('*', 'public')], null, iso(a.clock.t));
     assert.equal((await post(a.url, '/batches', b1)).status, 201);
-    assert.deepEqual(await mirror(c.url, a.url, 'node-a', undefined, () => c.clock.t), { identity: 'node-a', batches: 1 });
+    assert.deepEqual(await pull(c, invitation(a), 'node-a'), { identity: 'node-a', batches: 1 });
     const { thief } = steal(dirA);
 
     // The owner recovers at T0+10 s.
@@ -181,6 +181,87 @@ test('a backdated batch received after revocation is rejected', async () => {
   } finally { await a.stop(); await c.stop(); }
 });
 
+test('a first contact over plain HTTP is refused without an invitation link and pins with one whose key id matches', async () => {
+  const a = await start(tmpDir('inv-a'), 'node-a');
+  const b = await start(tmpDir('inv-b'), 'node-b');
+  // An impostor serving a feed under the same name, with its own key.
+  const x = await start(tmpDir('inv-x'), 'node-a');
+  try {
+    for (const n of [a, x]) await publish(n.url, n.me, [fact('alice', 'knows', n === a ? 'bob' : 'mallory'), exportRule('*', 'public')], () => n.clock.t);
+    const refused = (link: string) => pull(b, link, 'node-a').then(() => null, (e: unknown) => e as { reason?: string });
+    const nothingPinned = async () => {
+      assert.deepEqual((await get(b.url, '/health')).body.heads, {});
+      assert.equal((await get(b.url, '/identities/node-a')).status, 404);
+    };
+    // A bare http:// URL on first contact: refused before anything is pinned.
+    assert.equal((await refused(a.url))?.reason, 'invitation_required');
+    await nothingPinned();
+    // An invitation whose key id is not the one the peer's identity starts from
+    // (the impostor's feed under A's link, and A's feed under a made-up key id).
+    assert.equal((await refused(invitation(a, x.url)))?.reason, 'invitation_mismatch');
+    assert.equal((await refused(`${a.url}#key=${'A'.repeat(43)}`))?.reason, 'invitation_mismatch');
+    await nothingPinned();
+    // The right link pins A — and from then on the plain URL is enough, while
+    // the impostor meets the pin and is refused as a changed key.
+    assert.deepEqual(await pull(b, invitation(a), 'node-a'), { identity: 'node-a', batches: 1 });
+    assert.equal(((await get(b.url, '/identities/node-a')).body as unknown as IdentityDoc[])[0]!.key_id, a.me.keyId);
+    await publish(a.url, a.me, [fact('bob', 'knows', 'carol')], () => a.clock.t);
+    assert.deepEqual(await pull(b, a.url, 'node-a'), { identity: 'node-a', batches: 1 });
+    assert.equal((await refused(x.url))?.reason, 'key_changed');
+  } finally { await a.stop(); await b.stop(); await x.stop(); }
+});
+
+test('an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins', async () => {
+  const a = await start(tmpDir('squat-a'), 'node-a');
+  const b = await start(tmpDir('squat-b'), 'node-b');
+  const x = await start(tmpDir('squat-x'), 'node-a');           // an impostor: A's name, its own key
+  const alice = identityAt(tmpDir('squat-alice'), 'alice');
+  const bot = LocalIdentity.create(tmpDir('squat-bot'), 'alice.bot', new Date(T0 - DAY), { delegatedBy: 'alice' });
+  const rogue = LocalIdentity.create(tmpDir('squat-rogue'), 'alice.rogue', new Date(T0 - DAY), { delegatedBy: 'alice' });
+  try {
+    for (const n of [a, x]) await publish(n.url, n.me, [fact('alice', 'knows', n === a ? 'bob' : 'mallory'), exportRule('*', 'public')], () => n.clock.t);
+    await vouch(b, alice);
+    const anon = { as: null };
+    const refused = (r: { status: number; body: Record<string, unknown> }, how: string) => {
+      assert.equal(r.status, 403, `${how}: ${JSON.stringify(r.body)}`);
+      assert.equal(r.body.error, 'not_vouched', how);
+    };
+
+    // Writing: the impostor posts its own signed batch, identity document attached.
+    const f = (await get(x.url, '/feeds/node-a')).body as { identity: unknown; batches: { manifest: { digest: string }; jsonl: string; salt: string }[] };
+    refused(await post(b.url, '/batches', { ...f.batches[0], identity: f.identity }, anon), 'a write');
+    // Introducing: anonymously, and signed by an identity B knows that is not its operator.
+    refused(await post(b.url, '/identities', x.me.identityChain(), anon), 'an introduction');
+    refused(await post(b.url, '/identities', x.me.identityChain(), { as: alice }), 'an introduction by a known non-operator');
+    // Pushing a feed: under B's own live challenge, and as a static checkpoint.
+    const nonce = (await post(b.url, '/challenges', {}, anon)).body.nonce as string;
+    const live = (await get(x.url, `/feeds/node-a?challenge=${nonce}`, anon)).body;
+    refused(await post(b.url, '/feeds/admit', { identity: live.identity, batches: live.batches, attestation: live.attestation, nonce }, anon), 'a pushed feed');
+    const checkpoint = x.me.checkpoint(f.batches[0]!.manifest.digest, iso(x.clock.t));
+    refused(await post(b.url, '/feeds/admit', { identity: f.identity, batches: f.batches, checkpoint }, anon), 'a pushed static copy');
+    // A sealed batch addressed to B.
+    await vouch(x, b.me);
+    const e = await publishSealed(x.url, x.me, [fact('alice', 'owes', 'mallory')], ['node-b'], () => x.clock.t);
+    refused(await post(b.url, '/sealed', e, anon), 'a sealed batch');
+    // Nor can anyone take B's own name before B's first batch pins it.
+    const y = identityAt(tmpDir('squat-y'), 'node-b');
+    refused(await post(b.url, '/batches', batch(y, [fact('b', 'is', 'mine')], null, iso(b.clock.t)), anon), 'a write under the node\'s own name');
+    // Nothing of the impostor was pinned.
+    assert.equal((await get(b.url, '/identities/node-a')).status, 404);
+    assert.equal(((await get(b.url, '/health')).body.heads as Record<string, string>)['node-a'], undefined);
+
+    // A delegation from an identity B pins vouches for its agent — only for the
+    // one it delegated.
+    await publish(b.url, alice, [{ source: 'alice.bot', relation: 'roflenox:delegate', target: iso(T0 + DAY), perspective: 'policy', confidence: 1 }], () => b.clock.t);
+    assert.equal((await post(b.url, '/batches', batch(bot, [fact('bot', 'saw', 'x')], null, iso(b.clock.t)), anon)).status, 201);
+    refused(await post(b.url, '/batches', batch(rogue, [fact('rogue', 'saw', 'x')], null, iso(b.clock.t)), anon), 'an undelegated agent');
+
+    // The real A, pulled by its invitation (B's operator's word), pins.
+    assert.deepEqual(await pull(b, invitation(a), 'node-a'), { identity: 'node-a', batches: 1 });
+    assert.equal(((await get(b.url, '/identities/node-a')).body as unknown as IdentityDoc[])[0]!.key_id, a.me.keyId);
+  } finally { await a.stop(); await b.stop(); await x.stop(); }
+});
+
 test('a node that swaps its key without rotation is refused with a whynot', async () => {
   const a = await start(tmpDir('swap-a'), 'node-a');
   const b = await start(tmpDir('swap-b'), 'node-b');
@@ -188,11 +269,11 @@ test('a node that swaps its key without rotation is refused with a whynot', asyn
   const a2 = await start(tmpDir('swap-a2'), 'node-a');
   try {
     await publish(a.url, a.me, [fact('alice', 'knows', 'bob'), exportRule('*', 'public')], () => a.clock.t);
-    assert.deepEqual(await mirror(b.url, a.url, 'node-a', undefined, () => b.clock.t), { identity: 'node-a', batches: 1 });
+    assert.deepEqual(await pull(b, invitation(a), 'node-a'), { identity: 'node-a', batches: 1 });
     const headBefore = (await get(b.url, '/health')).body.heads;
     await publish(a2.url, a2.me, [fact('alice', 'owns', 'everything'), exportRule('*', 'public')], () => a2.clock.t);
 
-    const err = await mirror(b.url, a2.url, 'node-a', undefined, () => b.clock.t).then(() => null, (e: unknown) => e);
+    const err = await pull(b, a2.url, 'node-a').then(() => null, (e: unknown) => e);
     assert.ok(err instanceof RemoteRefusal, 'the pull stops');
     assert.equal(err.status, 409);
     assert.equal(err.reason, 'key_changed');
@@ -263,7 +344,7 @@ test('an identity document dated past the allowed skew is refused', async () => 
     a.clock.t += 3_600_000;                       // the publisher's clock runs an hour fast...
     assert.equal((await post(a.url, '/batches', fb)).status, 201);
     a.clock.t -= 3_600_000;                       // ...and is corrected before B pulls
-    const err = await mirror(b.url, a.url, 'node-a', undefined, () => b.clock.t).then(() => null, (e: unknown) => e);
+    const err = await pull(b, invitation(a), 'node-a').then(() => null, (e: unknown) => e);
     assert.ok(err instanceof RemoteRefusal);
     assert.equal(err.reason, 'future_dated');
     assert.deepEqual((await get(b.url, '/health')).body.heads, {});

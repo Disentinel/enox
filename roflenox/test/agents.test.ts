@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { LocalIdentity } from '../src/identity.ts';
 import { publish } from '../src/client.ts';
-import { batch, DAY, fact, identityAt, iso, post, start, T0, tmpDir } from './helpers.ts';
+import { batch, DAY, fact, identityAt, iso, post, start, T0, tmpDir, vouch } from './helpers.ts';
 
 const delegate = (agent: string, until: string) => ({ source: agent, relation: 'roflenox:delegate', target: until, perspective: 'policy', confidence: 1 });
 
@@ -13,6 +13,7 @@ test('a delegated agent key publishes until its expiry and is refused after it',
   const bot = LocalIdentity.create(tmpDir('agent-bot'), 'alice.bot', new Date(T0 - DAY), { delegatedBy: 'alice' });
   const rogue = LocalIdentity.create(tmpDir('agent-rogue'), 'alice.rogue', new Date(T0 - DAY), { delegatedBy: 'alice' });
   try {
+    await vouch(n, alice);                      // the hub's operator knows alice; her agents come by delegation
     await publish(n.url, alice, [fact('alice', 'runs', 'bot'), delegate('alice.bot', iso(T0 + 3_600_000))], () => n.clock.t);
 
     // Until the expiry: it publishes, into its OWN book.
@@ -46,6 +47,7 @@ test('a sub-agent is refused as soon as any identity above it in the delegation 
   const bot = LocalIdentity.create(tmpDir('chain-bot'), 'alice.bot', new Date(T0 - DAY), { delegatedBy: 'alice' });
   const bot2 = LocalIdentity.create(tmpDir('chain-bot2'), 'alice.bot2', new Date(T0 - DAY), { delegatedBy: 'alice.bot' });
   try {
+    await vouch(n, alice);
     await publish(n.url, alice, [delegate('alice.bot', iso(T0 + 3_600_000))], () => n.clock.t);
     // The expiring agent mints a year-long heir while it is still live.
     const d = batch(bot, [delegate('alice.bot2', iso(T0 + 365 * DAY))], null, iso(n.clock.t));

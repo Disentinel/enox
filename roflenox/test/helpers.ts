@@ -9,13 +9,17 @@ import { RoflenoxNode, type NodeOptions } from '../src/node.ts';
 import { createServer, listen } from '../src/http.ts';
 import { newSalt, toJsonl, type Fact } from '../src/facts.ts';
 import { signRequest } from '../src/httpsig.ts';
+import { httpCaller, invitationLink, mirrorVia } from '../src/client.ts';
 
-/** The identity a test's /ask and /feeds requests are signed as, per node URL:
- *  by default the node's own identity — its operator, who sees everything the
- *  node holds. Access tests pass `as` explicitly, or `null` for unsigned. */
-const operators = new Map<string, LocalIdentity>();
+/** The identity a test's /ask, /feeds, /op and write requests are signed as,
+ *  per node URL: by default the node's own identity — its operator, who sees
+ *  everything the node holds and vouches for what it writes (a first pin needs
+ *  the operator's word). Tests pass `as` explicitly, or `null` for unsigned. */
+const operators = new Map<string, string>();   // node URL → its data dir (the key file as it is NOW)
 /** Each node's clock, so a signed request is dated on the clock that judges it. */
 const clocks = new Map<string, Clock>();
+/** A node's public URL, when it has one: what a request to it is signed for. */
+const origins = new Map<string, string>();
 
 const made: string[] = [];
 process.on('exit', () => { for (const d of made) fs.rmSync(d, { recursive: true, force: true }); });
@@ -63,8 +67,9 @@ export async function start(dir: string, name: string, o: Partial<NodeOptions> &
   const node = await RoflenoxNode.open({ dataDir: dir, now: () => clock.t, ...o });
   const server: http.Server = createServer(node);
   const url = await listen(server, 0);
-  operators.set(url, me);
+  operators.set(url, dir);
   clocks.set(url, clock);
+  if (o.publicUrl) origins.set(url, new URL(o.publicUrl).origin);
   return {
     node, url, dir, me, clock,
     stop: async () => {
@@ -95,8 +100,8 @@ export function batch(me: LocalIdentity, facts: Fact[], prev: string | null, cla
 type As = { as?: LocalIdentity | null; now?: number };
 
 function signed(url: string, p: string, method: string, body: string | null, o: As): Record<string, string> {
-  const who = o.as === undefined ? (p.startsWith('/ask') || p.startsWith('/feeds/') || p.startsWith('/op/') ? operators.get(url) : undefined) : o.as;
-  return who ? signRequest(who, method, url + p, body, o.now ?? clocks.get(url)?.t ?? T0) : {};
+  const who = o.as === undefined ? (/^\/(ask|feeds\/|op\/|identities|batches|sealed)/.test(p) && operators.has(url) ? LocalIdentity.load(operators.get(url)!) ?? undefined : undefined) : o.as;
+  return who ? signRequest(who, method, (origins.get(url) ?? url) + p, body, o.now ?? clocks.get(url)?.t ?? T0) : {};
 }
 
 export async function post(url: string, p: string, body: unknown, o: As = {}): Promise<{ status: number; body: Record<string, unknown> }> {
@@ -108,6 +113,23 @@ export async function post(url: string, p: string, body: unknown, o: As = {}): P
 export async function get(url: string, p: string, o: As = {}): Promise<{ status: number; body: Record<string, unknown> }> {
   const res = await fetch(url + p, { headers: signed(url, p, 'GET', null, o) });
   return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+}
+
+/** A running node's invitation link: what a reader copies for the first pull
+ *  over plain HTTP (r_key_change_loud). `at` is where the feed is served. */
+export const invitation = (r: { url: string; me: LocalIdentity }, at = r.url) => invitationLink(at, r.me);
+
+/** `to`'s operator pulls `identity`'s feed from `link` into `to` (the CLI's
+ *  mirror): the local calls are the operator's, the peer ones made as `as`. */
+export const pull = (to: Running, link: string, identity: string, as?: LocalIdentity) =>
+  mirrorVia(httpCaller(to.url, to.me, () => to.clock.t), link, identity, as, () => to.clock.t);
+
+/** The operator of `node` introduces identities to it (their first pin). */
+export async function vouch(node: Running, ...ids: LocalIdentity[]): Promise<void> {
+  for (const id of ids) {
+    const r = await post(node.url, '/identities', id.identityChain(), { as: node.me });
+    if (r.status !== 200) throw new Error(`vouch ${id.name}: ${JSON.stringify(r.body)}`);
+  }
 }
 
 export const iso = (t: number) => new Date(t).toISOString();

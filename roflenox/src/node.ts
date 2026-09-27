@@ -241,7 +241,7 @@ export class RoflenoxNode {
       // The key file's chain may be ahead of the log (a rotation or recovery
       // made offline): admit the newer versions, through the same rule.
       try {
-        await n.applyChain(n.identity.name, n.identity.identityChain(), new Date(n.now()).toISOString(), false);
+        await n.applyChain(n.identity.name, n.identity.identityChain(), new Date(n.now()).toISOString(), false, n.identity.name);
       } catch (e) {
         await n.engine.stop();
         throw new Error(`the key file for ${n.identity.name} does not follow the identity the log knows (${(e as Error).message}); refusing to start`);
@@ -357,13 +357,14 @@ export class RoflenoxNode {
    *  for `identity`. Returns a first document to pin TOGETHER with the batch
    *  being admitted, when that is all there is to learn (first contact, one
    *  document); otherwise commits what is new as identity receipts. */
-  private async applyChain(identity: string, raw: unknown, receivedAt: string, pendingOk: boolean): Promise<IdentityDoc | null> {
+  private async applyChain(identity: string, raw: unknown, receivedAt: string, pendingOk: boolean, by: string | null): Promise<IdentityDoc | null> {
     const docs = (Array.isArray(raw) ? raw : [raw]).map(checkIdentityDoc);
     for (const d of docs) {
       if (d.doc.identity !== identity) {
         throw new Refusal(422, 'identity_mismatch', `the identity document is for ${d.doc.identity}, not ${identity}`);
       }
     }
+    if (!this.idDocs.has(identity)) await this.vouch(identity, docs[0]!, by, receivedAt);
     if (pendingOk && !this.idDocs.has(identity) && docs.length === 1) {
       this.notFuture(docs[0]!.doc.issued_at, receivedAt, `${identity}'s identity document`);
       return verifyIdentityDoc(docs[0]);
@@ -372,12 +373,32 @@ export class RoflenoxNode {
     return null;
   }
 
-  /** POST /identities: introduce an identity (trust on first use). Idempotent. */
-  introduce(raw: unknown): Promise<{ identity: string; pinned: boolean }> {
+  /** FIRST PIN (r_key_change_loud): an identity this node does not know is
+   *  pinned only on its operator's word (`by`, the proven caller), or on a
+   *  live delegation to it from an identity pinned here. Anyone else's write,
+   *  introduction or pushed feed naming it is refused and pins nothing — else
+   *  whoever speaks first would own the name. */
+  private async vouch(identity: string, first: IdentityDoc, by: string | null, receivedAt: string): Promise<void> {
+    if (by !== null && by === this.identity?.name) return;
+    // The node's own identity, as its key file on this machine starts it.
+    if (identity === this.identity?.name && docHash(first) === docHash(this.identity.identityChain()[0]!)) return;
+    const parent = first.doc.delegated_by;
+    if (parent !== undefined && this.idDocs.has(parent)) {
+      const at = Math.floor(Date.parse(receivedAt) / 1000);
+      const until = (await this.engine.sysRows(`delegate[${bookOf(parent)}](${roflString(identity)}, U)`)).map((r) => Number(r[0]));
+      if (until.some((u) => at < u)) return;
+    }
+    throw new Refusal(403, 'not_vouched',
+      `${identity} is not known here and nobody this node trusts vouched for it: its operator introduces it or pulls it by invitation, or an identity pinned here delegates to it`);
+  }
+
+  /** POST /identities: introduce an identity. Its first document is pinned
+   *  only as `by` allows (vouch); a known one's updates by rule. Idempotent. */
+  introduce(raw: unknown, by: string | null = null): Promise<{ identity: string; pinned: boolean }> {
     return this.serial(async () => {
       const first = checkIdentityDoc(Array.isArray(raw) ? raw[0] : raw);
       const before = this.idDocs.get(first.doc.identity)?.length ?? 0;
-      await this.applyChain(first.doc.identity, raw, new Date(this.now()).toISOString(), false);
+      await this.applyChain(first.doc.identity, raw, new Date(this.now()).toISOString(), false, by);
       return { identity: first.doc.identity, pinned: (this.idDocs.get(first.doc.identity)?.length ?? 0) > before };
     });
   }
@@ -601,8 +622,8 @@ export class RoflenoxNode {
   }
 
   /** Admit one batch, serialised against every other admission. */
-  admit(body: BatchBody): Promise<Receipt> {
-    return this.serial(() => this.admitNow(body, 'post', new Date(this.now()).toISOString()));
+  admit(body: BatchBody, by: string | null = null): Promise<Receipt> {
+    return this.serial(() => this.admitNow(body, 'post', new Date(this.now()).toISOString(), [], by));
   }
 
   /** One operation at a time. A dead engine is rebuilt first; an engine that
@@ -627,10 +648,10 @@ export class RoflenoxNode {
     return run;
   }
 
-  private async admitNow(body: BatchBody, mode: 'post' | 'feed' | 'offline', receivedAt: string, upcoming: string[] = []): Promise<Receipt> {
+  private async admitNow(body: BatchBody, mode: 'post' | 'feed' | 'offline', receivedAt: string, upcoming: string[], by: string | null): Promise<Receipt> {
     const ident = (body?.manifest as Manifest | undefined)?.identity;
     const pending = body?.identity !== undefined && typeof ident === 'string'
-      ? await this.applyChain(ident, body.identity, receivedAt, true) : null;
+      ? await this.applyChain(ident, body.identity, receivedAt, true, by) : null;
     const v = this.verify(body, receivedAt, mode, pending, upcoming);
     await this.checkDelegation(v.manifest, receivedAt, mode, pending);
     const id = v.manifest.identity;
@@ -941,13 +962,13 @@ export class RoflenoxNode {
    *  anything newer the envelope carries. A key revoked before the batch
    *  claims to have been signed does not sign it. Only an envelope this node
    *  can open is taken this way, never a bare stale POST. */
-  admitSealed(envelope: unknown): Promise<Receipt> {
+  admitSealed(envelope: unknown, by: string | null = null): Promise<Receipt> {
     return this.serial(async () => {
       const me = this.identity;
       if (!me) throw new Refusal(404, 'no_identity', 'this node has no identity to open envelopes with');
       const inner = openSealed(envelope as Envelope, me.name, me.encPrivateKey());
       const receivedAt = new Date(this.now()).toISOString();
-      return this.admitNow({ manifest: inner.manifest, jsonl: inner.jsonl, salt: inner.salt, identity: inner.identity }, 'offline', receivedAt);
+      return this.admitNow({ manifest: inner.manifest, jsonl: inner.jsonl, salt: inner.salt, identity: inner.identity }, 'offline', receivedAt, [], by);
     });
   }
 
@@ -960,7 +981,7 @@ export class RoflenoxNode {
       const jsonl = toJsonl(facts);
       const salt = newSalt();
       const manifest = me.signBatch(jsonl, this.head(me.name), new Date(this.now()).toISOString(), salt);
-      return this.admitNow({ manifest, jsonl, salt, identity: me.identityChain() }, 'post', new Date(this.now()).toISOString());
+      return this.admitNow({ manifest, jsonl, salt, identity: me.identityChain() }, 'post', new Date(this.now()).toISOString(), [], me.name);
     });
   }
 
@@ -1038,14 +1059,14 @@ export class RoflenoxNode {
   /** Admit a peer's feed under a challenge this node issued. The challenge is
    *  consumed once the publisher's answer to it VERIFIES; a refused feed
    *  leaves nothing behind. */
-  admitFeed(body: FeedBody): Promise<{ admitted: number }> {
+  admitFeed(body: FeedBody, by: string | null = null): Promise<{ admitted: number }> {
     return this.serial(async () => {
       const receivedAt = new Date(this.now()).toISOString();
       if (!body || typeof body !== 'object' || !Array.isArray(body.batches)) {
         throw new Refusal(400, 'malformed_body', 'the body is {identity?, batches, attestation, nonce}');
       }
       // No live answer, but a checkpoint: a static copy of the feed.
-      if (body.attestation === undefined && body.checkpoint !== undefined) return this.admitCheckpointed(body, receivedAt);
+      if (body.attestation === undefined && body.checkpoint !== undefined) return this.admitCheckpointed(body, receivedAt, by);
       if (body.attestation === undefined) {
         throw new Refusal(422, 'no_attestation', 'a feed is admitted with the publisher\'s live answer to a challenge, or a checkpoint');
       }
@@ -1059,7 +1080,7 @@ export class RoflenoxNode {
         throw new Refusal(422, 'no_attestation', 'a feed is admitted only with the publisher\'s signature over its head and the challenge');
       }
       if (a.nonce !== nonce) throw new Refusal(422, 'challenge_mismatch', 'the attestation answers a different challenge');
-      const pending = body.identity !== undefined ? await this.applyChain(a.identity, body.identity, receivedAt, true) : null;
+      const pending = body.identity !== undefined ? await this.applyChain(a.identity, body.identity, receivedAt, true, by) : null;
       const { doc } = this.keysFor(a.identity, pending);
       const key = this.keyOf(doc, a.key_id);
       if (!verifySigned(FEED_CONTEXT, a, key)) throw new Refusal(422, 'bad_signature', 'the feed attestation does not verify');
@@ -1074,7 +1095,7 @@ export class RoflenoxNode {
         if ((b.manifest as Manifest)?.identity !== a.identity) {
           throw new Refusal(422, 'identity_mismatch', 'a feed carries batches of the attested identity only');
         }
-        await this.admitNow({ ...b, identity: body.identity }, 'feed', receivedAt, digests.slice(i + 1));
+        await this.admitNow({ ...b, identity: body.identity }, 'feed', receivedAt, digests.slice(i + 1), by);
         admitted++;
       }
       return { admitted };
@@ -1085,13 +1106,13 @@ export class RoflenoxNode {
    *  signed at most the checkpoint window ago, over exactly this head. A live
    *  challenge is preferred whenever the publisher answers one; this is for
    *  the node that is a directory of files (r_static_feed). */
-  private async admitCheckpointed(body: FeedBody, receivedAt: string): Promise<{ admitted: number }> {
+  private async admitCheckpointed(body: FeedBody, receivedAt: string, by: string | null): Promise<{ admitted: number }> {
     const c = body.checkpoint as Checkpoint;
     if (!c || typeof c !== 'object' || typeof c.sig !== 'string' || typeof c.identity !== 'string'
       || typeof c.key_id !== 'string' || !isTime(c.checkpoint_at)) {
       throw new Refusal(422, 'no_attestation', 'a checkpoint is {identity, key_id, head, checkpoint_at, sig}');
     }
-    const pending = body.identity !== undefined ? await this.applyChain(c.identity, body.identity, receivedAt, true) : null;
+    const pending = body.identity !== undefined ? await this.applyChain(c.identity, body.identity, receivedAt, true, by) : null;
     const { doc } = this.keysFor(c.identity, pending);
     const key = this.keyOf(doc, c.key_id);
     if (!verifySigned(CHECKPOINT_CONTEXT, c, key)) throw new Refusal(422, 'bad_signature', 'the checkpoint does not verify');
@@ -1110,7 +1131,7 @@ export class RoflenoxNode {
       if ((b.manifest as Manifest)?.identity !== c.identity) {
         throw new Refusal(422, 'identity_mismatch', 'a feed carries batches of the checkpointed identity only');
       }
-      await this.admitNow({ ...b, identity: body.identity }, 'feed', receivedAt, digests.slice(i + 1));
+      await this.admitNow({ ...b, identity: body.identity }, 'feed', receivedAt, digests.slice(i + 1), by);
       admitted++;
     }
     return { admitted };

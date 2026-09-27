@@ -114,7 +114,7 @@ test('a meaning search returns a fact after the embedder answers its intent, and
     // same answer.
     const ex2Dir = tmpDir('search-e2');
     const ex2 = identityAt(ex2Dir, 'embedder-two');
-    assert.equal((await post(a.url, '/identities', ex2.identityChain())).status, 200);
+    assert.equal((await post(a.url, '/identities', ex2.identityChain(), { as: a.me, now: wall.t })).status, 200);   // the operator introduces it
     await publish(a.url, a.me, [{ ...f('embedder', 'roflenox:embedder', 'search'), confidence: 0 },
       f('embedder-two', 'roflenox:embedder', 'search'), grant('embedder-two', iso(Date.now() + DAY))]);
     assert.equal((await search(a.url, Q)).index, 'pending', 'the answer is the named embedder\'s');

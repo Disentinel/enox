@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { publish } from '../src/client.ts';
-import { exportRule, fact, identityAt, post, start, tmpDir } from './helpers.ts';
+import { exportRule, fact, identityAt, post, start, tmpDir, vouch } from './helpers.ts';
 
 test('a question restricted to one perspective sees only the facts asserted under it', async () => {
   const a = await start(tmpDir('persp'), 'node-a');
@@ -42,6 +42,7 @@ test('re-asserting a fact with a new confidence leaves exactly one confidence fo
       .map((r) => [r.identity, r.cells[1]]);
     assert.deepEqual(await conf(), [['node-a', 700]]);
     // Another identity's assertion of the same fact is its own, and does not replace node-a's.
+    await vouch(a, b);
     await publish(a.url, b, [fact('alice', 'knows', 'bob', 0.2)], now);
     assert.deepEqual(await conf(), [['node-a', 700], ['node-b', 200]]);
     // The engine holds only the CURRENT assertion of each (identity, fact).

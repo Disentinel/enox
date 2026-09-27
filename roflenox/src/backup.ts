@@ -10,6 +10,10 @@
 // and only then swapped in as <to>/latest. A backup that does not rebuild is
 // never installed.
 //
+// <to>/latest is a SYMLINK to the snapshot directory (r_atomic_write): the
+// swap is one rename of a new link over the old one, so a process killed at
+// any step leaves latest naming a whole backup — the previous or the new.
+//
 // Where <to> lives is the operator's choice; r_backup wants it off the host
 // (a mounted volume, a synced directory). Run it on a schedule with
 // `roflenox serve --backup-to <dir> --backup-every <sec>` or from cron with
@@ -18,14 +22,21 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { sha256hex } from './facts.ts';
 import { bookOf } from './identity.ts';
-import type { Receipt } from './log.ts';
+import type { Fault, Receipt } from './log.ts';
 import { RoflenoxNode } from './node.ts';
+
+function fsyncDir(dir: string): void {
+  const fd = fs.openSync(dir, 'r');
+  try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+}
 
 export interface BackupResult { dir: string; receipts: number; log_head: string; at: string }
 
 export async function backup(dataDir: string, toDir: string,
-  o: { bin?: string; now?: () => number; /** test seam: runs right after the index is read */ afterIndexRead?: () => Promise<void> } = {}): Promise<BackupResult> {
+  o: { bin?: string; now?: () => number; /** test seam: runs right after the index is read */ afterIndexRead?: () => Promise<void>;
+    /** test seam: called at each step of the swap (a crash test kills the process there) */ fault?: Fault } = {}): Promise<BackupResult> {
   const now = o.now ?? Date.now;
+  const fault = o.fault ?? (() => {});
   const log = path.join(dataDir, 'log');
   const all = fs.existsSync(path.join(log, 'index.jsonl')) ? fs.readFileSync(path.join(log, 'index.jsonl')) : Buffer.alloc(0);
   const index = all.subarray(0, all.lastIndexOf(0x0a) + 1);     // committed lines only
@@ -33,7 +44,8 @@ export async function backup(dataDir: string, toDir: string,
   await o.afterIndexRead?.();
 
   fs.mkdirSync(toDir, { recursive: true });
-  const staging = fs.mkdtempSync(path.join(toDir, '.staging-'));
+  const staging = fs.mkdtempSync(path.join(toDir, 'snap-'));
+  let installed = false;
   try {
     const copy = (rel: string) => {
       const to = path.join(staging, 'log', rel);
@@ -60,15 +72,32 @@ export async function backup(dataDir: string, toDir: string,
     const result: BackupResult = { dir: path.join(toDir, 'latest'), receipts: receipts.length, log_head: head, at: new Date(now()).toISOString() };
     fs.writeFileSync(path.join(staging, 'backup.json'), JSON.stringify(result));
 
-    // Swap in: the previous backup stays until the new one is in place.
+    fsyncDir(staging);
+    fault('backup:staged');
+
+    // Swap in: a new link renamed over latest; the previous snapshot goes
+    // only once nothing names it.
     const latest = path.join(toDir, 'latest');
-    const old = path.join(toDir, `.old-${process.pid}-${Date.now()}`);
-    if (fs.existsSync(latest)) fs.renameSync(latest, old);
-    fs.renameSync(staging, latest);
-    fs.rmSync(old, { recursive: true, force: true });
+    let old = fs.existsSync(latest) ? fs.realpathSync(latest) : null;
+    if (old !== null && !fs.lstatSync(latest).isSymbolicLink()) {
+      // A backup made before latest was a link: a real directory cannot be
+      // replaced by a rename, so it becomes a snapshot first (once).
+      old = `${staging}-before`;
+      fs.renameSync(latest, old);
+      fault('backup:migrated');
+    }
+    const link = path.join(toDir, `.latest-${path.basename(staging)}`);
+    fs.symlinkSync(path.basename(staging), link);
+    fault('backup:link-written');
+    fs.renameSync(link, latest);
+    installed = true;
+    fsyncDir(toDir);
+    fault('backup:swapped');
+    if (old !== null && old !== fs.realpathSync(staging)) fs.rmSync(old, { recursive: true, force: true });
+    fault('backup:old-removed');
     return result;
   } catch (e) {
-    fs.rmSync(staging, { recursive: true, force: true });
+    if (!installed) fs.rmSync(staging, { recursive: true, force: true });
     throw e;
   }
 }

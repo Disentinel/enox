@@ -2090,6 +2090,252 @@
    "red": [
     "a follow retired with confidence 0 stops every rule ranging over that host's book"
    ]
+  },
+  {
+   "id": "M152",
+   "title": "r_key_change_loud: plain-HTTP first contact without an invitation is pinned",
+   "file": "src/client.ts",
+   "edits": [
+    [
+     "if (!known && invited === null && new URL(peer).protocol !== 'https:') {",
+     "if (false && !known && invited === null && new URL(peer).protocol !== 'https:') {"
+    ]
+   ],
+   "red": [
+    "a first contact over plain HTTP is refused without an invitation link and pins with one whose key id matches"
+   ]
+  },
+  {
+   "id": "M153",
+   "title": "r_key_change_loud: an invitation's key id is not compared",
+   "file": "src/client.ts",
+   "edits": [
+    [
+     "if (!known && invited !== null && ",
+     "if (false && !known && invited !== null && "
+    ]
+   ],
+   "red": [
+    "a first contact over plain HTTP is refused without an invitation link and pins with one whose key id matches"
+   ]
+  },
+  {
+   "id": "M154",
+   "title": "r_key_change_loud: plain HTTP counts as a secure transport",
+   "file": "src/client.ts",
+   "edits": [
+    [
+     "new URL(peer).protocol !== 'https:'",
+     "!/^https?:$/.test(new URL(peer).protocol)"
+    ]
+   ],
+   "red": [
+    "a first contact over plain HTTP is refused without an invitation link and pins with one whose key id matches"
+   ]
+  },
+  {
+   "id": "M155",
+   "title": "r_key_change_loud: an unknown identity counts as already pinned",
+   "file": "src/client.ts",
+   "edits": [
+    [
+     "if ((e as { status?: number }).status === 404) return false;",
+     "if ((e as { status?: number }).status === 404) return true;"
+    ]
+   ],
+   "red": [
+    "a first contact over plain HTTP is refused without an invitation link and pins with one whose key id matches"
+   ]
+  },
+  {
+   "id": "M156",
+   "title": "r_atomic_write: the receipt is committed before the batch's facts are on disk",
+   "file": "src/log.ts",
+   "edits": [
+    [
+     "    if (jsonl !== null) writeFileAtomic(this.batchPath(manifest.identity, manifest.digest, 'jsonl'), jsonl, this.fault, 'jsonl');\n",
+     ""
+    ],
+    [
+     "    return this.commit({ received_at: receivedAt, digest: manifest.digest, identity: manifest.identity, pin: pinDigest, ...extra });",
+     "    const rc = this.commit({ received_at: receivedAt, digest: manifest.digest, identity: manifest.identity, pin: pinDigest, ...extra });\n    if (jsonl !== null) writeFileAtomic(this.batchPath(manifest.identity, manifest.digest, 'jsonl'), jsonl, this.fault, 'jsonl');\n    return rc;"
+    ]
+   ],
+   "red": [
+    "a node killed at each write step reopens with the whole batch or none of it"
+   ]
+  },
+  {
+   "id": "M157",
+   "title": "r_atomic_write: the pinned identity document is written after the commit",
+   "file": "src/log.ts",
+   "edits": [
+    [
+     "      writeFileAtomic(path.join(bookDir, `identity-${pinDigest}.json`), text, this.fault, 'identity');\n    }\n    if (jsonl",
+     "    }\n    if (jsonl"
+    ],
+    [
+     "    return this.commit({ received_at: receivedAt, digest: manifest.digest, identity: manifest.identity, pin: pinDigest, ...extra });",
+     "    const rc = this.commit({ received_at: receivedAt, digest: manifest.digest, identity: manifest.identity, pin: pinDigest, ...extra });\n    if (pin) writeFileAtomic(path.join(bookDir, `identity-${pinDigest}.json`), canonicalize(pin), this.fault, 'identity');\n    return rc;"
+    ]
+   ],
+   "red": [
+    "a node killed at each write step reopens with the whole batch or none of it"
+   ]
+  },
+  {
+   "id": "M158",
+   "title": "r_key_change_loud: an unknown identity is pinned by whoever speaks first",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (!this.idDocs.has(identity)) await this.vouch(identity, docs[0]!, by, receivedAt);",
+     "    if (false && !this.idDocs.has(identity)) await this.vouch(identity, docs[0]!, by, receivedAt);"
+    ]
+   ],
+   "red": [
+    "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins"
+   ]
+  },
+  {
+   "id": "M159",
+   "title": "r_key_change_loud: any signed caller vouches, not only the operator",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (by !== null && by === this.identity?.name) return;",
+     "    if (by !== null) return;"
+    ]
+   ],
+   "red": [
+    "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins"
+   ]
+  },
+  {
+   "id": "M160",
+   "title": "r_key_change_loud: any document under the node's own name is its own",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (identity === this.identity?.name && docHash(first) === docHash(this.identity.identityChain()[0]!)) return;",
+     "    if (identity === this.identity?.name) return;"
+    ]
+   ],
+   "red": [
+    "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins"
+   ]
+  },
+  {
+   "id": "M161",
+   "title": "r_key_change_loud: a claimed delegated_by vouches without the parent's delegation",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (until.some((u) => at < u)) return;",
+     "      return;"
+    ]
+   ],
+   "red": [
+    "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins"
+   ]
+  },
+  {
+   "id": "M162",
+   "title": "r_key_change_loud: a delegation from a pinned identity does not vouch",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (parent !== undefined && this.idDocs.has(parent)) {",
+     "    if (false && parent !== undefined && this.idDocs.has(parent)) {"
+    ]
+   ],
+   "red": [
+    "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins"
+   ]
+  },
+  {
+   "id": "M163",
+   "title": "r_key_change_loud: a posted batch counts as the operator's word",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "needNode(ctx).admit(a as never, ctx.caller)",
+     "needNode(ctx).admit(a as never, needNode(ctx).identity?.name ?? null)"
+    ]
+   ],
+   "red": [
+    "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins"
+   ]
+  },
+  {
+   "id": "M164",
+   "title": "r_key_change_loud: an introduction counts as the operator's word",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "needNode(ctx).introduce(a.chain, ctx.caller)",
+     "needNode(ctx).introduce(a.chain, needNode(ctx).identity?.name ?? null)"
+    ]
+   ],
+   "red": [
+    "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins"
+   ]
+  },
+  {
+   "id": "M165",
+   "title": "r_key_change_loud: a pushed feed counts as the operator's word",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "needNode(ctx).admitFeed(a as never, ctx.caller)",
+     "needNode(ctx).admitFeed(a as never, needNode(ctx).identity?.name ?? null)"
+    ]
+   ],
+   "red": [
+    "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins"
+   ]
+  },
+  {
+   "id": "M166",
+   "title": "r_key_change_loud: a sealed batch counts as the operator's word",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "needNode(ctx).admitSealed(a, ctx.caller)",
+     "needNode(ctx).admitSealed(a, needNode(ctx).identity?.name ?? null)"
+    ]
+   ],
+   "red": [
+    "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins"
+   ]
+  },
+  {
+   "id": "M167",
+   "title": "r_atomic_write: the previous backup leaves latest before the new one arrives",
+   "file": "src/backup.ts",
+   "edits": [
+    [
+     "    fs.symlinkSync(path.basename(staging), link);",
+     "    fs.rmSync(latest, { force: true });\n    fs.symlinkSync(path.basename(staging), link);"
+    ]
+   ],
+   "red": [
+    "a backup killed between any two of its steps leaves a readable backup at the latest path"
+   ]
+  },
+  {
+   "id": "M168",
+   "title": "r_atomic_write: the previous snapshot is removed before the swap",
+   "file": "src/backup.ts",
+   "edits": [
+    [
+     "    fs.symlinkSync(path.basename(staging), link);",
+     "    if (old !== null) fs.rmSync(old, { recursive: true, force: true });\n    fs.symlinkSync(path.basename(staging), link);"
+    ]
+   ],
+   "red": [
+    "a backup killed between any two of its steps leaves a readable backup at the latest path"
+   ]
   }
  ]
 }
