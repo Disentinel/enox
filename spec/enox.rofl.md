@@ -102,6 +102,7 @@ Declared as facts:
 - `r_atomic_write` is about `durability`.
 - `r_atomic_write` binds as `must`.
 - `r_atomic_write` is to be checked by "a node killed at each write step reopens with the whole batch or none of it".
+- `r_atomic_write` is to be checked by "a backup killed between any two of its steps leaves a readable backup at the latest path".
 - `r_atomic_write` says "a process killed during any write leaves the previous consistent version readable".
 - `r_atomic_write` is stated in "incident 2026-09-18".
 - `r_backup` is about `durability`.
@@ -642,6 +643,7 @@ The queue:
 - `r_static_feed` is queued at 75.
 - `r_identity_names` is queued at 76.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
+- `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
 
 Rejected after verification:
 
