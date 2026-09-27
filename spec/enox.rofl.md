@@ -252,6 +252,8 @@ Declared as facts:
 - `r_enox_compat` binds as `must`.
 - `r_enox_compat` says "an Enox write's asserted_by label is kept as claimed_by, shown beside the signer and marked as a claim; it never replaces the signer as asserted_by".
 - `r_enox_compat` is to be checked by "an agent label given to an Enox write reads back as claimed_by next to the signing identity, and a forged label changes nothing but claimed_by".
+- `r_enox_compat` says "claimed_by is untrusted text: it is refused at write when longer than 128 characters or when it holds a control character, and every text view shows it as a quoted, escaped string, so a label can never read as a signer, a line or a fact".
+- `r_enox_compat` is to be checked by "a claimed label holding brackets, a newline or 5000 characters can neither forge a signer nor add a line to a text view".
 - `r_enox_compat` says "the MCP tools that current Enox clients call, such as remember, recall, semantic_search, add_assertion, batch_assertions, query_graph, explore and graph_stats, are rows of the operation table mapped onto ask, assert and executors, so a client moves by changing its URL".
 - `r_enox_compat` is stated in "owner 2026-09-26; the twenty tools of the Enox MCP server in use".
 - `r_enox_compat` is to be checked by "the tool calls an Enox client made on 2026-09-26 run unchanged against a node and get answers of the same shape".
@@ -717,6 +719,7 @@ The queue:
 - `r_default_deny` is accepted at "a1bb4a0d379138676deab6a7b2bf05915362a5f7".
 - `r_chain` is accepted at "68809976741d5ab863ba19d57a9920566d4afa60".
 - `r_backup` is accepted at "d8f57a54ae23621d1c63757978d8ee7b69098e18".
+- `r_enox_compat` is rejected at "63f344e6d8b0cc2c6b578bbd558a2dbaad21e357".
 - `r_identity_names` is rejected at "4800a6841d8476258cb98c07a16cfaf815353c4e".
 - `r_rotation` is rejected at "db71b41d7281fe72aae5d4d4302303045a5fb4ce".
 
