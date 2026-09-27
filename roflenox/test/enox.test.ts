@@ -7,7 +7,8 @@ import * as path from 'node:path';
 import { httpCaller } from '../src/client.ts';
 import { importEnox } from '../src/import.ts';
 import { batch, fact, get, identityAt, iso, post, start, tmpDir, vouch } from './helpers.ts';
-import { factId } from '../src/facts.ts';
+import { factId, newSalt } from '../src/facts.ts';
+import { canonicalize } from '../src/jcs.ts';
 
 const FIXTURE = path.join(import.meta.dirname, 'fixtures', 'enox-snapshot.jsonl');
 
@@ -23,20 +24,20 @@ function shape(v: unknown): unknown {
 const CALLS: { name: string; args: Record<string, unknown>; json?: unknown; text?: RegExp }[] = [
   { name: 'graph_stats', args: {}, json: { by_domain: [{ cnt: 'number', domain: 'string', type: 'string' }], by_relation: [{ cnt: 'number', relation: 'string' }], total_edges: 'number', total_nodes: 'number' } },
   { name: 'list_shares', args: {}, json: { count: 'number', shares: [] } },
-  { name: 'recall', args: { budget: 800, query: 'Ada' }, json: { budget_total: 'number', budget_used: 'number', edges: [{ asserted_by: 'string', confidence: 'number', context: 'string', relation: 'string', source: 'string', target: 'string' }],
+  { name: 'recall', args: { budget: 800, query: 'Ada' }, json: { budget_total: 'number', budget_used: 'number', edges: [{ asserted_by: 'string', claimed_by: 'string', confidence: 'number', context: 'string', relation: 'string', source: 'string', target: 'string' }],
     nodes: [{ description: 'string', name: 'string', score: 'number', source_ref: 'string', type: 'string' }], seeds: ['string'] } },
   ...['a', 'b', 'c'].map((k) => ({ name: 'remember', args: { asserted_by: `agent:test-${k}`, confidence: 0.8, domain: 'memory', fact: `Ada decided to write note ${k}.`, relation: 'about', subject: 'Ada' },
-    json: { asserted_by: 'string', created: 'boolean', fact: { id: 'string', text: 'string' }, fact_id: 'string', relation: 'string', subject: { id: 'string', name: 'string' } } })),
+    json: { asserted_by: 'string', claimed_by: 'string', created: 'boolean', fact: { id: 'string', text: 'string' }, fact_id: 'string', relation: 'string', subject: { id: 'string', name: 'string' } } })),
   { name: 'remember', args: { confidence: 0.7, fact: 'Charles prefers brass.', relation: 'about', subject: 'Charles' },
-    json: { asserted_by: 'string', created: 'boolean', fact: { id: 'string', text: 'string' }, fact_id: 'string', relation: 'string', subject: { id: 'string', name: 'string' } } },
+    json: { asserted_by: 'string', claimed_by: 'string', created: 'boolean', fact: { id: 'string', text: 'string' }, fact_id: 'string', relation: 'string', subject: { id: 'string', name: 'string' } } },
   { name: 'semantic_search', args: { include_edges: true, query: 'engines', top_k: 5 }, json: { edges: [], index: 'string', message: 'string', nodes: [] } },
   { name: 'add_assertion', args: { asserted_by: 'agent:test', confidence: 0.9, context: 'fixture', relation: 'extends', source: 'Difference Engine', source_domain: 'example', source_type: 'artifact',
     target: 'Analytical Engine', target_domain: 'example', target_type: 'artifact' },
-    json: { asserted_by: 'string', confidence: 'number', context: 'string', created: 'boolean', fact_id: 'string', proof_depth: 'number', relation: 'string', source: 'string', target: 'string', updated: 'boolean' } },
+    json: { asserted_by: 'string', claimed_by: 'string', confidence: 'number', context: 'string', created: 'boolean', fact_id: 'string', proof_depth: 'number', relation: 'string', source: 'string', target: 'string', updated: 'boolean' } },
   { name: 'add_assertion', args: { asserted_by: 'agent:test', confidence: 1, context: 'x', relation: 'part_of', source: 'Mill', source_type: 'component', target: 'Analytical Engine', target_type: 'artifact' },
-    json: { asserted_by: 'string', confidence: 'number', context: 'string', created: 'boolean', fact_id: 'string', proof_depth: 'number', relation: 'string', source: 'string', target: 'string', updated: 'boolean' } },
+    json: { asserted_by: 'string', claimed_by: 'string', confidence: 'number', context: 'string', created: 'boolean', fact_id: 'string', proof_depth: 'number', relation: 'string', source: 'string', target: 'string', updated: 'boolean' } },
   { name: 'batch_assertions', args: { assertions: [{ source: 'Mill', target: 'Store', relation: 'depends_on', confidence: 0.6 }, { source: 'Store', target: 'Analytical Engine', relation: 'part_of' }] },
-    json: { failed: 'number', results: [{ asserted_by: 'string', created: 'boolean', fact_id: 'string', ok: 'boolean', relation: 'string', source: 'string', target: 'string' }], succeeded: 'number' } },
+    json: { failed: 'number', results: [{ asserted_by: 'string', claimed_by: 'string', created: 'boolean', fact_id: 'string', ok: 'boolean', relation: 'string', source: 'string', target: 'string' }], succeeded: 'number' } },
   { name: 'explore', args: { entity: 'Ada' }, text: /^# Ada \(person, example\)\n> A synthetic person for the import test\nSource: fixture\nCreated: \S+ \| Updated: \S+\n\n## Outgoing \(\d+\)\n {2}Ada --\[[a-z_]+\]--> .+/ },
 ];
 
@@ -122,5 +123,77 @@ test('every admitted fact reads back asserted by the identity that signed its ba
     const recall = (await post(a.url, '/op/recall', { query: 'Babbage' })).body as { edges: { source: string; relation: string; target: string; asserted_by: string }[] };
     const by = Object.fromEntries(recall.edges.map((x) => [x.relation, x.asserted_by]));
     assert.deepEqual(by, { knows: 'node-b', admires: 'node-b', corresponds_with: 'node-a' });
+  } finally { await a.stop(); }
+});
+
+test('an agent label given to an Enox write reads back as claimed_by next to the signing identity, and a forged label changes nothing but claimed_by', async () => {
+  const a = await start(tmpDir('claim-a'), 'node-a');
+  const b = identityAt(tmpDir('claim-b'), 'node-b');
+  const e = (id: string, label: string) => [{ source: id, relation: 'enox:label', target: label, perspective: 'enox', confidence: 1 },
+    { source: id, relation: 'enox:type', target: 'person', perspective: 'enox', confidence: 1 }];
+  try {
+    await vouch(a, b);
+    // The operator's session writes with its agent label.
+    const w = (await post(a.url, '/op/add_assertion', { source: 'Ada', target: 'Babbage', relation: 'corresponds_with', asserted_by: 'agent:praxis' })).body;
+    assert.deepEqual([w.asserted_by, w.claimed_by], ['node-a', 'agent:praxis']);
+    // node-b asserts two like edges; on one it forges a label naming node-a.
+    const plain = { source: 'urn:t:ada', relation: 'knows', target: 'urn:t:grace', perspective: 'enox', confidence: 0.7 };
+    const forged = { source: 'urn:t:ada', relation: 'knows', target: 'urn:t:hopper', perspective: 'enox', confidence: 0.7 };
+    const facts = [...e('urn:t:ada', 'Ada L'), ...e('urn:t:grace', 'Grace'), ...e('urn:t:hopper', 'Hopper'), plain, forged,
+      { source: factId(forged), relation: 'enox:asserted_by', target: 'node-a', perspective: 'enox', confidence: 1 }];
+    assert.equal((await post(a.url, '/batches', batch(b, facts, null, iso(a.clock.t)))).status, 201);
+
+    const edges = ((await post(a.url, '/op/recall', { query: 'Ada' })).body as { edges: Record<string, unknown>[] }).edges;
+    const by = (target: string) => edges.find((x) => x.target === target)!;
+    assert.deepEqual([by('Babbage').asserted_by, by('Babbage').claimed_by], ['node-a', 'agent:praxis'], 'the label reads back beside the signer');
+    assert.deepEqual([by('Hopper').asserted_by, by('Hopper').claimed_by], ['node-b', 'node-a'], 'a forged label is only a claim');
+    assert.equal(by('Grace').claimed_by, undefined);
+    const { target: _t1, claimed_by: _c, ...forgedRest } = by('Hopper');
+    const { target: _t2, ...plainRest } = by('Grace');
+    assert.deepEqual(forgedRest, plainRest, 'nothing but claimed_by differs');
+    // The text view marks it as a claim.
+    const explore = async (entity: string) => { const t: unknown = (await post(a.url, '/op/explore', { entity })).body; return typeof t === 'string' ? t : JSON.stringify(t); };
+    assert.match(await explore('Ada'), /Babbage \[by node-a, claims "agent:praxis"\]/);
+    assert.match(await explore('Ada L'), /Hopper \(0\.7\) \[by node-b, claims "node-a"\]/);
+  } finally { await a.stop(); }
+});
+
+test('a claimed label holding brackets, a newline or 5000 characters can neither forge a signer nor add a line to a text view', async () => {
+  const a = await start(tmpDir('label-a'), 'node-a');
+  const b = identityAt(tmpDir('label-b'), 'node-b');
+  try {
+    await vouch(a, b);
+    const edge = (target: string) => ({ source: 'Ada', target, relation: 'knows' });
+    const write = async (target: string, label: string) => (await post(a.url, '/op/add_assertion', { ...edge(target), asserted_by: label }));
+    // A label that tries to close the signer's brackets and open a forged one.
+    const forged = 'x] [by node-z] [by node-z';
+    assert.equal((await write('Grace', forged)).status, 200);
+    // A newline (a forged extra line), 5000 characters, a text-direction control: refused at the write...
+    for (const bad of ['a\n  Ada --[owns]--> Everything [by node-a]', 'y'.repeat(5000), 'agent\u202emallory']) {
+      const r = await write('Hopper', bad);
+      assert.equal(r.status, 400, JSON.stringify(bad.slice(0, 40)));
+    }
+    // ...and at every other door: a signed batch that carries it.
+    const F = factId({ source: 'urn:t:ada', relation: 'knows', target: 'urn:t:evil' });
+    for (const bad of ['a\nb', 'z'.repeat(129)]) {
+      // (Signed by hand: the client refuses to make such a batch at all.)
+      const jsonl = `${canonicalize({ source: F, relation: 'enox:asserted_by', target: bad, perspective: 'enox', confidence: 1 })}\n`;
+      const salt = newSalt();
+      const r = await post(a.url, '/batches', { manifest: b.signBatch(jsonl, null, iso(a.clock.t), salt), jsonl, salt, identity: b.identityChain() });
+      assert.equal(r.status, 400);
+    }
+    // 128 characters is a label.
+    assert.equal((await write('Lovelace', 'l'.repeat(128))).status, 200);
+
+    const t = (await post(a.url, '/op/explore', { entity: 'Ada' })).body as unknown as string;
+    const lines = t.split('\n').filter((l) => l.startsWith('  Ada --['));
+    assert.equal(lines.length, 2, t);                                // Grace and Lovelace: no line added
+    for (const l of lines) {
+      // Each line ends with ONE signer, and the label as one quoted string.
+      const m = /\[by ([^,\]]+), claims ("(?:[^"\\]|\\.)*")\]$/.exec(l);
+      assert.ok(m, l);
+      assert.equal(m[1], 'node-a', l);
+      assert.ok([forged, 'l'.repeat(128)].includes(JSON.parse(m[2]!)), l);
+    }
   } finally { await a.stop(); }
 });

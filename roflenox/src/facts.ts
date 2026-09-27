@@ -100,6 +100,8 @@ const INVISIBLE = /[\p{White_Space}\p{Cf}\p{Cc}]/gu;
 /** Bidi embeddings, overrides and isolates: they reorder how a name LOOKS
  *  without changing what it IS (Trojan Source). */
 const BIDI = /[\u202A-\u202E\u2066-\u2069]/u;
+/** The longest agent label an Enox write may claim (r_enox_compat). */
+export const MAX_CLAIM = 128;
 
 /** A line is a directed typed relation between two entities, not a document
  *  (r_relation_primary): the source is an entity — a name or id, one line, of
@@ -117,6 +119,11 @@ export function checkRelation(f: Fact, at: string): void {
   }
   if (f.relation.startsWith('roflenox:') && !(RESERVED as readonly string[]).includes(f.relation)) {
     throw new Refusal(400, 'not_a_relation', `${at}: ${f.relation} is not one of the node's relations (${RESERVED.join(', ')}); the roflenox: prefix is reserved`);
+  }
+  // An Enox agent label is untrusted text shown beside a signer
+  // (r_enox_compat): one short line, or it is refused here, at every door.
+  if (f.relation === 'enox:asserted_by' && (f.target.length > MAX_CLAIM || /[\u0000-\u001f\u007f-\u009f]/.test(f.target) || BIDI.test(f.target))) {
+    throw new Refusal(400, 'not_a_relation', `${at}: an asserted_by label is one line of at most ${MAX_CLAIM} characters, without control characters`);
   }
   for (const [k, max] of [['source', MAX_ENTITY], ['relation', MAX_RELATION]] as const) {
     const v = f[k];

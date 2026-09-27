@@ -41,3 +41,21 @@ test('the mutation gate fails when a listed mutant survives', () => {
   assert.match(clean.out, /1\/1 mutants killed, 0 survivors by design, 0 failing; [\d.]+ s/);
   assert.equal(fs.readFileSync(path.join(import.meta.dirname, '..', 'src', 'node.ts'), 'utf8'), before);
 });
+
+test('a failing mutant shard fails the whole mutant gate', () => {
+  const extra = path.join(tmpDir('gate-shards'), 'extra.json');
+  fs.writeFileSync(extra, JSON.stringify({ mutants: [
+    { id: 'NOOP', title: 'a comment changed', file: 'src/jcs.ts',
+      edits: [['// RFC 8785 JSON Canonicalization Scheme.', '// RFC 8785 JSON Canonicalization Scheme!']],
+      red: ['a batch with one byte changed is rejected'] },
+  ] }));
+  // Two shards; the surviving mutant lands in one of them, the other passes.
+  const r = gate(['--shards', '2', '--only', 'NOOP,M2', '--extra', extra]);
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /^\[shard \d\/2\] SURVIVED NOOP /m);
+  assert.match(r.out, /^1\/2 shards passed$/m);
+  // Positive control: the same shards with only a real mutant pass.
+  const ok = gate(['--shards', '2', '--only', 'M2']);
+  assert.equal(ok.status, 0, ok.out);
+  assert.match(ok.out, /^2\/2 shards passed$/m);
+});

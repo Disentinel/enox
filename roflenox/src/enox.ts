@@ -9,8 +9,8 @@
 //              [F, enox:asserted_by|context|proof_depth|created_at|updated_at|fact_id, v]
 //              about it (F = its roflenox fact_id). An edge reads back asserted
 //              by the identities whose signed batches hold it (r_asserted_by);
-//              an enox:asserted_by a batch writes is its claim, kept in the
-//              log and never shown as who asserted.
+//              an enox:asserted_by a batch writes is its claim: shown beside
+//              the signer as claimed_by (r_enox_compat), never as who asserted.
 // Single-valued attributes resolve to the latest assertion in the chain.
 // Updates and deletes are NEW assertions that supersede — the log stays
 // append-only; a delete is the triple re-asserted with confidence 0.
@@ -51,7 +51,7 @@ export function deriveDescription(text: string, max = 240): string {
 const enoxFactId = (s: string, r: string, t: string) => createHash('sha256').update(`${s}|${r}|${t}`).digest('hex');
 
 export interface Node { id: string; type: string; domain: string; name: string; description: string; aliases: string[]; source_ref: string; created_at: string | null; updated_at: string | null; attrs: Map<string, string> }
-export interface Edge { F: string; fact_id: string; source: string; target: string; relation: string; confidence: number; asserted_by: string | null; context: string; proof_depth: number; created_at: string | null; updated_at: string | null }
+export interface Edge { F: string; fact_id: string; source: string; target: string; relation: string; confidence: number; asserted_by: string | null; claimed_by: string | null; context: string; proof_depth: number; created_at: string | null; updated_at: string | null }
 
 /** The Enox graph as `caller` may see it, built from asks. */
 export class Graph {
@@ -144,7 +144,7 @@ export class Graph {
       if (!this.nodes.has(a.S) || !this.nodes.has(a.T)) continue;
       this.edges.push({
         F: a.F, fact_id: attr(a.F, 'fact_id') ?? enoxFactId(a.S, a.R, a.T), source: a.S, target: a.T, relation: a.R,
-        confidence: c / 1000, asserted_by: [...(this.by.get(a.F) ?? [])].sort().join(', ') || null, context: attr(a.F, 'context') ?? '',
+        confidence: c / 1000, asserted_by: [...(this.by.get(a.F) ?? [])].sort().join(', ') || null, claimed_by: attr(a.F, 'asserted_by') ?? null, context: attr(a.F, 'context') ?? '',
         proof_depth: Number(attr(a.F, 'proof_depth') ?? 0), created_at: attr(a.F, 'created_at') ?? null, updated_at: attr(a.F, 'updated_at') ?? null,
       });
     }
@@ -159,7 +159,7 @@ export class Graph {
   row(e: Edge) {
     const s = this.nodes.get(e.source)!, t = this.nodes.get(e.target)!;
     return { fact_id: e.fact_id, source: e.source, source_name: s.name, source_type: s.type, target: e.target, target_name: t.name, target_type: t.type,
-      relation: e.relation, asserted_by: e.asserted_by, confidence: e.confidence, context: e.context, created_at: e.created_at, updated_at: e.updated_at };
+      relation: e.relation, asserted_by: e.asserted_by, claimed_by: e.claimed_by, confidence: e.confidence, context: e.context, created_at: e.created_at, updated_at: e.updated_at };
   }
 
   /** Enox's resolveNode: exact id, then name (case-insensitive), then name contains. */
@@ -223,7 +223,7 @@ export function addFacts(g: Graph, a: AddArgs, agent: string, created: Map<strin
     meta(F, 'asserted_by', by), meta(F, 'fact_id', fid), meta(F, 'updated_at', t));
   if (a.context) facts.push(meta(F, 'context', a.context));
   if (!existing) facts.push(meta(F, 'created_at', t), meta(F, 'proof_depth', a.proof_depth ?? 0));
-  const result = { fact_id: fid, source: sid, target: tid, relation: a.relation, asserted_by: signer, confidence,
+  const result = { fact_id: fid, source: sid, target: tid, relation: a.relation, asserted_by: signer, claimed_by: by, confidence,
     proof_depth: existing ? existing.proof_depth : a.proof_depth ?? 0, context: a.context ?? '', created: !existing, updated: !!existing };
   return { facts, result, inverse: g.edges.find((e) => e.source === tid && e.target === sid && e.relation === a.relation) };
 }

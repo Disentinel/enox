@@ -69,3 +69,9 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_chain`.
 - `roflenox_core` finished `r_chain` at "68809976741d5ab863ba19d57a9920566d4afa60".
 - `roflenox_core` takes `r_backup`.
+- `roflenox_core` finished `r_backup` at "d8f57a54ae23621d1c63757978d8ee7b69098e18".
+- `roflenox_core` takes `r_enox_compat`.
+- `roflenox_core` finished `r_enox_compat` at "63f344e6d8b0cc2c6b578bbd558a2dbaad21e357".
+- `roflenox_core` takes `r_mutation_gate`.
+- `roflenox_core` finished `r_mutation_gate` at "b6b67403f2e7a5c645be914d5f45754273e77418".
+- `roflenox_core` takes `r_enox_compat`.

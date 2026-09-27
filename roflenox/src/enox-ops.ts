@@ -63,7 +63,7 @@ async function write(ctx: Ctx, facts: Fact[]): Promise<void> {
 }
 
 const confStr = (e: Edge) => (e.confidence < 1 ? ` (${e.confidence})` : '');
-const byStr = (e: Edge) => (e.asserted_by ? ` [by ${e.asserted_by}]` : '');
+const byStr = (e: Edge) => (e.asserted_by ? ` [by ${e.asserted_by}${e.claimed_by ? `, claims ${JSON.stringify(e.claimed_by)}` : ''}]` : '');
 const NOT_FOUND = (term: string) => refuseText(`Entity "${term}" not found`);
 
 const ASSERTION: Record<string, Prop> = {
@@ -200,7 +200,7 @@ export const ENOX_OPS: Op[] = [
         const cost = `${sn} --[${e.relation}]--> ${tn}`.length + e.context.length;
         if (used + cost > chars) continue;
         used += cost;
-        edges.push({ source: sn, relation: e.relation, target: tn, ...(e.asserted_by ? { asserted_by: e.asserted_by } : {}), confidence: e.confidence, context: e.context });
+        edges.push({ source: sn, relation: e.relation, target: tn, ...(e.asserted_by ? { asserted_by: e.asserted_by } : {}), ...(e.claimed_by ? { claimed_by: e.claimed_by } : {}), confidence: e.confidence, context: e.context });
       }
       return { nodes, edges, seeds: hits.slice(0, 5).map((h) => h.x.name), budget_used: Math.ceil(used / 4), budget_total: budget };
     } },
@@ -299,7 +299,7 @@ export const ENOX_OPS: Op[] = [
           if (!x.source || !x.target || !x.relation) throw new Error('source, target and relation are required');
           const r = addFacts(g, x, agent(), created, self(ctx));
           all.push(...r.facts);
-          return { fact_id: r.result.fact_id, source: r.result.source, target: r.result.target, relation: r.result.relation, asserted_by: r.result.asserted_by, ok: true, created: r.result.created };
+          return { fact_id: r.result.fact_id, source: r.result.source, target: r.result.target, relation: r.result.relation, asserted_by: r.result.asserted_by, claimed_by: r.result.claimed_by, ok: true, created: r.result.created };
         } catch (e) {
           return { fact_id: '', source: x.source, target: x.target, relation: x.relation, ok: false, error: String(e) };
         }
@@ -331,7 +331,7 @@ export const ENOX_OPS: Op[] = [
       facts.push(...r.facts);
       await write(ctx, facts);
       return { subject: { id: subj!.id, name: subj!.name }, fact: { id: fid, text: truncateAtWordBoundary(fact, 300) }, relation,
-        asserted_by: r.result.asserted_by, fact_id: r.result.fact_id, created: r.result.created };
+        asserted_by: r.result.asserted_by, claimed_by: r.result.claimed_by, fact_id: r.result.fact_id, created: r.result.created };
     } },
   { name: 'update_assertion', description: 'Change an assertion\'s confidence/context/author: a new assertion that supersedes.',
     input: obj({ fact_id: s(), confidence: n(), context: s(), asserted_by: s(), proof_depth: n() }, ['fact_id']), access: 'operator', text: pretty,
@@ -346,7 +346,7 @@ export const ENOX_OPS: Op[] = [
       if (a.asserted_by !== undefined) facts.push(meta(e.F, 'asserted_by', a.asserted_by as string));
       if (a.proof_depth !== undefined) facts.push(meta(e.F, 'proof_depth', a.proof_depth as number));
       await write(ctx, facts);
-      return { fact_id: e.fact_id, source: e.source, target: e.target, relation: e.relation, asserted_by: self(ctx),
+      return { fact_id: e.fact_id, source: e.source, target: e.target, relation: e.relation, asserted_by: self(ctx), claimed_by: (a.asserted_by as string | undefined) ?? e.claimed_by,
         confidence, proof_depth: (a.proof_depth as number | undefined) ?? e.proof_depth, context: (a.context as string | undefined) ?? e.context, updated_at: t };
     } },
   { name: 'delete_assertion', description: 'Retire an assertion: re-asserted with confidence 0 (the log keeps its history).',
@@ -434,9 +434,9 @@ export const ENOX_OPS: Op[] = [
       return { id: a.id, entity_id: x.id, content_type: ct, title: x.name, domain: x.domain, filename: x.attrs.get('filename') ?? null,
         size: Number(x.attrs.get('size') ?? 0), sha256: x.attrs.get('sha256'), created_at: x.created_at, updated_at: x.updated_at,
         links: g.out(x.id).map((e) => ({ fact_id: e.fact_id, source: e.source, target: e.target, target_name: g.nodes.get(e.target)!.name, relation: e.relation,
-          confidence: e.confidence, context: e.context, asserted_by: e.asserted_by })),
+          confidence: e.confidence, context: e.context, asserted_by: e.asserted_by, claimed_by: e.claimed_by })),
         incoming: g.in(x.id).map((e) => ({ fact_id: e.fact_id, source: e.source, source_name: g.nodes.get(e.source)!.name, target: e.target, relation: e.relation,
-          confidence: e.confidence, context: e.context, asserted_by: e.asserted_by })),
+          confidence: e.confidence, context: e.context, asserted_by: e.asserted_by, claimed_by: e.claimed_by })),
         ...((a.include_body ?? true) && textLike ? { body: x.attrs.get('body') ?? '' } : {}) };
     } },
   // ---- shares: roflenox shares by grant and export; there are no token links ----

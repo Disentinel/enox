@@ -85,7 +85,8 @@ test('a node holding 200000 facts stays under 1.5 GB of resident memory while id
     } finally { fs.chmodSync(book, 0o755); }
     const ask = await fetch(`${url}/op/ask`, { method: 'POST', headers: auth, body: JSON.stringify({ query: 'edge(F, S, "rel7", T)', limit: 10 }) });
     assert.equal(ask.status, 200, await ask.clone().text());
-    const health = (await (await fetch(`${url}/health`)).json()) as { facts: number; engine: { restarts: number }; recent_facts_remembered: number };
+    // (Health in full is the operator's view.)
+    const health = (await (await fetch(`${url}/op/health`, { method: 'POST', headers: auth, body: '{}' })).json()) as { facts: number; engine: { restarts: number }; recent_facts_remembered: number };
     assert.equal(health.facts, HELD);
     assert.equal(health.engine.restarts, 1, 'the aborted write made the node rebuild its engine');
     // What it remembers of recent admissions is bounded in facts, not batches.

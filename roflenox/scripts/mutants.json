@@ -2400,8 +2400,8 @@
    "file": "src/enox.ts",
    "edits": [
     [
-     "relation: a.relation, asserted_by: signer, confidence,",
-     "relation: a.relation, asserted_by: by, confidence,"
+     "relation: a.relation, asserted_by: signer, claimed_by: by, confidence,",
+     "relation: a.relation, asserted_by: by, claimed_by: by, confidence,"
     ]
    ],
    "red": [
@@ -2924,6 +2924,160 @@
    ],
    "red": [
     "a backup syncs every file and directory it holds before it becomes the latest"
+   ]
+  },
+  {
+   "id": "M212",
+   "title": "r_enox_compat: the claimed label is not read back",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "claimed_by: attr(a.F, 'asserted_by') ?? null,",
+     "claimed_by: null,"
+    ]
+   ],
+   "red": [
+    "an agent label given to an Enox write reads back as claimed_by next to the signing identity, and a forged label changes nothing but claimed_by"
+   ]
+  },
+  {
+   "id": "M213",
+   "title": "r_enox_compat: a write's answer drops the label",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "asserted_by: signer, claimed_by: by,",
+     "asserted_by: signer, claimed_by: null,"
+    ]
+   ],
+   "red": [
+    "an agent label given to an Enox write reads back as claimed_by next to the signing identity, and a forged label changes nothing but claimed_by"
+   ]
+  },
+  {
+   "id": "M214",
+   "title": "r_enox_compat: the text view does not mark the claim",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "${e.claimed_by ? `, claims ${JSON.stringify(e.claimed_by)}` : ''}",
+     ""
+    ]
+   ],
+   "red": [
+    "an agent label given to an Enox write reads back as claimed_by next to the signing identity, and a forged label changes nothing but claimed_by"
+   ]
+  },
+  {
+   "id": "M215",
+   "title": "r_enox_compat: recall leaves the claim out",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "...(e.claimed_by ? { claimed_by: e.claimed_by } : {}), ",
+     ""
+    ]
+   ],
+   "red": [
+    "an agent label given to an Enox write reads back as claimed_by next to the signing identity, and a forged label changes nothing but claimed_by"
+   ]
+  },
+  {
+   "id": "M216",
+   "title": "r_mutation_gate: a node that refuses to start leaves its engine running",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      await n.engine.stop().catch(() => {});\n",
+     ""
+    ]
+   ],
+   "red": [
+    "every test file exits on its own without force-exit, leaving no engine process behind"
+   ]
+  },
+  {
+   "id": "M217",
+   "title": "r_mutation_gate: a failing shard does not fail the gate",
+   "file": "scripts/mutants.ts",
+   "edits": [
+    [
+     "shards passed\\n`);\n  return bad === 0 ? 0 : 1;",
+     "shards passed\\n`);\n  return 0;"
+    ]
+   ],
+   "red": [
+    "a failing mutant shard fails the whole mutant gate"
+   ]
+  },
+  {
+   "id": "M218",
+   "title": "r_mutation_gate: a nested failure is reported without its error",
+   "file": "test/sandbox.ts",
+   "edits": [
+    [
+     "    for (let j = i + 1; j < lines.length && !/^\\s*\\.\\.\\.\\s*$/.test(lines[j]!) && j < i + 40; j++) out.push(`  ${lines[j]!.trim()}`);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "the hermetic suite passes five runs in a row, and a nested failure prints the failing test's own error"
+   ]
+  },
+  {
+   "id": "M219",
+   "title": "r_enox_compat: the text view shows the label unquoted",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "claims ${JSON.stringify(e.claimed_by)}",
+     "claims ${e.claimed_by}"
+    ]
+   ],
+   "red": [
+    "a claimed label holding brackets, a newline or 5000 characters can neither forge a signer nor add a line to a text view"
+   ]
+  },
+  {
+   "id": "M220",
+   "title": "r_enox_compat: a label of any length is written",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "  if (f.relation === 'enox:asserted_by' && (f.target.length > MAX_CLAIM || /[\\u0000-\\u001f\\u007f-\\u009f]/.test(f.target) || BIDI.test(f.target))) {",
+     "  if (f.relation === 'enox:asserted_by' && (/[\\u0000-\\u001f\\u007f-\\u009f]/.test(f.target) || BIDI.test(f.target))) {"
+    ]
+   ],
+   "red": [
+    "a claimed label holding brackets, a newline or 5000 characters can neither forge a signer nor add a line to a text view"
+   ]
+  },
+  {
+   "id": "M221",
+   "title": "r_enox_compat: a label may hold control characters",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "  if (f.relation === 'enox:asserted_by' && (f.target.length > MAX_CLAIM || /[\\u0000-\\u001f\\u007f-\\u009f]/.test(f.target) || BIDI.test(f.target))) {",
+     "  if (f.relation === 'enox:asserted_by' && (f.target.length > MAX_CLAIM || BIDI.test(f.target))) {"
+    ]
+   ],
+   "red": [
+    "a claimed label holding brackets, a newline or 5000 characters can neither forge a signer nor add a line to a text view"
+   ]
+  },
+  {
+   "id": "M222",
+   "title": "r_enox_compat: labels stop at 127 characters",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "export const MAX_CLAIM = 128;",
+     "export const MAX_CLAIM = 127;"
+    ]
+   ],
+   "red": [
+    "a claimed label holding brackets, a newline or 5000 characters can neither forge a signer nor add a line to a text view"
    ]
   }
  ]

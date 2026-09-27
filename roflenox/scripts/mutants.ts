@@ -66,7 +66,7 @@ async function runShards(n: number, passOn: string[]): Promise<number> {
       ...passOn, '--shard', `${i + 1}/${n}`, '--workers', '1'], { stdio: ['ignore', 'pipe', 'inherit'] });
     let out = '';
     c.stdout.on('data', (d) => { out += d; });
-    c.on('exit', (code) => { process.stdout.write(out.replace(/^/gm, `[shard ${i + 1}/${n}] `)); ok(code ?? 1); });
+    c.on('exit', (code) => { process.stdout.write(`${out.replace(/\n+$/, '').replace(/^/gm, `[shard ${i + 1}/${n}] `)}\n`); ok(code ?? 1); });
   })));
   const bad = codes.filter((c) => c !== 0).length;
   process.stdout.write(`\n${n - bad}/${n} shards passed\n`);
@@ -187,7 +187,7 @@ async function judge(tree: string, m: Mutant): Promise<Verdict> {
 async function main(): Promise<number> {
   const t0 = Date.now();
   const { only, extra, workers, perf, shard, shards } = args();
-  if (shards !== null && shard === null && only === null) {
+  if (shards !== null && shard === null) {
     return runShards(shards, process.argv.slice(2).filter((x, i, a) => x !== '--shards' && a[i - 1] !== '--shards'));
   }
   // Two gates, each within the budget: perf mutants (their red tests live in
