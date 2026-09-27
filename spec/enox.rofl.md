@@ -497,6 +497,13 @@ Declared as facts:
 - `r_revocation_bound` says "after a key is revoked, a batch it signed is accepted only if it stands before the revocation in the chain or was received before the revocation".
 - `r_revocation_bound` is stated in "PROTOCOL.md#1.2".
 - `r_revocation_bound` is to be checked by "a backdated batch received after revocation is rejected".
+- `r_domain_vouch` is about `identity`.
+- `r_domain_vouch` binds as `should`.
+- `r_domain_vouch` says "optionally, a node whose operator turns it on lets the domain of a user@domain identity vouch for its first key: the domain publishes the identity's first document at https://domain/.well-known/roflenox/<local part, percent-encoded>, and that answer pins first contact the way an invitation link does; off by default".
+- `r_domain_vouch` says "a domain vouches only for names under it, only over HTTPS with a valid certificate and no redirect to another host, and only for first contact: it never replaces a key already pinned, which still changes only by a rotation signed by the key or the recovery key".
+- `r_domain_vouch` is stated in "owner 2026-09-27: add domain vouching as an optional variant".
+- `r_domain_vouch` is to be checked by "with domain vouching on, a first contact with user@domain pins the key its domain publishes over HTTPS, and with it off the same contact needs an invitation".
+- `r_domain_vouch` is to be checked by "a domain vouches for no name outside it, never over plain HTTP or across a redirect to another host, and never replaces an already pinned key".
 - `r_key_change_loud` is about `identity`.
 - `r_key_change_loud` binds as `must`.
 - `r_key_change_loud` says "first contact is bootstrapped over HTTPS and pinned; a key that changes without a signed rotation stops the pull and says why".
@@ -600,7 +607,9 @@ Kinds of the requirements:
 - `r_revocation_bound` is of `security`.
 - `r_revocation_bound` resists "the holder of a stolen and since revoked key, who backdates new batches".
 - `r_key_change_loud` is of `security`.
+- `r_domain_vouch` is of `security`.
 - `r_key_change_loud` resists "anyone, including an identity this node already trusts, who wants a name here pinned to a key its owner does not hold".
+- `r_domain_vouch` resists "whoever controls the domain's DNS or web server, or the network between nodes, trying to pin a key the user does not hold, and the domain's owner trying to take over an identity already pinned".
 - `r_default_deny` is of `security`.
 - `r_default_deny` resists "an anonymous or granted caller of ANY endpoint, who wants to learn what no export rule derives, facts or metadata".
 - `r_withheld_unguessable` is of `security`.
@@ -693,6 +702,7 @@ The queue:
 - `r_enox_compat` is queued at 80.
 - `r_no_orphan_tests` is queued at 76.
 - `r_freshness` is queued at 77.
+- `r_domain_vouch` is queued at 82.
 - `r_mutation_gate` is queued at 73.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 - `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
