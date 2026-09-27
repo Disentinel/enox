@@ -272,6 +272,7 @@ Declared as facts:
 - `r_no_orphan_tests` binds as `must`.
 - `r_no_orphan_tests` says "every test case in the repository guards at least one requirement; test names are static strings; the list of test cases is read by a deterministic scanner and compared with the test runner's own list, so a test the scanner cannot see fails the gate instead of passing unseen".
 - `r_no_orphan_tests` is stated in "owner 2026-09-27: a scanner lists every test case, and no test case is unlinked".
+- `r_no_orphan_tests` says "the scanner and the runner compare top-level test names; a subtest (t.test) may carry a dynamic name, so a loop of cases is one static top-level test with subtests; the scan covers roflenox/test, roflenox/executors/*/test and spec/check.test.mjs; the implementer owns spec/check.mjs and spec/check.test.mjs for this".
 - `r_no_orphan_tests` is to be checked by "a test that guards no requirement fails the spec gate, and linking it passes".
 - `r_no_orphan_tests` is to be checked by "a test the scanner cannot read, or one the runner lists and the scanner does not, fails the spec gate".
 - `r_no_orphan_tests` is to be checked by "an accepted requirement whose checks guard no existing test fails the spec gate".
