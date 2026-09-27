@@ -67,3 +67,5 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_default_deny`.
 - `roflenox_core` finished `r_default_deny` at "a1bb4a0d379138676deab6a7b2bf05915362a5f7".
 - `roflenox_core` takes `r_chain`.
+- `roflenox_core` finished `r_chain` at "68809976741d5ab863ba19d57a9920566d4afa60".
+- `roflenox_core` takes `r_backup`.

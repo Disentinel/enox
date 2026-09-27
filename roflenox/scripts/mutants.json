@@ -2883,6 +2883,48 @@
    "red": [
     "a node given a second signed successor of the same batch keeps both signatures as fork proof and marks every answer over that book"
    ]
+  },
+  {
+   "id": "M209",
+   "title": "r_backup: the snapshot's files are not synced",
+   "file": "src/backup.ts",
+   "edits": [
+    [
+     "    for (const f of entries.filter((p) => fs.statSync(p).isFile())) {",
+     "    for (const f of [] as string[]) {"
+    ]
+   ],
+   "red": [
+    "a backup syncs every file and directory it holds before it becomes the latest"
+   ]
+  },
+  {
+   "id": "M210",
+   "title": "r_backup: only the snapshot directory is synced, not the ones inside it",
+   "file": "src/backup.ts",
+   "edits": [
+    [
+     "    for (const d of [...entries.filter((p) => fs.statSync(p).isDirectory()), staging].sort((x, y) => y.length - x.length)) {",
+     "    for (const d of [staging]) {"
+    ]
+   ],
+   "red": [
+    "a backup syncs every file and directory it holds before it becomes the latest"
+   ]
+  },
+  {
+   "id": "M211",
+   "title": "r_backup: a latest that is a real directory is taken over",
+   "file": "src/backup.ts",
+   "edits": [
+    [
+     "  if (fs.existsSync(latest) && !fs.lstatSync(latest).isSymbolicLink()) {",
+     "  if (false) {"
+    ]
+   ],
+   "red": [
+    "a backup syncs every file and directory it holds before it becomes the latest"
+   ]
   }
  ]
 }

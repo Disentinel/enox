@@ -49,6 +49,8 @@ export function operatorTokenOf(dataDir: string): string {
     const fd = fs.openSync(tmp, 'wx', 0o600);
     try { fs.writeSync(fd, crypto.randomBytes(32).toString('base64url')); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
     fs.renameSync(tmp, p);
+    const d = fs.openSync(path.dirname(p), 'r');
+    try { fs.fsyncSync(d); } finally { fs.closeSync(d); }
   }
   return fs.readFileSync(p, 'utf8').trim();
 }

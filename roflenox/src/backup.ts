@@ -25,6 +25,11 @@ import { bookOf } from './identity.ts';
 import type { Fault, Receipt } from './log.ts';
 import { RoflenoxNode } from './node.ts';
 
+function fsyncFile(p: string): void {
+  const fd = fs.openSync(p, 'r');
+  try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+}
+
 function fsyncDir(dir: string): void {
   const fd = fs.openSync(dir, 'r');
   try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
@@ -44,6 +49,10 @@ export async function backup(dataDir: string, toDir: string,
   await o.afterIndexRead?.();
 
   fs.mkdirSync(toDir, { recursive: true });
+  const latest = path.join(toDir, 'latest');
+  if (fs.existsSync(latest) && !fs.lstatSync(latest).isSymbolicLink()) {
+    throw new Error(`${latest} is a directory, not the link this backup keeps; move it aside and back up again`);
+  }
   const staging = fs.mkdtempSync(path.join(toDir, 'snap-'));
   let installed = false;
   try {
@@ -72,20 +81,24 @@ export async function backup(dataDir: string, toDir: string,
     const result: BackupResult = { dir: path.join(toDir, 'latest'), receipts: receipts.length, log_head: head, at: new Date(now()).toISOString() };
     fs.writeFileSync(path.join(staging, 'backup.json'), JSON.stringify(result));
 
-    fsyncDir(staging);
+    // Every file, then every directory (deepest first), on disk before the
+    // snapshot can become the latest (r_backup): a power loss never leaves
+    // latest naming a torn copy.
+    const entries = fs.readdirSync(staging, { recursive: true, withFileTypes: true })
+      .map((e) => path.join(e.parentPath, e.name));
+    for (const f of entries.filter((p) => fs.statSync(p).isFile())) {
+      fsyncFile(f);
+      fault(`backup:synced:${path.relative(staging, f)}`);
+    }
+    for (const d of [...entries.filter((p) => fs.statSync(p).isDirectory()), staging].sort((x, y) => y.length - x.length)) {
+      fsyncDir(d);
+      fault(`backup:synced:${path.relative(staging, d) || '.'}`);
+    }
     fault('backup:staged');
 
     // Swap in: a new link renamed over latest; the previous snapshot goes
     // only once nothing names it.
-    const latest = path.join(toDir, 'latest');
-    let old = fs.existsSync(latest) ? fs.realpathSync(latest) : null;
-    if (old !== null && !fs.lstatSync(latest).isSymbolicLink()) {
-      // A backup made before latest was a link: a real directory cannot be
-      // replaced by a rename, so it becomes a snapshot first (once).
-      old = `${staging}-before`;
-      fs.renameSync(latest, old);
-      fault('backup:migrated');
-    }
+    const old = fs.existsSync(latest) ? fs.realpathSync(latest) : null;
     const link = path.join(toDir, `.latest-${path.basename(staging)}`);
     fs.symlinkSync(path.basename(staging), link);
     fault('backup:link-written');

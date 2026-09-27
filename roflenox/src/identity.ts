@@ -172,6 +172,8 @@ export class LocalIdentity {
     const fd = fs.openSync(tmp, 'wx', 0o600);
     try { fs.writeSync(fd, JSON.stringify(f)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
     fs.renameSync(tmp, p);
+    const d = fs.openSync(path.dirname(p), 'r');           // the rename itself, on disk
+    try { fs.fsyncSync(d); } finally { fs.closeSync(d); }
   }
 
   private file(): KeyFile {

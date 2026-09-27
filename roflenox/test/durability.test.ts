@@ -247,10 +247,16 @@ test('a backup killed between any two of its steps leaves a readable backup at t
   // a previous one is in place.
   const steps: string[] = [];
   await backup(dir, withPrevious(), { now: () => T0, fault: (p) => { steps.push(p); } });
-  assert.deepEqual(steps, ['backup:staged', 'backup:link-written', 'backup:swapped', 'backup:old-removed']);
+  assert.deepEqual(steps.filter((x) => !x.startsWith('backup:synced:')), ['backup:staged', 'backup:link-written', 'backup:swapped', 'backup:old-removed']);
 
+  // The sync steps (one per file and directory) all lie before the link is
+  // written, where latest cannot change: the first and the last of them
+  // stand for the rest, and keep this file under its time budget.
+  const syncs = steps.filter((x) => x.startsWith('backup:synced:'));
+  const killAt = steps.filter((x) => !x.startsWith('backup:synced:') || x === syncs[0] || x === syncs[syncs.length - 1]);
+  assert.ok(syncs.length >= 6 && killAt.length === 6, killAt.join(' '));
   const heads: string[] = [];
-  for (const step of steps) {
+  for (const step of killAt) {
     const to = withPrevious();
     const child = spawnSync(process.execPath,
       ['--experimental-strip-types', '--no-warnings', path.join(import.meta.dirname, 'backup-child.ts'), dir, to, step, String(T0)],
@@ -269,7 +275,35 @@ test('a backup killed between any two of its steps leaves a readable backup at t
     assert.equal((await backup(dir, to, { now: () => T0 })).log_head, after, `after a kill at ${step}`);
   }
   // Both outcomes occur: killed before the swap keeps the previous, after it the new.
-  assert.deepEqual(heads, [before, before, after, after]);
+  const swapped = killAt.indexOf('backup:swapped');
+  assert.deepEqual(heads, killAt.map((_, i) => (i < swapped ? before : after)));
+});
+
+test('a backup syncs every file and directory it holds before it becomes the latest', async () => {
+  const dir = tmpDir('bk-sync');
+  const a = await start(dir, 'node-a');
+  const to = tmpDir('bk-sync-to');
+  try {
+    const b1 = batch(a.me, [fact('alice', 'knows', 'bob')], null, iso(a.clock.t));
+    assert.equal((await post(a.url, '/batches', b1)).status, 201);
+    const steps: string[] = [];
+    await backup(dir, to, { now: () => a.clock.t, fault: (p) => { steps.push(p); } });
+    // Everything the snapshot holds, read back from what latest names.
+    const snap = fs.realpathSync(path.join(to, 'latest'));
+    const held = [...fs.readdirSync(snap, { recursive: true }).map(String), '.'].sort();
+    const link = steps.indexOf('backup:link-written');
+    const synced = steps.slice(0, link).filter((x) => x.startsWith('backup:synced:')).map((x) => x.slice('backup:synced:'.length)).sort();
+    assert.ok(held.length >= 6, held.join(' '));
+    assert.deepEqual(synced, held, 'every file and directory is synced before the link is written');
+    // Directories after the files they hold, and the snapshot itself last.
+    assert.equal(steps[link - 2], 'backup:synced:.');
+    // A latest that is a real directory is not a backup this node made: refused, untouched.
+    const other = tmpDir('bk-sync-other');
+    fs.mkdirSync(path.join(other, 'latest'));
+    fs.writeFileSync(path.join(other, 'latest', 'mine.txt'), 'keep');
+    await assert.rejects(backup(dir, other, { now: () => a.clock.t }), /is a directory, not the link/);
+    assert.equal(fs.readFileSync(path.join(other, 'latest', 'mine.txt'), 'utf8'), 'keep');
+  } finally { await a.stop(); }
 });
 
 test('killing the engine during an admission leaves the log consistent, refuses that batch, and the node answers after it rebuilds', async () => {
