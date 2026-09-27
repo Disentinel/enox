@@ -722,6 +722,7 @@ The queue:
 - `r_chain` is accepted at "68809976741d5ab863ba19d57a9920566d4afa60".
 - `r_backup` is accepted at "d8f57a54ae23621d1c63757978d8ee7b69098e18".
 - `r_enox_compat` is accepted at "047c616173ff5b28ed1f33cfb24ff4aec1d7febc".
+- `r_mutation_gate` is accepted at "3ca019fb84ae9d2aaeea0979e21e86715ec0b8b8".
 - `r_enox_compat` is rejected at "63f344e6d8b0cc2c6b578bbd558a2dbaad21e357".
 - `r_mutation_gate` is rejected at "b6b67403f2e7a5c645be914d5f45754273e77418".
 - `r_identity_names` is rejected at "4800a6841d8476258cb98c07a16cfaf815353c4e".
@@ -994,6 +995,14 @@ The checks that exist:
 - "an agent label given to an Enox write reads back as claimed_by next to the signing identity, and a forged label changes nothing but claimed_by" lives in "roflenox/test/enox.test.ts".
 - "a claimed label holding brackets, a newline or 5000 characters can neither forge a signer nor add a line to a text view" guards `r_enox_compat`.
 - "a claimed label holding brackets, a newline or 5000 characters can neither forge a signer nor add a line to a text view" lives in "roflenox/test/enox.test.ts".
+- "every test file exits on its own without force-exit, leaving no engine process behind" guards `r_mutation_gate`.
+- "every test file exits on its own without force-exit, leaving no engine process behind" lives in "roflenox/test/hermetic.test.ts".
+- "a failing mutant shard fails the whole mutant gate" guards `r_mutation_gate`.
+- "a failing mutant shard fails the whole mutant gate" lives in "roflenox/test/gate.test.ts".
+- "a mutant whose red test already fails on the unmutated tree is reported as a broken baseline, never as killed" guards `r_mutation_gate`.
+- "a mutant whose red test already fails on the unmutated tree is reported as a broken baseline, never as killed" lives in "roflenox/test/gate.test.ts".
+- "the hermetic suite passes five runs in a row, and a nested failure prints the failing test's own error" guards `r_mutation_gate`.
+- "the hermetic suite passes five runs in a row, and a nested failure prints the failing test's own error" lives in "roflenox/test/hermetic5/hermetic5.test.ts".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" guards `r_asserted_by`.
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" lives in "personal-node/src/mcp/main-graph.test.ts".
 
