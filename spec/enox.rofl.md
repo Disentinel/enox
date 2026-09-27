@@ -286,6 +286,16 @@ Declared as facts:
 - `r_single_writer` says "one process at a time owns a data directory: serve, stdio and every local operation that signs take an exclusive lock on it, and a second process refuses to start, naming the holder, before it reads or writes anything; so a node can never sign two successors of its own head by accident".
 - `r_single_writer` is stated in "found 2026-09-27 while verifying the quickstart: stdio and serve on one data dir forked the node's own chain, and the node then refused to start".
 - `r_single_writer` is to be checked by "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing".
+- `r_compat_parity` is about `enox`.
+- `r_compat_parity` binds as `must`.
+- `r_compat_parity` says "the Enox tools answer like the Enox they replace on the same data: recall uses meaning as well as names, semantic_search carries age_days and stale, proof_depth is an integer, the embedder runs in bounded memory and survives writes during its read, updates and deletes stay fast, a read after a write meets the one-second bound under load, and why agrees with ask".
+- `r_compat_parity` is stated in "side-by-side comparison with the base Enox on the owner's data, 2026-09-27 (private report, not in the repo)".
+- `r_compat_parity` is to be checked by "recall finds an entity from a natural-language question that shares no word with its name".
+- `r_compat_parity` is to be checked by "semantic_search results carry age_days and stale like the base".
+- `r_compat_parity` is to be checked by "a fractional proof_depth is refused".
+- `r_compat_parity` is to be checked by "the embedder embeds a book of mixed text lengths in bounded memory and finishes although writes land during its read".
+- `r_compat_parity` is to be checked by "update_assertion and delete_assertion answer within 100 ms and a read after a write within one second while writes keep arriving".
+- `r_compat_parity` is to be checked by "why agrees with ask for every literal ask returns, including conf".
 - `r_typed` says "every requirement is of exactly one kind from the closed list".
 - `r_typed` is stated in "owner 2026-09-26".
 - `r_typed` is to be checked by "a requirement with an unknown kind fails typing".
@@ -659,6 +669,7 @@ Kinds of the requirements:
 - `r_interface_parity` is of `constraint`.
 - `r_mutation_gate` is of `gate`.
 - `r_typed` is of `gate`.
+- `r_compat_parity` is of `feature`.
 - `r_single_writer` is of `reliability`.
 - `r_no_orphan_tests` is of `gate`.
 - `r_balanced` is of `gate`.
@@ -730,6 +741,7 @@ The queue:
 - `r_freshness` is queued at 77.
 - `r_domain_vouch` is queued at 82.
 - `r_single_writer` is queued at 83.
+- `r_compat_parity` is queued at 84.
 - `r_mutation_gate` is queued at 73.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 - `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
