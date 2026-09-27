@@ -676,6 +676,7 @@ The queue:
 - `r_atomic_write` is accepted at "cb8730b753d33b9d28115ad4db650776d2c5a154".
 - `r_key_change_loud` is accepted at "2873ca82a93a210e7954cd7dc7e6d9f33d604569".
 - `r_asserted_by` is accepted at "47c198a247231c85bf38ef70395a3fb9514f5306".
+- `r_confidence` is accepted at "27f4b5e57621eae2ebf937f99d7cf3540c766a1e".
 
 Rejected after verification:
 
