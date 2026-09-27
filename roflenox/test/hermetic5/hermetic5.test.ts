@@ -1,5 +1,6 @@
 // The hermetic suite, repeated: a gate that flakes is switched off, so it is
-// run five times in a row here (npm run perf), and its failures must say why.
+// run five times in a row here (npm run hermetic5, its own gate), and its
+// failures must say why.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';

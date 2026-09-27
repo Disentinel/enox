@@ -59,3 +59,33 @@ test('a failing mutant shard fails the whole mutant gate', () => {
   assert.equal(ok.status, 0, ok.out);
   assert.match(ok.out, /^2\/2 shards passed$/m);
 });
+
+test('a mutant whose red test already fails on the unmutated tree is reported as a broken baseline, never as killed', () => {
+  const RED = 'RFC 8785 section 3.2.2: the example object canonicalises exactly';
+  const extra = path.join(tmpDir('gate-base'), 'extra.json');
+  // A mutant that changes only a comment: nothing it does can turn a test red.
+  fs.writeFileSync(extra, JSON.stringify({ mutants: [{ id: 'MZ', title: 'a comment changed', file: 'src/jcs.ts',
+    edits: [['// RFC 8785 JSON Canonicalization Scheme.', '// RFC 8785 JSON Canonicalization Scheme!']], red: [RED] }] }));
+  // Control, the honest tree: the baseline passes and the mutant survives.
+  const honest = gate(['--only', 'MZ', '--extra', extra]);
+  assert.equal(honest.status, 1, honest.out);
+  assert.match(honest.out, /^baseline: 1 red tests pass on the unmutated tree/m);
+  assert.match(honest.out, /^SURVIVED MZ /m);
+  // A copy of the tree in which that red test is already broken.
+  const root = path.join(import.meta.dirname, '..');
+  const copy = tmpDir('gate-broken');
+  for (const d of ['src', 'test', 'vendor', 'scripts']) fs.cpSync(path.join(root, d), path.join(copy, d), { recursive: true });
+  fs.mkdirSync(path.join(copy, 'executors'));
+  fs.copyFileSync(path.join(root, 'package.json'), path.join(copy, 'package.json'));
+  const f = path.join(copy, 'test', 'canonical.test.ts');
+  const text = fs.readFileSync(f, 'utf8');
+  const head = `test('${RED}', () => {`;
+  assert.ok(text.includes(head));
+  fs.writeFileSync(f, text.replace(head, `${head} throw new Error('broken before any mutant');`));
+  const r = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', path.join(copy, 'scripts', 'mutants.ts'), '--only', 'MZ', '--extra', extra],
+    { encoding: 'utf8', timeout: 100_000 });
+  const out = r.stdout + r.stderr;
+  assert.equal(r.status, 1, out);
+  assert.match(out, new RegExp(`^BASELINE "${RED}" fails on the unmutated tree`, 'm'));
+  assert.doesNotMatch(out, /killed {2}MZ/, 'a pre-broken test is never a kill');
+});

@@ -3079,6 +3079,20 @@
    "red": [
     "a claimed label holding brackets, a newline or 5000 characters can neither forge a signer nor add a line to a text view"
    ]
+  },
+  {
+   "id": "M223",
+   "title": "r_mutation_gate: the gate judges mutants without a baseline",
+   "file": "scripts/mutants.ts",
+   "edits": [
+    [
+     "  if (reds.length) {",
+     "  if (false) {"
+    ]
+   ],
+   "red": [
+    "a mutant whose red test already fails on the unmutated tree is reported as a broken baseline, never as killed"
+   ]
   }
  ]
 }

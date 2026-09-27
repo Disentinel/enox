@@ -75,3 +75,5 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_mutation_gate`.
 - `roflenox_core` finished `r_mutation_gate` at "b6b67403f2e7a5c645be914d5f45754273e77418".
 - `roflenox_core` takes `r_enox_compat`.
+- `roflenox_core` finished `r_enox_compat` at "047c616173ff5b28ed1f33cfb24ff4aec1d7febc".
+- `roflenox_core` takes `r_mutation_gate`.
