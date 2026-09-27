@@ -428,8 +428,9 @@ Declared as facts:
 - `r_identity_names` binds as `must`.
 - `r_identity_names` says "users address identities by name; in normal operation no key, fingerprint or signature is shown or asked for".
 - `r_identity_names` is stated in "owner 2026-09-26".
-- `r_identity_names` says "a name is 1 to 128 ASCII letters, digits and the marks . _ @ -, starting with a letter or digit; one format for people, hosts and agents".
+- `r_identity_names` says "a name is 1 to 128 lowercase ASCII letters, digits and the marks . _ @ -, starting with a letter or digit; one format for people, hosts and agents; no two names differ only in letter case, because an uppercase letter is refused rather than folded".
 - `r_identity_names` is to be checked by "a name with a space, a non-ASCII letter or an invisible mark is refused, and a name of 128 allowed characters is accepted".
+- `r_identity_names` is to be checked by "a name with an uppercase letter is refused by the client and by the node, so node-a and Node-A can never both be pinned".
 - `r_identity_names` is to be checked by "an end-to-end pull between two nodes whose transcript contains no key material".
 - `r_keys_automatic` is about `identity`.
 - `r_keys_automatic` binds as `must`.
@@ -697,6 +698,7 @@ The queue:
 - `r_confidence` is accepted at "27f4b5e57621eae2ebf937f99d7cf3540c766a1e".
 - `r_revocation_receipt` is accepted at "85443bd2b257d98972e1de35b2ad3b5feace3e36".
 - `r_static_feed` is accepted at "c42404137f12fcbf7962f8fc936c480bb83f3e13".
+- `r_identity_names` is rejected at "4800a6841d8476258cb98c07a16cfaf815353c4e".
 - `r_rotation` is rejected at "db71b41d7281fe72aae5d4d4302303045a5fb4ce".
 
 Rejected after verification:
