@@ -11,6 +11,11 @@
     "node": ">=22.6"
   },
   "scripts": {
-    "start": "node --experimental-strip-types --no-warnings embedder.ts"
+    "start": "node --experimental-strip-types --no-warnings embedder.ts",
+    "fetch-model": "node --experimental-strip-types --no-warnings -e \"const { learned } = await import('./embed.ts'); await learned(process.env.ROFLENOX_EMBED_MODEL); console.log('model ready')\"",
+    "test": "node --experimental-strip-types --no-warnings --test --test-timeout=110000 --test-force-exit test/*.test.ts"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "3.7.0"
   }
 }

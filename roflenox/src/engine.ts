@@ -3,7 +3,7 @@
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { RoflPort, type RoflSession } from '../vendor/rofl-port.ts';
-import { decodeCell, Refusal, roflString } from './facts.ts';
+import { decodeCell, NOT_BY_WILDCARD, Refusal, roflString } from './facts.ts';
 
 /** The engine's record of which log batches it holds. */
 export const SYSTEM_BOOK = 'sys_roflenox';
@@ -54,7 +54,10 @@ export function bookRules(book: string, owner: string): string {
     `readable_until[${SYSTEM_BOOK}](R, ${b}, U) :- grant[${book}](R, U).`,
     `delegated_until[${SYSTEM_BOOK}](A, ${roflString(owner)}, U) :- delegate[${book}](A, U).`,
     `exported[${SYSTEM_BOOK}](${b}, F, A) :- edge[${book}](F, S, Rel, T), export[${book}](Rel, A).`,
-    `exported[${SYSTEM_BOOK}](${b}, F, A) :- edge[${book}](F, S, Rel, T), export[${book}]("*", A).`,
+    // A wildcard never covers the node's own relations (a search asked, a rule,
+    // a grant…): only an export naming one does (r_semantic_search leak).
+    `exported[${SYSTEM_BOOK}](${b}, F, A) :- edge[${book}](F, S, Rel, T), export[${book}]("*", A), not reserved[${SYSTEM_BOOK}](Rel).`,
+    ...NOT_BY_WILDCARD.map((r) => `reserved[${SYSTEM_BOOK}](${roflString(r)}).`),
     '',
   ].join('\n');
 }

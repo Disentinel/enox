@@ -26,7 +26,7 @@ import { bookOf, LocalIdentity } from '../../src/identity.ts';
 import { httpCaller, publishVia, RemoteRefusal, type OpCaller } from '../../src/client.ts';
 import { pullIntents, RESULT } from '../../src/executor.ts';
 import { EMBEDDING, type Fact } from '../../src/facts.ts';
-import { cosine, decode, embeddingKey, encode, HASH, type Model } from './embed.ts';
+import { cosine, decode, embeddingKey, encode, modelFromEnv, type Model } from './embed.ts';
 
 const TOP = 50;
 const BATCH = 1000;
@@ -75,7 +75,7 @@ function docsOf(rows: Row[]): Doc[] {
 }
 
 /** Answer the search intents addressed to `me`. Returns how many were answered. */
-export async function answerSearches(url: string, me: LocalIdentity, model: Model = HASH, log: (s: string) => void = () => {}): Promise<number> {
+export async function answerSearches(url: string, me: LocalIdentity, model: Model, log: (s: string) => void = () => {}): Promise<number> {
   const node = httpCaller(url, me);
   const intents = (await pullIntents(url, me)).filter((i) => i.kind === 'search');
   if (intents.length === 0) return 0;
@@ -100,7 +100,7 @@ export async function answerSearches(url: string, me: LocalIdentity, model: Mode
     const missing = [...new Map(docs.map((d) => [embeddingKey(model.id, d.text), d.text])).entries()].filter(([k]) => !index.has(k));
     for (let i = 0; i < missing.length; i += BATCH) {
       const chunk = missing.slice(i, i + BATCH);
-      const vs = await model.embed(chunk.map(([, t]) => t));
+      const vs = await model.embed(chunk.map(([, t]) => t), 'passage');
       const facts = chunk.map(([k], j) => {
         // Quantised as it will be read back, so this run ranks as a rebuild would.
         const v = encode(vs[j]!);
@@ -111,7 +111,7 @@ export async function answerSearches(url: string, me: LocalIdentity, model: Mode
       embedded += facts.length;
     }
     for (const i of asked) {
-      const q = (await model.embed([String(i.input)]))[0]!;
+      const q = (await model.embed([String(i.input)], 'query'))[0]!;
       const hits = docs.map((d) => ({ kind: d.kind, id: d.id, score: Math.round(cosine(q, index.get(embeddingKey(model.id, d.text))!) * 1000) / 1000 }))
         .filter((h) => h.score > 0)
         .sort((x, y) => y.score - x.score || (x.id < y.id ? -1 : 1))
@@ -134,11 +134,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   }
   const say = (s: string) => process.stdout.write(`${s}\n`);
   if (process.argv.includes('--once') || process.env.ROFLENOX_ONCE === '1') {
-    say(`answered ${await answerSearches(url, me, HASH, say)}`);
+    say(`answered ${await answerSearches(url, me, await modelFromEnv(), say)}`);
   } else {
     const every = Number(process.env.ROFLENOX_POLL_MS ?? 5000);
+    const model = await modelFromEnv();
     for (;;) {
-      try { await answerSearches(url, me, HASH, say); } catch (e) { process.stderr.write(`roflenox-embedder: ${(e as Error).message}\n`); }
+      try { await answerSearches(url, me, model, say); } catch (e) { process.stderr.write(`roflenox-embedder: ${(e as Error).message}\n`); }
       await new Promise((r) => setTimeout(r, every));
     }
   }

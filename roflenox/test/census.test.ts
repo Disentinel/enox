@@ -20,7 +20,10 @@ test('a census of the source finds no second store, queue, wire format or proof 
     'src/plant-queue.ts': 'setInterval(() => drain(jobs), 100);',
     'src/plant-wire.ts': "res.writeHead(200, { 'content-type': 'application/x-msgpack' });",
     'src/plant-who.ts': "if (req.headers['x-api-key'] !== KEY) throw new Error('no');",
+    'executors/plant/package.json': JSON.stringify({ name: 'plant', dependencies: { redis: '^4.0.0' } }),
   });
-  assert.deepEqual([...new Set(plants.map((p) => p.kind))].sort(), ['queue', 'store', 'who', 'wire']);
+  assert.deepEqual([...new Set(plants.map((p) => p.kind))].sort(), ['dependency', 'queue', 'store', 'who', 'wire']);
+  // The executors are scanned too, not only the core.
+  assert.ok(Object.keys(sources(ROOT)).some((f) => f.startsWith('executors/')), 'executors/ is in the census');
   assert.equal(compare([...found, ...plants], allowed).extra.length, plants.length);
 });

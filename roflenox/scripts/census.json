@@ -1,5 +1,5 @@
 {
- "note": "Every place in src/ that writes to disk, runs a timer or queue, speaks a wire format, or checks who someone is. npm run census fails on any place not listed here, and on any listed place no longer found (r_minimal_parts).",
+ "note": "Every place in src/ and executors/ that writes to disk, runs a timer or queue, speaks a wire format, or checks who someone is. npm run census fails on any place not listed here, and on any listed place no longer found (r_minimal_parts). A dependency of an executor package is listed with its reason; the core has none (test/hermetic.test.ts).",
  "allowed": [
   {
    "file": "src/backup.ts",
@@ -150,6 +150,12 @@
    "kind": "store",
    "match": ".writeFileSync(",
    "why": "seal: writes a sealed envelope FILE for the user to carry (an output, not a store)"
+  },
+  {
+   "file": "executors/embedder/package.json",
+   "kind": "dependency",
+   "match": "@huggingface/transformers@3.7.0",
+   "why": "the embedder's learned model (r_semantic_search): runs a multilingual sentence encoder locally via ONNX. Pinned at 3.7.0 because its onnxruntime-node 1.21 still ships macOS x64 (4.x does not). Separate process and package; the core stays zero-deps"
   }
  ]
 }

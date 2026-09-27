@@ -51,7 +51,18 @@ function perfTestNames(): Set<string> {
 /** A private copy of the tree for one worker; mutants never touch ROOT. */
 function copyTree(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'roflenox-mutant-'));
-  for (const d of ['src', 'test', 'vendor', 'scripts', 'executors']) fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true });
+  // An executor's installed dependencies and model cache are not source: they
+  // are linked, not copied (hundreds of MB), and no mutant edits them.
+  const heavy = (p: string) => /[\\/](node_modules|\.models)$/.test(p);
+  for (const d of ['src', 'test', 'vendor', 'scripts', 'executors']) {
+    fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true, filter: (p) => !heavy(p) });
+  }
+  for (const ex of fs.readdirSync(path.join(ROOT, 'executors'))) {
+    for (const h of ['node_modules', '.models']) {
+      const from = path.join(ROOT, 'executors', ex, h);
+      if (fs.existsSync(from)) fs.symlinkSync(from, path.join(dir, 'executors', ex, h));
+    }
+  }
   fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(dir, 'package.json'));
   return dir;
 }
@@ -60,7 +71,9 @@ const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** Test files that define each named test. */
 function filesFor(tree: string, names: string[]): string[] {
-  const files = ['test', 'test/perf'].flatMap((d) => fs.existsSync(path.join(tree, d))
+  const executorTests = fs.existsSync(path.join(tree, 'executors'))
+    ? fs.readdirSync(path.join(tree, 'executors')).map((ex) => `executors/${ex}/test`) : [];
+  const files = ['test', 'test/perf', ...executorTests].flatMap((d) => fs.existsSync(path.join(tree, d))
     ? fs.readdirSync(path.join(tree, d)).filter((f) => f.endsWith('.test.ts')).map((f) => path.join(d, f)) : []);
   return files.filter((f) => names.some((n) => fs.readFileSync(path.join(tree, f), 'utf8').includes(n)));
 }

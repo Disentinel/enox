@@ -1839,6 +1839,62 @@
    "red": [
     "a name made only of invisible or text-direction characters is refused, the same way by the client and the node"
    ]
+  },
+  {
+   "id": "M134",
+   "title": "r_semantic_search: a wildcard export covers the node's own relations (the search leaks)",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     ", export[${book}](\"*\", A), not reserved[${SYSTEM_BOOK}](Rel).`",
+     ", export[${book}](\"*\", A).`"
+    ]
+   ],
+   "red": [
+    "a search the operator asks is never published by a wildcard export"
+   ]
+  },
+  {
+   "id": "M135",
+   "title": "r_semantic_search: an unknown roflenox: relation is admitted (past the closed list)",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "  if (f.relation.startsWith('roflenox:') && !(RESERVED as readonly string[]).includes(f.relation)) {",
+     "  if (false) {"
+    ]
+   ],
+   "red": [
+    "a search the operator asks is never published by a wildcard export"
+   ]
+  },
+  {
+   "id": "M136",
+   "title": "r_semantic_search: the search relation missing from the reserved list",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "    ...NOT_BY_WILDCARD.map((r) => `reserved[${SYSTEM_BOOK}](${roflString(r)}).`),",
+     "    ...NOT_BY_WILDCARD.filter((r) => r !== 'roflenox:search').map((r) => `reserved[${SYSTEM_BOOK}](${roflString(r)}).`),"
+    ]
+   ],
+   "red": [
+    "a search the operator asks is never published by a wildcard export"
+   ]
+  },
+  {
+   "id": "M137",
+   "title": "r_semantic_search: the embedder quietly runs the hash model (text, not meaning)",
+   "file": "executors/embedder/embed.ts",
+   "edits": [
+    [
+     "  return name === 'hash' ? HASH : learned(name);",
+     "  return HASH;"
+    ]
+   ],
+   "red": [
+    "a meaning search finds a fact that shares none of the query's words"
+   ]
   }
  ]
 }

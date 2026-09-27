@@ -42,6 +42,16 @@ export const EXPORT = 'roflenox:export';
 export const EMBEDDER = 'roflenox:embedder';
 export const SEARCH = 'roflenox:search';
 export const EMBEDDING = 'roflenox:embedding';
+/** The node's own relations — a closed list: no other roflenox: relation is
+ *  admitted, so none can slip past a rule that names them. */
+export const RESERVED = ['roflenox:rule', 'roflenox:trust_rules', GRANT, DELEGATE, EXPORT, 'roflenox:follow',
+  'roflenox:result', EMBEDDER, SEARCH, EMBEDDING] as const;
+/** What a wildcard export ("*") never covers: every node relation but the
+ *  export rule itself. A search, a rule, a grant, a trust or a follow says
+ *  what its author asked or allowed, not what they published — only an
+ *  export that NAMES the relation publishes it. The export rule is what a
+ *  reader needs to know what is published, and says nothing else. */
+export const NOT_BY_WILDCARD = RESERVED.filter((r) => r !== EXPORT);
 const TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 export class Refusal extends Error {
@@ -102,6 +112,9 @@ export function checkRelation(f: Fact, at: string): void {
     if (f[k].replace(INVISIBLE, '').length === 0) {
       throw new Refusal(400, 'not_a_relation', `${at}: ${k} is blank — made only of invisible or text-direction characters`);
     }
+  }
+  if (f.relation.startsWith('roflenox:') && !(RESERVED as readonly string[]).includes(f.relation)) {
+    throw new Refusal(400, 'not_a_relation', `${at}: ${f.relation} is not one of the node's relations (${RESERVED.join(', ')}); the roflenox: prefix is reserved`);
   }
   for (const [k, max] of [['source', MAX_ENTITY], ['relation', MAX_RELATION]] as const) {
     const v = f[k];

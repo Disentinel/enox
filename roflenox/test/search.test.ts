@@ -8,7 +8,7 @@ import * as path from 'node:path';
 import { spawnExecutor } from '../src/executor.ts';
 import { publish } from '../src/client.ts';
 import type { Fact } from '../src/facts.ts';
-import { DAY, grant, identityAt, iso, post, serveAsIs, start, tmpDir, type Clock } from './helpers.ts';
+import { DAY, get, grant, identityAt, iso, post, serveAsIs, start, tmpDir, type Clock } from './helpers.ts';
 
 const EMBEDDER = path.join(import.meta.dirname, '..', 'executors', 'embedder', 'embedder.ts');
 const wall = { get t() { return Date.now(); }, set t(_v: number) { /* the wall clock */ } } as Clock;
@@ -18,8 +18,12 @@ const f = (source: string, relation: string, target: string): Fact => ({ source,
 const entity = (id: string, label: string, description: string) =>
   [f(E(id), 'enox:label', label), f(E(id), 'enox:description', description), f(E(id), 'enox:type', 'artifact'), f(E(id), 'enox:domain', 'example')];
 
+/** The embedder with its HASH model: this suite needs neither the network
+ *  nor a model (test/hermetic.test.ts). The learned model's own check —
+ *  "a meaning search finds a fact that shares none of the query's words" —
+ *  is in executors/embedder/test. */
 async function runEmbedder(url: string, dataDir: string): Promise<string> {
-  const child = spawnExecutor({ url, dataDir, script: EMBEDDER, cpuSeconds: 30, env: { ROFLENOX_ONCE: '1' } });
+  const child = spawnExecutor({ url, dataDir, script: EMBEDDER, cpuSeconds: 30, env: { ROFLENOX_ONCE: '1', ROFLENOX_EMBED_MODEL: 'hash' } });
   let out = '';
   child.stdout!.on('data', (d) => { out += d; });
   child.stderr!.on('data', (d) => { out += d; });
@@ -119,5 +123,48 @@ test('a meaning search returns a fact after the embedder answers its intent, and
     const rebuilt = await search(a.url, Q);
     assert.equal(rebuilt.index, 'embedder:embedder-two');
     assert.deepEqual(strip(rebuilt), strip(answered));
+  } finally { await a.stop(); }
+});
+
+test('a search the operator asks is never published by a wildcard export', async () => {
+  const a = await start(tmpDir('search-leak'), 'alice', { clock: wall });
+  try {
+    const token = a.node.operatorToken();
+    const Q = 'divorce lawyer near me';
+    // alice publishes everything ("*" to "public") and names an embedder.
+    await publish(a.url, a.me, [
+      { source: '*', relation: 'roflenox:export', target: 'public', perspective: 'policy', confidence: 1 },
+      f('embedder', 'roflenox:embedder', 'search'),
+      { source: 'bob', relation: 'roflenox:rule', target: 'likes2(X) :- edge(F, X, "likes", T).', perspective: 'rules', confidence: 1 },
+      grant('embedder', iso(Date.now() + DAY)),
+    ]);
+    // (A batch leaves whole or not at all: the ordinary fact goes on its own.)
+    await publish(a.url, a.me, [f('alice', 'likes', 'tea')]);
+    const r = await fetch(`${a.url}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'semantic_search', arguments: { query: Q } } }) });
+    assert.equal(JSON.parse(((await r.json()) as { result: { content: { text: string }[] } }).result.content[0]!.text).index, 'pending');
+    assert.equal((await post(a.url, '/ask', { query: 'edge(F, K, "roflenox:search", Q)' })).body.rows instanceof Array, true);
+    assert.equal(((await post(a.url, '/ask', { query: 'edge(F, K, "roflenox:search", Q)' })).body.rows as unknown[]).length, 1, 'the search is a fact of alice\'s');
+
+    // Nobody else sees it: not the public feed, not an anonymous ask.
+    const feed = await get(a.url, '/feeds/alice', { as: null });
+    assert.equal(feed.status, 200);
+    const published = JSON.stringify(feed.body);
+    assert.match(published, /likes/, 'the wildcard does publish ordinary facts');
+    for (const secret of [Q, 'roflenox:search', 'roflenox:grant', 'roflenox:rule', 'roflenox:embedder']) {
+      assert.ok(!published.includes(secret), `the public feed carries ${secret}`);
+    }
+    const anon = async (q: string) => (await post(a.url, '/ask', { query: q }, { as: null })).body.rows as unknown[];
+    assert.equal((await anon('edge(F, S, "likes", T)')).length, 1, 'control: an anonymous reader sees exported facts');
+    assert.deepEqual(await anon('edge(F, K, "roflenox:search", Q)'), []);
+    assert.deepEqual(await anon('edge(F, S, "roflenox:grant", T)'), []);
+
+    // The list of the node's relations is closed: another roflenox: relation,
+    // which the wildcard exclusion might not know, is not admitted at all.
+    await assert.rejects(publish(a.url, a.me, [f('alice', 'roflenox:private_note', 'x')]), /not one of the node's relations/);
+
+    // Only an export that NAMES the relation publishes it.
+    await publish(a.url, a.me, [{ source: 'roflenox:search', relation: 'roflenox:export', target: 'public', perspective: 'policy', confidence: 1 }]);
+    assert.equal((await anon('edge(F, K, "roflenox:search", Q)')).length, 1);
   } finally { await a.stop(); }
 });

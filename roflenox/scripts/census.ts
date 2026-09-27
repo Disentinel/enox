@@ -1,8 +1,10 @@
 // The census (r_minimal_parts): one process, one log, one engine, one wire
 // format (the signed batch, carried as JSON), one proof of who (an identity
-// signature). This scans src/ for every place that could be a SECOND one of
+// signature). This scans src/ and executors/ for every place that could be a SECOND one of
 // these — a write to disk, a queue or timer loop, a non-JSON wire format, a
-// check of who someone is — and compares what it finds with
+// check of who someone is — and, in the executor packages under executors/
+// (part of the system too), every dependency they declare. It compares what
+// it finds with
 // scripts/census.json, where every place that is allowed is listed with its
 // reason. Anything found and not listed, or listed and no longer found, fails.
 //
@@ -23,6 +25,17 @@ export interface Finding { file: string; kind: string; match: string }
 export function scan(files: Record<string, string>): Finding[] {
   const out = new Map<string, Finding>();
   for (const [file, text] of Object.entries(files)) {
+    if (file.endsWith('package.json')) {
+      // A dependency is a part the system did not have: each one is declared.
+      const pkg = JSON.parse(text) as Record<string, Record<string, string> | undefined>;
+      for (const k of ['dependencies', 'optionalDependencies', 'peerDependencies', 'bundleDependencies', 'bundledDependencies']) {
+        for (const [name, version] of Object.entries(pkg[k] ?? {})) {
+          const f = { file, kind: 'dependency', match: `${name}@${version}` };
+          out.set(`${file}\u0000dependency\u0000${f.match}`, f);
+        }
+      }
+      continue;
+    }
     const code = text.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');   // comments do not count
     for (const [kind, re] of Object.entries(SIGNATURES)) {
       for (const m of code.matchAll(re)) {
@@ -35,8 +48,14 @@ export function scan(files: Record<string, string>): Finding[] {
 }
 
 export function sources(root: string): Record<string, string> {
-  const dir = path.join(root, 'src');
-  return Object.fromEntries(fs.readdirSync(dir).filter((f) => f.endsWith('.ts')).map((f) => [`src/${f}`, fs.readFileSync(path.join(dir, f), 'utf8')]));
+  const read = (rel: string) => [rel, fs.readFileSync(path.join(root, rel), 'utf8')] as const;
+  const out = fs.readdirSync(path.join(root, 'src')).filter((f) => f.endsWith('.ts')).map((f) => read(`src/${f}`));
+  // Each executor package: its code (not its tests) and its manifest.
+  const ex = path.join(root, 'executors');
+  for (const pkg of fs.existsSync(ex) ? fs.readdirSync(ex) : []) {
+    for (const f of fs.readdirSync(path.join(ex, pkg)).filter((f) => f.endsWith('.ts') || f === 'package.json')) out.push(read(`executors/${pkg}/${f}`));
+  }
+  return Object.fromEntries(out);
 }
 
 export interface Allowed extends Finding { why: string }

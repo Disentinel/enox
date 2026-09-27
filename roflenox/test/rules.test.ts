@@ -128,7 +128,9 @@ test('a mirrored rule does not run until the reader trusts its author for rules,
   const a = await start(tmpDir('trust-a'), 'pubr');
   const b = await start(tmpDir('trust-b'), 'reader');
   try {
-    await publish(a.url, a.me, [fact('ada', 'knows', 'grace'), rule('knowers', 'knower(X) :- edge(F, X, "knows", T).'), exportRule('*', 'public')], () => a.clock.t);
+    await publish(a.url, a.me, [fact('ada', 'knows', 'grace'), rule('knowers', 'knower(X) :- edge(F, X, "knows", T).'), exportRule('*', 'public'),
+      // A wildcard never publishes a rule: it is published by name.
+      exportRule('roflenox:rule', 'public')], () => a.clock.t);
     const knowers = async (url: string) => ((await post(url, '/ask', { query: 'knower(X)' })).body.rows as { cells: string[] }[]).map((r) => r.cells[0]);
     assert.deepEqual(await knowers(a.url), ['ada'], 'control: at home, the operator\'s own rule runs');
 
