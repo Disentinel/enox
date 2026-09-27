@@ -954,6 +954,8 @@ The checks that exist:
 - "a key file that is not the identity the log knows stops the node" lives in "roflenox/test/durability.test.ts".
 - "two nodes: publish on A, mirror into B, identical ask answers; mirrored batches keep their original signer\" guards `r_follow`.
 - "two nodes: publish on A, mirror into B, identical ask answers; mirrored batches keep their original signer\" lives in "roflenox/test/federation.test.ts".
+- "a checkpoint one second past the window is refused and one second inside it mirrors" guards `r_static_feed`.
+- "a checkpoint one second past the window is refused and one second inside it mirrors" lives in "roflenox/test/freshness.test.ts".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" guards `r_asserted_by`.
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" lives in "personal-node/src/mcp/main-graph.test.ts".
 
