@@ -715,6 +715,7 @@ The queue:
 - `r_revocation_receipt` is accepted at "85443bd2b257d98972e1de35b2ad3b5feace3e36".
 - `r_static_feed` is accepted at "c42404137f12fcbf7962f8fc936c480bb83f3e13".
 - `r_default_deny` is accepted at "a1bb4a0d379138676deab6a7b2bf05915362a5f7".
+- `r_chain` is accepted at "68809976741d5ab863ba19d57a9920566d4afa60".
 - `r_identity_names` is rejected at "4800a6841d8476258cb98c07a16cfaf815353c4e".
 - `r_rotation` is rejected at "db71b41d7281fe72aae5d4d4302303045a5fb4ce".
 
@@ -977,6 +978,8 @@ The checks that exist:
 - "a checkpoint one second past the window is refused and one second inside it mirrors" lives in "roflenox/test/freshness.test.ts".
 - "an anonymous caller of every open endpoint learns the node's own name and liveness and nothing about the identities, facts or batches it holds" guards `r_default_deny`.
 - "an anonymous caller of every open endpoint learns the node's own name and liveness and nothing about the identities, facts or batches it holds" lives in "roflenox/test/access.test.ts".
+- "a node given a second signed successor of the same batch keeps both signatures as fork proof and marks every answer over that book" guards `r_chain`.
+- "a node given a second signed successor of the same batch keeps both signatures as fork proof and marks every answer over that book" lives in "roflenox/test/admission.test.ts".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" guards `r_asserted_by`.
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" lives in "personal-node/src/mcp/main-graph.test.ts".
 
