@@ -61,6 +61,7 @@ Declared as facts:
 - `r_relation_primary` is to be checked by "a name made only of invisible or text-direction characters is refused, the same way by the client and the node".
 - `r_asserted_by` is about `data_model`.
 - `r_asserted_by` binds as `must`.
+- `r_asserted_by` is to be checked by "every admitted fact reads back asserted by the identity that signed its batch, whatever the batch claims".
 - `r_asserted_by` says "every assertion carries asserted_by; an assertion without it is rejected".
 - `r_asserted_by` is stated in "PROTOCOL.md#1.2".
 - `r_fact_id_derived` is about `data_model`.
@@ -100,6 +101,7 @@ Declared as facts:
 - `r_engine_crash_recovery` is to be checked by "killing the engine during an ask never yields a plain answer: the asker gets an error or unknown, and the next ask is answered".
 - `r_atomic_write` is about `durability`.
 - `r_atomic_write` binds as `must`.
+- `r_atomic_write` is to be checked by "a node killed at each write step reopens with the whole batch or none of it".
 - `r_atomic_write` says "a process killed during any write leaves the previous consistent version readable".
 - `r_atomic_write` is stated in "incident 2026-09-18".
 - `r_backup` is about `durability`.
@@ -155,6 +157,7 @@ Declared as facts:
 - `r_verify_without_author` is to be checked by "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one".
 - `r_revocation_receipt` is about `transfer`.
 - `r_revocation_receipt` binds as `must`.
+- `r_revocation_receipt` is to be checked by "a revoked grant answers 410 on the next read, while facts read before the revocation still verify against their batch digest".
 - `r_revocation_receipt` says "revoking a share stops future reads with status 410; what was already read stays attested by its digest".
 - `r_revocation_receipt` is stated in "PROTOCOL.md#1.2".
 
@@ -395,7 +398,8 @@ Declared as facts:
 - `r_static_feed` binds as `must`.
 - `r_static_feed` says "a feed on dumb static hosting is mirrored under a signed checkpoint of its head that the publisher renews on a schedule; a checkpoint older than the checkpoint window is refused; a live challenge is used whenever the publisher is reachable".
 - `r_static_feed` is stated in "verification 2026-09-26: only the home node can attest, which contradicts static nodes being first-class".
-- `r_static_feed` leaves open "the checkpoint window".
+- `r_static_feed` says "the checkpoint window is 24 hours by default and set per node".
+- `r_static_feed` is to be checked by "a checkpoint one second past the window is refused and one second inside it mirrors".
 - `r_static_feed` is to be checked by "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one".
 - `r_challenge_stateless` is about `operations`.
 - `r_challenge_stateless` binds as `must`.
@@ -409,7 +413,8 @@ Declared as facts:
 - `r_identity_names` binds as `must`.
 - `r_identity_names` says "users address identities by name; in normal operation no key, fingerprint or signature is shown or asked for".
 - `r_identity_names` is stated in "owner 2026-09-26".
-- `r_identity_names` leaves open "the name format for people, hosts and agents".
+- `r_identity_names` says "a name is 1 to 128 ASCII letters, digits and the marks . _ @ -, starting with a letter or digit; one format for people, hosts and agents".
+- `r_identity_names` is to be checked by "a name with a space, a non-ASCII letter or an invisible mark is refused, and a name of 128 allowed characters is accepted".
 - `r_identity_names` is to be checked by "an end-to-end pull between two nodes whose transcript contains no key material".
 - `r_keys_automatic` is about `identity`.
 - `r_keys_automatic` binds as `must`.
@@ -446,7 +451,8 @@ Declared as facts:
 - `r_rotation` binds as `must`.
 - `r_rotation` says "a key is valid from one moment and invalid from another; rotation is a fact signed by the old key, and the user notices nothing".
 - `r_rotation` is stated in "owner 2026-09-26".
-- `r_rotation` leaves open "whose clock the validity interval is measured on".
+- `r_rotation` says "a key's validity is judged at the time its signer claims, and a claimed time later than the receipt plus 300 seconds is refused".
+- `r_rotation` is to be checked by "a batch signed after its key's invalid_from is refused, and one dated 301 seconds past its receipt is refused as future-dated".
 - `r_rotation` is to be checked by "a rotation in the middle of a chain is followed without a warning".
 - `r_recovery` is about `identity`.
 - `r_recovery` binds as `must`.
@@ -468,7 +474,8 @@ Declared as facts:
 - `r_key_change_loud` binds as `must`.
 - `r_key_change_loud` says "first contact is bootstrapped over HTTPS and pinned; a key that changes without a signed rotation stops the pull and says why".
 - `r_key_change_loud` is stated in "best practice, SSH known_hosts and did:web".
-- `r_key_change_loud` leaves open "how first contact works for a node without HTTPS".
+- `r_key_change_loud` says "without HTTPS first contact needs an invitation link that carries the key id; the user copies a link and never sees a key; a plain-HTTP first contact without one is refused".
+- `r_key_change_loud` is to be checked by "a first contact over plain HTTP is refused without an invitation link and pins with one whose key id matches".
 - `r_key_change_loud` is to be checked by "a node that swaps its key without rotation is refused with a whynot".
 - `r_grants` is about `access`.
 - `r_grants` binds as `must`.
@@ -625,6 +632,13 @@ The queue:
 - `r_uc_observability` is queued at 60.
 - `r_rule_budget` is queued at 5.
 - `r_answer_limits` is queued at 6.
+- `r_key_change_loud` is queued at 70.
+- `r_atomic_write` is queued at 71.
+- `r_asserted_by` is queued at 72.
+- `r_revocation_receipt` is queued at 73.
+- `r_rotation` is queued at 74.
+- `r_static_feed` is queued at 75.
+- `r_identity_names` is queued at 76.
 
 Rejected after verification:
 
