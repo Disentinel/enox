@@ -741,6 +741,7 @@ The queue:
 - `r_rotation` is accepted at "4f7c3617e44a355a89ed563c133438d5e58bd6fe".
 - `r_identity_names` is accepted at "2db9e9f9d7518478a277e98369bccc38681654b1".
 - `r_freshness` is accepted at "90c44041770a0cd1c0c83595b88f17c9a5e4519c".
+- `r_no_orphan_tests` is accepted at "401323a64dfa1c3eea9ab4aea24143fc54818ed7".
 - `r_domain_vouch` is rejected at "806c6af8065554dfda58a02fa06d1e7f591fdc32".
 - `r_domain_vouch` is rejected at "e63b41e1564229c02ffde8d8463f71ef03984823".
 - `r_no_orphan_tests` is rejected at "2db9e9f9d7518478a277e98369bccc38681654b1".
@@ -1070,6 +1071,14 @@ The checks that exist:
 - "ada@example.org, Ada@Example.ORG and a fullwidth spelling of it are one identity; ada@пример.рф is accepted and shown in Cyrillic; bot.ada@example.org is its delegated agent's name" lives in "roflenox/test/keys.test.ts".
 - "a live batch dated 301 seconds ahead of its receipt is refused as future-dated, while one dated 301 seconds behind is refused as stale with a request to re-attest" guards `r_freshness`.
 - "a live batch dated 301 seconds ahead of its receipt is refused as future-dated, while one dated 301 seconds behind is refused as stale with a request to re-attest" lives in "roflenox/test/admission.test.ts".
+- "a test that guards no requirement fails the spec gate, and linking it passes" guards `r_no_orphan_tests`.
+- "a test that guards no requirement fails the spec gate, and linking it passes" lives in "spec/check.test.mjs".
+- "a test the scanner cannot read, or one the runner lists and the scanner does not, fails the spec gate" guards `r_no_orphan_tests`.
+- "a test the scanner cannot read, or one the runner lists and the scanner does not, fails the spec gate" lives in "spec/check.test.mjs".
+- "an accepted requirement whose checks guard no existing test fails the spec gate" guards `r_no_orphan_tests`.
+- "an accepted requirement whose checks guard no existing test fails the spec gate" lives in "spec/check.test.mjs".
+- "a test that matches a planned check of an accepted requirement but has no guards line is an orphan, and an accepted requirement with one unguarded planned check fails the spec gate" guards `r_no_orphan_tests`.
+- "a test that matches a planned check of an accepted requirement but has no guards line is an orphan, and an accepted requirement with one unguarded planned check fails the spec gate" lives in "spec/check.test.mjs".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" guards `r_asserted_by`.
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" lives in "personal-node/src/mcp/main-graph.test.ts".
 
