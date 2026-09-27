@@ -677,6 +677,7 @@ The queue:
 - `r_key_change_loud` is accepted at "2873ca82a93a210e7954cd7dc7e6d9f33d604569".
 - `r_asserted_by` is accepted at "47c198a247231c85bf38ef70395a3fb9514f5306".
 - `r_confidence` is accepted at "27f4b5e57621eae2ebf937f99d7cf3540c766a1e".
+- `r_revocation_receipt` is accepted at "85443bd2b257d98972e1de35b2ad3b5feace3e36".
 
 Rejected after verification:
 
