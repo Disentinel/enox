@@ -233,6 +233,7 @@ Declared as facts:
 - `r_uc_observability` is to be checked by "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why".
 - `r_uc_observability` is to be checked by "a fleet rule written once covers every followed host, including a host followed after the rule was written".
 - `r_uc_observability` is to be checked by "a followed feed that no rule reads is reported as unknown, never as all-clear".
+- `r_uc_observability` is to be checked by "a follow retired with confidence 0 stops every rule ranging over that host's book".
 - `r_import` is about `hybrid`.
 - `r_import` binds as `must`.
 - `r_import` says "an existing Enox node's graph, with entities, assertions, confidence, perspective and provenance, is imported into the log as signed batches of the importing identity, each original author kept as a fact about the fact; the import is repeatable and gives the same log for the same input".
@@ -628,6 +629,7 @@ The queue:
 Rejected after verification:
 
 - `r_uc_observability` is rejected at "ef2147d2f7ff0e6faa68971239964306da5a4c0d".
+- `r_uc_observability` is rejected at "1ab2863c26a2db55074d9d7dbd4a72bcf4f46aa0".
 - `r_semantic_search` is rejected at "4170fad256ebfbac06d77bc0fefac9d2fac388d2".
 - `r_relation_primary` is rejected at "c7f2ea68049192b5ad4dffb5164ae8ef10fd14a3".
 
