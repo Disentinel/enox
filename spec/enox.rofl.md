@@ -476,6 +476,8 @@ Declared as facts:
 - `r_key_change_loud` is stated in "best practice, SSH known_hosts and did:web".
 - `r_key_change_loud` says "without HTTPS first contact needs an invitation link that carries the key id; the user copies a link and never sees a key; a plain-HTTP first contact without one is refused".
 - `r_key_change_loud` is to be checked by "a first contact over plain HTTP is refused without an invitation link and pins with one whose key id matches".
+- `r_key_change_loud` says "a node pins an identity it does not know only on its operator's word or a delegation from an identity it already pins; an anonymous write, introduction or pushed feed naming an unknown identity is refused and pins nothing".
+- `r_key_change_loud` is to be checked by "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins".
 - `r_key_change_loud` is to be checked by "a node that swaps its key without rotation is refused with a whynot".
 - `r_grants` is about `access`.
 - `r_grants` binds as `must`.
@@ -639,6 +641,7 @@ The queue:
 - `r_rotation` is queued at 74.
 - `r_static_feed` is queued at 75.
 - `r_identity_names` is queued at 76.
+- `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 
 Rejected after verification:
 
