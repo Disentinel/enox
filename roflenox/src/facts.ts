@@ -17,6 +17,9 @@ export interface Fact {
 }
 
 const FIELDS = ['confidence', 'perspective', 'relation', 'source', 'target'];
+/** The longest source (an entity: a name, a URI) and relation (a type). */
+export const MAX_ENTITY = 2048;
+export const MAX_RELATION = 256;
 
 // Access facts: ordinary signed facts with a reserved relation, admitted into
 // the OWNER's book like any other, so an identity can only speak about its own.
@@ -70,7 +73,7 @@ export function factId(f: { source: string; relation: string; target: string }):
 }
 
 /** Throws a 400 Refusal naming the line if `o` is not a well-formed fact. */
-export function checkFact(o: unknown, line: number): Fact {
+export function checkFact(o: unknown, line: number, admission = true): Fact {
   const at = `line ${line}`;
   if (o === null || typeof o !== 'object' || Array.isArray(o)) {
     throw new Refusal(400, 'malformed_fact', `${at}: a fact is a JSON object`);
@@ -85,6 +88,20 @@ export function checkFact(o: unknown, line: number): Fact {
     if (typeof f[k] !== 'string' || (f[k] as string).length === 0) {
       throw new Refusal(400, 'malformed_fact', `${at}: ${k} must be a non-empty string`);
     }
+  }
+  // A line is a directed typed relation between two entities, not a document
+  // (r_relation_primary): the source is an entity — a name or id, one line, of
+  // bounded length — the relation a type of the same kind, and the target an
+  // entity or a value (Enox keeps attributes as relations to values: a label,
+  // a description). None of them is blank. This is ADMISSION's rule: a batch
+  // the log already holds is not judged again on replay (the log is truth).
+  if (admission) for (const k of ['source', 'relation', 'target']) {
+    if ((f[k] as string).trim().length === 0) throw new Refusal(400, 'not_a_relation', `${at}: ${k} is blank`);
+  }
+  if (admission) for (const [k, max] of [['source', MAX_ENTITY], ['relation', MAX_RELATION]] as const) {
+    const v = f[k] as string;
+    if (/[\u0000-\u001f\u007f]/.test(v)) throw new Refusal(400, 'not_a_relation', `${at}: ${k} is an entity or a type, one line without control characters`);
+    if (v.length > max) throw new Refusal(400, 'not_a_relation', `${at}: ${k} is ${v.length} characters; an entity or a type is at most ${max} — a document is a value, the target of a relation`);
   }
   if ((f.relation === GRANT || f.relation === DELEGATE) && (!TIME.test(f.target as string) || Number.isNaN(Date.parse(f.target as string)))) {
     throw new Refusal(400, 'malformed_fact', `${at}: a grant's target is its expiry, RFC 3339 UTC with milliseconds`);
@@ -105,7 +122,7 @@ export function toJsonl(facts: Fact[]): string {
 }
 
 /** Parse and validate canonical JSONL. Every refusal is a 400 naming the line. */
-export function parseJsonl(text: string): Fact[] {
+export function parseJsonl(text: string, admission = true): Fact[] {
   if (text.length === 0) throw new Refusal(400, 'empty_batch', 'a batch has at least one fact');
   if (!text.endsWith('\n')) throw new Refusal(400, 'non_canonical', 'every line, including the last, ends in \\n');
   const lines = text.slice(0, -1).split('\n');
@@ -115,7 +132,7 @@ export function parseJsonl(text: string): Fact[] {
     try { o = JSON.parse(l); } catch (e) {
       throw new Refusal(400, 'malformed_fact', `line ${i + 1}: not JSON (${(e as Error).message})`);
     }
-    const f = checkFact(o, i + 1);
+    const f = checkFact(o, i + 1, admission);
     let canon: string;
     try { canon = canonicalize(f); } catch (e) {
       if (e instanceof JcsError) throw new Refusal(400, 'non_canonical', `line ${i + 1}: ${e.message}`);

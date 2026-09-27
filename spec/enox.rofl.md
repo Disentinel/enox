@@ -30,6 +30,7 @@ Declared as facts:
 - <a id="kind"></a>A requirement R is of a kind K
 - <a id="queued"></a>A requirement R is queued at a rank N
 - <a id="accepted"></a>A requirement R is accepted at a revision V
+- <a id="rejected"></a>A requirement R is rejected at a revision V
 
 > Вид требования, закрытый список: `feature` — что можно делать; `model` — что
 > такое данные; `security` — защита от враждебной стороны; `reliability` —
@@ -57,6 +58,7 @@ Declared as facts:
 - `r_relation_primary` says "the primary unit of data is a directed typed relation between two entities, not a document".
 - `r_relation_primary` is stated in "PROTOCOL.md#1.0".
 - `r_relation_primary` is to be checked by "a batch line that is not a relation between two entities is refused".
+- `r_relation_primary` is to be checked by "a name made only of invisible or text-direction characters is refused, the same way by the client and the node".
 - `r_asserted_by` is about `data_model`.
 - `r_asserted_by` binds as `must`.
 - `r_asserted_by` says "every assertion carries asserted_by; an assertion without it is rejected".
@@ -613,6 +615,10 @@ The queue:
 - `r_uc_observability` is queued at 60.
 - `r_rule_budget` is queued at 5.
 - `r_answer_limits` is queued at 6.
+
+Rejected after verification:
+
+- `r_relation_primary` is rejected at "c7f2ea68049192b5ad4dffb5164ae8ef10fd14a3".
 
 Accepted after verification:
 

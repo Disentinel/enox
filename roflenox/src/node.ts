@@ -205,7 +205,7 @@ export class RoflenoxNode {
           manifest: s.manifest, reattest: r.reattest,
           ...(r.withheld ? { withheld: true } : { jsonl: s.jsonl, salt: s.salt }),
         }, r.received_at, r.withheld ? 'feed' : r.via === 'envelope' ? 'offline' : 'replay', s.pinned,
-          receipts.slice(ri + 1).filter((x) => x.identity === r.identity && x.kind !== 'identity').map((x) => x.digest));
+          receipts.slice(ri + 1).filter((x) => x.identity === r.identity && x.kind !== 'identity').map((x) => x.digest), true);
       } catch (e) {
         throw new Error(`log batch ${r.identity}/${r.digest} no longer verifies (${(e as Error).message}); refusing to start`);
       }
@@ -489,7 +489,7 @@ export class RoflenoxNode {
   }
 
   /** Steps 1–4. Pure with respect to node state: it only reads it. */
-  private verify(body: BatchBody, receivedAt: string, mode: Mode, pending: IdentityDoc | null = null, upcoming: string[] = []): Verified {
+  private verify(body: BatchBody, receivedAt: string, mode: Mode, pending: IdentityDoc | null = null, upcoming: string[] = [], replaying = false): Verified {
     if (!body || typeof body !== 'object') throw new Refusal(400, 'malformed_body', 'the body is {manifest, jsonl, identity?, reattest?}');
     const m = checkManifest(body.manifest);
     // A withheld batch is a chain link without content; only a feed carries one.
@@ -508,7 +508,7 @@ export class RoflenoxNode {
       if (batchDigest(body.salt, jsonl) !== m.digest) {
         throw new Refusal(422, 'digest_mismatch', 'the salt and JSONL do not hash to the signed digest');
       }
-      facts = parseJsonl(jsonl);
+      facts = parseJsonl(jsonl, !replaying);
       if (facts.length !== m.count) throw new Refusal(422, 'count_mismatch', `signed count ${m.count}, found ${facts.length}`);
     }
 

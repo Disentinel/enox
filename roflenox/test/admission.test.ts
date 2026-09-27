@@ -2,7 +2,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { bookOf } from '../src/identity.ts';
-import { batch, fact, get, identityAt, iso, post, start, tmpDir } from './helpers.ts';
+import { canonicalize } from '../src/jcs.ts';
+import { MAX_ENTITY, MAX_RELATION, newSalt } from '../src/facts.ts';
+import { Log } from '../src/log.ts';
+import { RoflenoxNode } from '../src/node.ts';
+import { batch, fact, get, identityAt, iso, post, start, T0, tmpDir } from './helpers.ts';
 
 test('a batch with one byte changed is rejected', async () => {
   const a = await start(tmpDir('byte'), 'node-a');
@@ -178,4 +182,61 @@ test('a batch whose prev was rewritten after signing is rejected', async () => {
     assert.equal(r2.body.error, 'bad_signature');
     assert.equal((await get(a.url, '/health')).body.facts, 2);
   } finally { await a.stop(); }
+});
+
+test('a batch line that is not a relation between two entities is refused', async () => {
+  const a = await start(tmpDir('relation'), 'node-a');
+  try {
+    const line = (o: unknown) => `${canonicalize(o)}\n`;
+    const rel = (source: string, relation: string, target: string) => ({ source, relation, target, perspective: 'test', confidence: 0.9 });
+    const send = async (jsonl: string) => {
+      const salt = newSalt();
+      const manifest = a.me.signBatch(jsonl, a.node.head(a.me.name), iso(a.clock.t), salt);
+      return post(a.url, '/batches', { manifest, jsonl, salt, identity: a.me.identityChain() });
+    };
+    const refused: [string, string, string][] = [
+      ['a triple written as an array', line(['alice', 'knows', 'bob']), 'malformed_fact'],
+      ['a document', line({ title: 'Notes', body: 'Alice knows Bob.', perspective: 'test', confidence: 0.9 }), 'malformed_fact'],
+      ['no target', line({ source: 'alice', relation: 'knows', perspective: 'test', confidence: 0.9 }), 'malformed_fact'],
+      ['a source that is not a name', line({ ...rel('x', 'knows', 'bob'), source: { name: 'alice' } }), 'malformed_fact'],
+      ['a blank source', line(rel('   ', 'knows', 'bob')), 'not_a_relation'],
+      ['a blank relation', line(rel('alice', ' \t', 'bob')), 'not_a_relation'],
+      ['a blank target', line(rel('alice', 'knows', '  ')), 'not_a_relation'],
+      ['a document as the source', line(rel('Meeting notes\n\nAlice said she knows Bob.', 'mentions', 'bob')), 'not_a_relation'],
+      ['a document as the relation', line(rel('alice', 'knows\nand also met', 'bob')), 'not_a_relation'],
+      ['a source longer than an entity', line(rel('a'.repeat(MAX_ENTITY + 1), 'knows', 'bob')), 'not_a_relation'],
+      ['a relation longer than a type', line(rel('alice', 'r'.repeat(MAX_RELATION + 1), 'bob')), 'not_a_relation'],
+      ['a good line, then a bad one', line(rel('alice', 'knows', 'bob')) + line(rel('alice', '', 'carol')), 'malformed_fact'],
+    ];
+    for (const [what, jsonl, error] of refused) {
+      const r = await send(jsonl);
+      assert.equal(r.status, 400, what);
+      assert.equal(r.body.error, error, `${what}: ${String(r.body.message)}`);
+      assert.match(String(r.body.message), jsonl.split('\n').length > 2 ? /^line 2/ : /^line 1/, what);
+    }
+    assert.equal((await get(a.url, '/health')).body.facts, 0, 'nothing of a refused batch was admitted');
+    // Through the operation surface too (the MCP assert tool is the same op).
+    const op = await post(a.url, '/op/assert', { facts: [rel('alice', 'knows', '')] });
+    assert.equal(op.status, 400);
+    const op2 = await post(a.url, '/op/assert', { facts: [rel('alice\nbob', 'knows', 'carol')] });
+    assert.equal(op2.body.error, 'not_a_relation');
+    // Controls: a relation between two entities is admitted, and so is a
+    // relation to a VALUE — a long, multi-line description is a target.
+    const description = `${'A long description.\n'.repeat(400)}`;
+    const ok = await send(line(rel('alice', 'knows', 'bob')) + line(rel('alice', 'enox:description', description)));
+    assert.equal(ok.status, 201, String(ok.body.message));
+    assert.equal((await get(a.url, '/health')).body.facts, 2);
+  } finally { await a.stop(); }
+
+  // The rule is admission's: a log that already holds such a line (written
+  // before the rule) still opens — replay does not judge it again.
+  const dir = tmpDir('relation-old-log');
+  const me = identityAt(dir, 'old');
+  const log = new Log(dir);
+  log.open();
+  const jsonl = `${canonicalize({ confidence: 0.5, perspective: 'test', relation: 'knows', source: 'alice', target: '  ' })}\n`;
+  const salt = newSalt();
+  log.append(me.signBatch(jsonl, null, iso(T0), salt), jsonl, iso(T0), me.identityDoc(), { salt });
+  const n = await RoflenoxNode.open({ dataDir: dir, now: () => T0 + 60_000 });
+  try { assert.equal((n.health() as { facts: number }).facts, 1); } finally { await n.close(); }
 });

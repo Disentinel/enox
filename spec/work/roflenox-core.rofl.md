@@ -29,3 +29,5 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_session_eviction`.
 - `roflenox_core` finished `r_session_eviction` at "4bed1e467dd5b09c5d04ffb0b83aa0fbb9d05056".
 - `roflenox_core` takes `r_bounded_memory`.
+- `roflenox_core` finished `r_bounded_memory` at "fe6c2b55716d73ef8889f3d3ae57a74eae083063".
+- `roflenox_core` takes `r_relation_primary`.

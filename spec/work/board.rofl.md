@@ -10,12 +10,13 @@ default: main
 > из сообщений. Ведущий пишет ранг и приёмку в `spec/enox.rofl.md`; каждый
 > исполнитель пишет только в свой файл `spec/work/<имя>.rofl.md`.
 > Загрузка: `npm run repl -- spec/enox.rofl.md spec/work/*.rofl.md`, затем
-> `? R is next`, `? R awaits review`, `? R is in progress by W`, `? R is blocked for W by T`.
+> `? R is next`, `? R awaits review`, `? R is in progress by W`, `? W is blocked on R by T`, `? R is rejected at V`.
 
 Declared as facts:
 
 - <a id="queued"></a>A requirement R is queued at a rank N
 - <a id="accepted"></a>A requirement R is accepted at a revision V
+- <a id="rejected"></a>A requirement R is rejected at a revision V
 - <a id="takes"></a>A worker W takes a requirement R
 - <a id="finished"></a>A worker W finished a requirement R at a revision V
 - <a id="blocked"></a>A worker W is blocked on a requirement R by a text T
@@ -28,6 +29,11 @@ Declared as facts:
 
 <a id="next"></a>A requirement R is next if R is open, unless R is behind some requirement.
 
-<a id="review"></a>A requirement R awaits review if some worker finished R at some revision, unless R is accepted at some revision.
+<a id="settled"></a>A requirement R is settled at a revision V either:
+
+1. if R is accepted at V;
+2. if R is rejected at V.
+
+<a id="review"></a>A requirement R awaits review if some worker finished R at a revision V, unless R is settled at V.
 
 <a id="progress"></a>A requirement R is in progress by a worker W if W takes R, unless W finished R at some revision.

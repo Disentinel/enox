@@ -1641,6 +1641,76 @@
    "red": [
     "a node holding 200000 facts stays under 1.5 GB of resident memory while idle"
    ]
+  },
+  {
+   "id": "M120",
+   "title": "r_relation_primary: a blank source, relation or target is let in",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "    if ((f[k] as string).trim().length === 0) throw",
+     "    if ((f[k] as string).length === 0) throw"
+    ]
+   ],
+   "red": [
+    "a batch line that is not a relation between two entities is refused"
+   ]
+  },
+  {
+   "id": "M121",
+   "title": "r_relation_primary: a multi-line document as source or relation is let in",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "    if (/[\\u0000-\\u001f\\u007f]/.test(v)) throw",
+     "    if (false) throw"
+    ]
+   ],
+   "red": [
+    "a batch line that is not a relation between two entities is refused"
+   ]
+  },
+  {
+   "id": "M122",
+   "title": "r_relation_primary: no bound on the length of an entity or a type",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "    if (v.length > max) throw",
+     "    if (v.length > max * 1000) throw"
+    ]
+   ],
+   "red": [
+    "a batch line that is not a relation between two entities is refused"
+   ]
+  },
+  {
+   "id": "M123",
+   "title": "r_relation_primary: replay judges the log again (an old log no longer opens)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      facts = parseJsonl(jsonl, !replaying);",
+     "      facts = parseJsonl(jsonl, true);"
+    ]
+   ],
+   "red": [
+    "a batch line that is not a relation between two entities is refused"
+   ]
+  },
+  {
+   "id": "M124",
+   "title": "r_relation_primary: batches are not judged at admission",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      facts = parseJsonl(jsonl, !replaying);",
+     "      facts = parseJsonl(jsonl, false);"
+    ]
+   ],
+   "red": [
+    "a batch line that is not a relation between two entities is refused"
+   ]
   }
  ]
 }
