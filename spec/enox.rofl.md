@@ -268,6 +268,12 @@ Declared as facts:
 - `r_interface_parity` is to be checked by "every operation in the table is reachable with the same name and schema over MCP, CLI and HTTP, and nothing outside the table is".
 - `r_typed` is about `spec`.
 - `r_typed` binds as `must`.
+- `r_no_orphan_tests` is about `spec`.
+- `r_no_orphan_tests` binds as `must`.
+- `r_no_orphan_tests` says "every test case in the repository guards at least one requirement; test names are static strings; the list of test cases is read by a deterministic scanner and compared with the test runner's own list, so a test the scanner cannot see fails the gate instead of passing unseen".
+- `r_no_orphan_tests` is stated in "owner 2026-09-27: a scanner lists every test case, and no test case is unlinked".
+- `r_no_orphan_tests` is to be checked by "a test that guards no requirement fails the spec gate, and linking it passes".
+- `r_no_orphan_tests` is to be checked by "a test the scanner cannot read, or one the runner lists and the scanner does not, fails the spec gate".
 - `r_typed` says "every requirement is of exactly one kind from the closed list".
 - `r_typed` is stated in "owner 2026-09-26".
 - `r_typed` is to be checked by "a requirement with an unknown kind fails typing".
@@ -607,6 +613,7 @@ Kinds of the requirements:
 - `r_interface_parity` is of `constraint`.
 - `r_mutation_gate` is of `gate`.
 - `r_typed` is of `gate`.
+- `r_no_orphan_tests` is of `gate`.
 - `r_balanced` is of `gate`.
 - `r_relation_primary` is of `model`.
 - `r_asserted_by` is of `model`.
@@ -673,6 +680,7 @@ The queue:
 - `r_confidence` is queued at 69.
 - `r_enox_compat` is queued at 80.
 - `r_mutation_gate` is queued at 81.
+- `r_no_orphan_tests` is queued at 76.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 - `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
 - `r_key_change_loud` is rejected at "6bfb1bbf0121614ca309293042adf2231ecc31d1".
@@ -919,6 +927,24 @@ The checks that exist:
 - "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins" lives in "roflenox/test/keys.test.ts".
 - "a delegation to a name outside the parent's own names pins nothing, and the invited pull of that name's real owner still pins" guards `r_key_change_loud`.
 - "a delegation to a name outside the parent's own names pins nothing, and the invited pull of that name's real owner still pins" lives in "roflenox/test/keys.test.ts".
+- "RFC 8785 appendix B: number serialisation vectors" guards `r_signed_batch`.
+- "RFC 8785 appendix B: number serialisation vectors" lives in "roflenox/test/canonical.test.ts".
+- "RFC 8785 section 3.2.2: the example object canonicalises exactly" guards `r_signed_batch`.
+- "RFC 8785 section 3.2.2: the example object canonicalises exactly" lives in "roflenox/test/canonical.test.ts".
+- "RFC 8785 section 3.2.3: members sort by UTF-16 code units" guards `r_signed_batch`.
+- "RFC 8785 section 3.2.3: members sort by UTF-16 code units" lives in "roflenox/test/canonical.test.ts".
+- "batch digest is SHA-256 of the salt followed by the JSONL bytes" guards `r_signed_batch`.
+- "batch digest is SHA-256 of the salt followed by the JSONL bytes" lives in "roflenox/test/canonical.test.ts".
+- "a batch whose JSONL is not canonical is refused, naming the line" guards `r_signed_batch`.
+- "a batch whose JSONL is not canonical is refused, naming the line" lives in "roflenox/test/admission.test.ts".
+- "createAssertion requires asserted_by: a batch with no identity or signature is not admitted" guards `r_admit_by_signer`.
+- "createAssertion requires asserted_by: a batch with no identity or signature is not admitted" lives in "roflenox/test/admission.test.ts".
+- "negation over an ungranted book is no oracle" guards `r_default_deny`.
+- "negation over an ungranted book is no oracle" lives in "roflenox/test/rules.test.ts".
+- "a key file that is not the identity the log knows stops the node" guards `r_key_change_loud`.
+- "a key file that is not the identity the log knows stops the node" lives in "roflenox/test/durability.test.ts".
+- "two nodes: publish on A, mirror into B, identical ask answers; mirrored batches keep their original signer\" guards `r_follow`.
+- "two nodes: publish on A, mirror into B, identical ask answers; mirrored batches keep their original signer\" lives in "roflenox/test/federation.test.ts".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" guards `r_asserted_by`.
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" lives in "personal-node/src/mcp/main-graph.test.ts".
 
