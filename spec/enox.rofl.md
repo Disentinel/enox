@@ -738,6 +738,7 @@ The queue:
 - `r_mutation_gate` is accepted at "3ca019fb84ae9d2aaeea0979e21e86715ec0b8b8".
 - `r_rotation` is accepted at "4f7c3617e44a355a89ed563c133438d5e58bd6fe".
 - `r_identity_names` is accepted at "2db9e9f9d7518478a277e98369bccc38681654b1".
+- `r_freshness` is accepted at "90c44041770a0cd1c0c83595b88f17c9a5e4519c".
 - `r_domain_vouch` is rejected at "e63b41e1564229c02ffde8d8463f71ef03984823".
 - `r_no_orphan_tests` is rejected at "2db9e9f9d7518478a277e98369bccc38681654b1".
 - `r_identity_names` is rejected at "fd7980616c080677b958b90759493edde1012954".
@@ -1064,6 +1065,8 @@ The checks that exist:
 - "a grant, a delegation and a follow written with a differently cased or composed name act on the same identity" lives in "roflenox/test/keys.test.ts".
 - "ada@example.org, Ada@Example.ORG and a fullwidth spelling of it are one identity; ada@пример.рф is accepted and shown in Cyrillic; bot.ada@example.org is its delegated agent's name" guards `r_identity_names`.
 - "ada@example.org, Ada@Example.ORG and a fullwidth spelling of it are one identity; ada@пример.рф is accepted and shown in Cyrillic; bot.ada@example.org is its delegated agent's name" lives in "roflenox/test/keys.test.ts".
+- "a live batch dated 301 seconds ahead of its receipt is refused as future-dated, while one dated 301 seconds behind is refused as stale with a request to re-attest" guards `r_freshness`.
+- "a live batch dated 301 seconds ahead of its receipt is refused as future-dated, while one dated 301 seconds behind is refused as stale with a request to re-attest" lives in "roflenox/test/admission.test.ts".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" guards `r_asserted_by`.
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" lives in "personal-node/src/mcp/main-graph.test.ts".
 
