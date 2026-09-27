@@ -435,7 +435,7 @@ Declared as facts:
 - `r_identity_names` is to be checked by "Node-A, node-a and NODE-A are one identity, and so are a composed and a decomposed accent and a name with a zero-width mark".
 - `r_identity_names` is to be checked by "a label mixing Cyrillic and Latin letters is refused, while an all-Cyrillic name is accepted and shown in Cyrillic".
 - `r_identity_names` is to be checked by "a grant, a delegation and a follow written with a differently cased or composed name act on the same identity".
-- `r_identity_names` is to be checked by "vadim@rimych.ru, Vadim@Rimych.RU and a fullwidth spelling of it are one identity; vadim@римыч.рф is accepted and shown in Cyrillic; bot.vadim@rimych.ru is its delegated agent's name".
+- `r_identity_names` is to be checked by "ada@example.org, Ada@Example.ORG and a fullwidth spelling of it are one identity; ada@пример.рф is accepted and shown in Cyrillic; bot.ada@example.org is its delegated agent's name".
 - `r_identity_names` is to be checked by "an end-to-end pull between two nodes whose transcript contains no key material".
 - `r_keys_automatic` is about `identity`.
 - `r_keys_automatic` binds as `must`.
