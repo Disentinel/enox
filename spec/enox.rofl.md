@@ -278,8 +278,8 @@ Declared as facts:
 - `r_no_orphan_tests` is to be checked by "a test that guards no requirement fails the spec gate, and linking it passes".
 - `r_no_orphan_tests` is to be checked by "a test the scanner cannot read, or one the runner lists and the scanner does not, fails the spec gate".
 - `r_no_orphan_tests` is to be checked by "an accepted requirement whose checks guard no existing test fails the spec gate".
-- `r_no_orphan_tests` says "a test counts as linked only through a guards fact and its lives-in file, never by matching a planned check's text; and every planned check of an accepted requirement must itself be guarded by an existing test, not just one of them".
-- `r_no_orphan_tests` is to be checked by "a test that matches a planned check but has no guards line is an orphan, and an accepted requirement with one unguarded planned check fails the spec gate".
+- `r_no_orphan_tests` says "a test counts as linked through a guards fact and its lives-in file; the one exception is work in review: a test named by a planned check of a requirement not yet accepted counts as linked until that requirement is accepted, after which it needs its own guards line; and every planned check of an accepted requirement must itself be guarded by an existing test, not just one of them".
+- `r_no_orphan_tests` is to be checked by "a test that matches a planned check of an accepted requirement but has no guards line is an orphan, and an accepted requirement with one unguarded planned check fails the spec gate".
 - `r_no_orphan_tests` says "whole-suite nested runs belong to the hermetic5 gate, not to npm test, so npm test does not run the suite twice under its own time limit".
 - `r_typed` says "every requirement is of exactly one kind from the closed list".
 - `r_typed` is stated in "owner 2026-09-26".
@@ -519,6 +519,8 @@ Declared as facts:
 - `r_domain_vouch` says "domain lookups are bounded: at most a few at a time per node, and each answer, including no answer, is cached for minutes, so first contacts cannot turn the node into a flood or a scanner".
 - `r_domain_vouch` is to be checked by "an anonymous first contact as user@127.0.0.1, user@localhost or a user at a name resolving to a private address makes no outbound connection".
 - `r_domain_vouch` is to be checked by "a flood of first contacts naming many domains opens a bounded number of domain lookups at a time and repeats none within the cache time".
+- `r_domain_vouch` says "an IPv6 address is public only inside global unicast 2000::/3 and outside the IANA special blocks 2001::/23 and 2002::/16 (an allow-list, not a deny-list), so NAT64, 6to4, IPv4-compatible and Teredo forms of an internal IPv4 are never public".
+- `r_domain_vouch` is to be checked by "an internal IPv4 written in any IPv6 form, NAT64, 6to4, IPv4-compatible or mapped, is not a public address".
 - `r_key_change_loud` is about `identity`.
 - `r_key_change_loud` binds as `must`.
 - `r_key_change_loud` says "first contact is bootstrapped over HTTPS and pinned; a key that changes without a signed rotation stops the pull and says why".
@@ -739,6 +741,7 @@ The queue:
 - `r_rotation` is accepted at "4f7c3617e44a355a89ed563c133438d5e58bd6fe".
 - `r_identity_names` is accepted at "2db9e9f9d7518478a277e98369bccc38681654b1".
 - `r_freshness` is accepted at "90c44041770a0cd1c0c83595b88f17c9a5e4519c".
+- `r_domain_vouch` is rejected at "806c6af8065554dfda58a02fa06d1e7f591fdc32".
 - `r_domain_vouch` is rejected at "e63b41e1564229c02ffde8d8463f71ef03984823".
 - `r_no_orphan_tests` is rejected at "2db9e9f9d7518478a277e98369bccc38681654b1".
 - `r_identity_names` is rejected at "fd7980616c080677b958b90759493edde1012954".
