@@ -742,6 +742,7 @@ The queue:
 - `r_identity_names` is accepted at "2db9e9f9d7518478a277e98369bccc38681654b1".
 - `r_freshness` is accepted at "90c44041770a0cd1c0c83595b88f17c9a5e4519c".
 - `r_no_orphan_tests` is accepted at "401323a64dfa1c3eea9ab4aea24143fc54818ed7".
+- `r_domain_vouch` is accepted at "85a2cfc1bfc3969bc9de6f5c9ab62422faa255dd".
 - `r_domain_vouch` is rejected at "806c6af8065554dfda58a02fa06d1e7f591fdc32".
 - `r_domain_vouch` is rejected at "e63b41e1564229c02ffde8d8463f71ef03984823".
 - `r_no_orphan_tests` is rejected at "2db9e9f9d7518478a277e98369bccc38681654b1".
@@ -1079,6 +1080,16 @@ The checks that exist:
 - "an accepted requirement whose checks guard no existing test fails the spec gate" lives in "spec/check.test.mjs".
 - "a test that matches a planned check of an accepted requirement but has no guards line is an orphan, and an accepted requirement with one unguarded planned check fails the spec gate" guards `r_no_orphan_tests`.
 - "a test that matches a planned check of an accepted requirement but has no guards line is an orphan, and an accepted requirement with one unguarded planned check fails the spec gate" lives in "spec/check.test.mjs".
+- "with domain vouching on, a first contact with user@domain pins the key its domain publishes over HTTPS, and with it off the same contact needs an invitation" guards `r_domain_vouch`.
+- "with domain vouching on, a first contact with user@domain pins the key its domain publishes over HTTPS, and with it off the same contact needs an invitation" lives in "roflenox/test/domain.test.ts".
+- "a domain vouches for no name outside it, never over plain HTTP or across a redirect to another host, and never replaces an already pinned key" guards `r_domain_vouch`.
+- "a domain vouches for no name outside it, never over plain HTTP or across a redirect to another host, and never replaces an already pinned key" lives in "roflenox/test/domain.test.ts".
+- "an anonymous first contact as user@127.0.0.1, user@localhost or a user at a name resolving to a private address makes no outbound connection" guards `r_domain_vouch`.
+- "an anonymous first contact as user@127.0.0.1, user@localhost or a user at a name resolving to a private address makes no outbound connection" lives in "roflenox/test/domain.test.ts".
+- "a flood of first contacts naming many domains opens a bounded number of domain lookups at a time and repeats none within the cache time" guards `r_domain_vouch`.
+- "a flood of first contacts naming many domains opens a bounded number of domain lookups at a time and repeats none within the cache time" lives in "roflenox/test/domain.test.ts".
+- "an internal IPv4 written in any IPv6 form, NAT64, 6to4, IPv4-compatible or mapped, is not a public address" guards `r_domain_vouch`.
+- "an internal IPv4 written in any IPv6 form, NAT64, 6to4, IPv4-compatible or mapped, is not a public address" lives in "roflenox/test/domain.test.ts".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" guards `r_asserted_by`.
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" lives in "personal-node/src/mcp/main-graph.test.ts".
 
