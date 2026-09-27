@@ -5,10 +5,10 @@ import * as crypto from 'node:crypto';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { docHash, keyIdOf, LocalIdentity, signDoc, type IdentityDoc } from '../src/identity.ts';
+import { bookOf, checkName, docHash, keyIdOf, LocalIdentity, shownName, signDoc, type IdentityDoc } from '../src/identity.ts';
 import { publish, publishSealed, RemoteRefusal } from '../src/client.ts';
 import { seal } from '../src/seal.ts';
-import { answers, batch, DAY, exportRule, fact, get, identityAt, invitation, iso, post, start, T0, tmpDir, pull, vouch } from './helpers.ts';
+import { answers, batch, DAY, exportRule, fact, get, grant, identityAt, invitation, iso, post, start, T0, tmpDir, pull, vouch } from './helpers.ts';
 
 const CLI = path.join(import.meta.dirname, '..', 'src', 'cli.ts');
 
@@ -311,9 +311,8 @@ test('a batch signed after its key\'s invalid_from is refused, and one dated 301
     // is refused, one before is the key's own time.
     assert.equal(await send(old, R + 1), 'key_not_valid');
     assert.equal(await send(old, R - 1), 'admitted');
-    // The new key, through the door where age is not judged (a sealed batch,
-    // admitted offline): 301 s past the receipt is the future; 300 s is skew.
-    // (A live POST 301 s ahead is refused too, as stale: r_freshness.)
+    // The new key: 301 s past the receipt is the future, by every door —
+    // posted live, and sealed (admitted offline); 300 s is clock skew.
     const sealed = async (claimed: number) => {
       const b = batch(me2, [fact('alice', 'seals', String(claimed))], head, iso(claimed));
       const e = seal(b, [{ identity: 'node-a', enc_public_key: me2.identityDoc().doc.enc.public_key }]);
@@ -321,9 +320,58 @@ test('a batch signed after its key\'s invalid_from is refused, and one dated 301
       if (r.status === 201) head = b.manifest.digest;
       return r.status === 201 ? 'admitted' : String(r.body.error);
     };
+    assert.equal(await send(me2, a.clock.t + 301_000), 'future_dated');
     assert.equal(await sealed(a.clock.t + 301_000), 'future_dated');
     assert.equal(await sealed(a.clock.t + 300_000), 'admitted');
-    assert.equal(await send(me2, a.clock.t + 301_000), 'stale');
+  } finally { await a.stop(); }
+});
+
+test('after a batch signed by the new key, a batch signed by the rotated key is refused whatever time it claims, and a batch claiming a time earlier than its predecessor is refused', async () => {
+  const dir = tmpDir('order-a');
+  const a = await start(dir, 'node-a');
+  try {
+    const old = a.me;
+    let head: string | null = null;
+    const send = async (who: LocalIdentity, claimed: number) => {
+      const b = batch(who, [fact('alice', 'says', String(claimed))], head, iso(claimed));
+      const r = await post(a.url, '/batches', b);
+      if (r.status === 201) head = b.manifest.digest;
+      return r.status === 201 ? 'admitted' : String(r.body.error);
+    };
+    assert.equal(await send(old, T0), 'admitted');
+    // Backwards within one key: refused.
+    assert.equal(await send(old, T0 - 1), 'time_backwards');
+    assert.equal(await send(old, T0), 'admitted', 'the same time is not earlier');
+    const R = T0 + 3_600_000;
+    const me2 = old.rotate(dir, new Date(R));
+    a.clock.t = R + 10_000;
+    assert.equal((await post(a.url, '/identities', me2.identityChain())).status, 200);
+    assert.equal(await send(me2, R + 5_000), 'admitted');
+    // The rotated key, after its successor has signed: before the rotation
+    // (earlier than its predecessor), just after it, and at the receipt.
+    for (const t of [R - 1, R + 5_000, a.clock.t]) {
+      assert.match(await send(old, t), /^(time_backwards|key_not_valid)$/, `old key claiming ${iso(t)}`);
+    }
+    assert.equal(await send(me2, R + 6_000), 'admitted', 'the new key goes on');
+  } finally { await a.stop(); }
+});
+
+test('a publisher whose clock steps back publishes on without a refusal, each batch claiming no earlier than the one before', async () => {
+  const a = await start(tmpDir('hlc-a'), 'node-a');
+  const pub = identityAt(tmpDir('hlc-pub'), 'writer');
+  try {
+    await vouch(a, pub);
+    // The publisher's clock: on time, then 60 s back, then another 60 s back.
+    for (const t of [T0, T0 - 60_000, T0 - 120_000]) await publish(a.url, pub, [fact('w', 'wrote', String(t))], () => t);
+    // The node's own writes too, with the node's clock stepping back.
+    await post(a.url, '/op/assert', { facts: [fact('n', 'wrote', '1')] });
+    a.clock.t = T0 - 90_000;
+    assert.equal((await post(a.url, '/op/assert', { facts: [fact('n', 'wrote', '2')] })).status, 200);
+    for (const who of ['writer', 'node-a']) {
+      const claims = ((await get(a.url, `/feeds/${who}`)).body.batches as { manifest: { claimed_at: string } }[]).map((b) => Date.parse(b.manifest.claimed_at));
+      assert.ok(claims.length >= 2, who);
+      claims.forEach((c, i) => assert.ok(i === 0 || c >= claims[i - 1]!, `${who}: batch ${i} claims earlier than the one before`));
+    }
   } finally { await a.stop(); }
 });
 
@@ -402,10 +450,10 @@ test('an identity document dated past the allowed skew is refused', async () => 
     assert.equal((await post(a.url, '/identities', rot.identityChain())).body.error, 'future_dated');
     // Inside the skew is fine (clocks differ), and so is the present.
     assert.equal((await post(a.url, '/identities', identityAt(tmpDir('skew-ok'), 'ok').identityChain())).status, 200);
-    // A batch claiming the future: a live POST is outside the window (stale);
-    // from a feed — where age is not judged — it is refused as future-dated.
+    // A batch claiming the future is refused as future-dated, posted live or
+    // (below) from a feed.
     const fb = batch(a.me, [fact('alice', 'knows', 'tomorrow'), exportRule('*', 'public')], null, iso(a.clock.t + 3_600_000));
-    assert.equal((await post(a.url, '/batches', fb)).body.error, 'stale');
+    assert.equal((await post(a.url, '/batches', fb)).body.error, 'future_dated');
     a.clock.t += 3_600_000;                       // the publisher's clock runs an hour fast...
     assert.equal((await post(a.url, '/batches', fb)).status, 201);
     a.clock.t -= 3_600_000;                       // ...and is corrected before B pulls
@@ -422,29 +470,111 @@ function keyOfDir(dir: string): crypto.KeyObject {
   return crypto.createPrivateKey({ key: Buffer.from(j.private_key, 'base64'), format: 'der', type: 'pkcs8' });
 }
 
-test('a name with a space, a non-ASCII letter or an invisible mark is refused, and a name of 128 allowed characters is accepted', async () => {
+/** A validly signed first document carrying `name` as written (the client
+ *  would canonicalise it; a node must refuse a document that is not). */
+function docNamed(name: string) {
+  const dir = tmpDir('names-doc');
+  const good = identityAt(dir, 'placeholder').identityDoc();
+  return signDoc({ ...good.doc, identity: name }, keyOfDir(dir));
+}
+
+test('a name with a space or a text-direction mark is refused, and names at the label and total length limits are accepted', async () => {
   const a = await start(tmpDir('names-a'), 'node-a');
-  // Each bad name, once through the client (making a key) and once at the
-  // node (a validly signed identity document that carries it).
-  const signedAs = (name: string) => {
-    const dir = tmpDir('names-doc');
-    const good = identityAt(dir, 'placeholder').identityDoc();
-    return signDoc({ ...good.doc, identity: name }, keyOfDir(dir));
-  };
-  const long = `a${'b._@-9'.repeat(21)}c`;                       // 1 + 126 + 1 = 128
-  assert.equal(long.length, 128);
+  const l63 = 'a'.repeat(63);
+  const long = [l63, l63, l63, 'b'.repeat(61)].join('.');       // 253
+  assert.equal(long.length, 253);
   try {
-    for (const bad of ['alice smith', 'аlice', 'alice​', 'alice‮', `${long}d`]) {
-      assert.throws(() => identityAt(tmpDir('names-bad'), bad), /bad_identity_name|identity names are/, JSON.stringify(bad));
-      const r = await post(a.url, '/identities', [signedAs(bad)]);
-      assert.equal(r.status, 400, JSON.stringify(bad));
-      assert.equal(r.body.error, 'bad_identity_name', JSON.stringify(bad));
+    for (const bad of ['alice smith', 'alice\u202e', 'a\u2067b', '-alice', 'alice-', `${l63}a`, `${long}c`, `x.${long.slice(2)}.y`]) {
+      assert.throws(() => checkName(bad), /bad_identity_name|identity name/, JSON.stringify(bad.slice(0, 30)));
+      assert.throws(() => identityAt(tmpDir('names-bad'), bad), /identity name/);
+      const r = await post(a.url, '/identities', [docNamed(bad)]);
+      assert.equal(r.status, 400, JSON.stringify(bad.slice(0, 30)));
     }
-    // 128 allowed characters: a key is made, and the node pins it.
-    const ok = identityAt(tmpDir('names-long'), long);
-    assert.equal(ok.name, long);
-    assert.equal((await post(a.url, '/identities', ok.identityChain())).status, 200);
-    const other = `z${long.slice(1)}`;                          // another 128, through the node's own check
-    assert.equal((await post(a.url, '/identities', [signedAs(other)])).status, 200);
+    for (const ok of [l63, long, 'a', 'ops_1.example.org']) {
+      assert.equal(checkName(ok), ok);
+      assert.equal((await post(a.url, '/identities', identityAt(tmpDir('names-ok'), ok).identityChain())).status, 200, ok.slice(0, 30));
+    }
+  } finally { await a.stop(); }
+});
+
+test('Node-A, node-a and NODE-A are one identity, and so are a composed and a decomposed accent and a name with a zero-width mark', async () => {
+  const a = await start(tmpDir('same-a'), 'hub');
+  try {
+    for (const group of [['Node-A', 'node-a', 'NODE-A'], ['caf\u00e9', 'cafe\u0301', 'CAF\u00c9'], ['alice\u200b', 'alice', 'Al\u200bice']]) {
+      assert.equal(new Set(group.map(checkName)).size, 1, group.join(' '));
+      assert.equal(new Set(group.map(bookOf)).size, 1, 'one book');
+    }
+    // A key made under one spelling is that identity; another key under another
+    // spelling is a key change of the SAME identity, not a second one.
+    const first = identityAt(tmpDir('same-1'), 'Node-A');
+    assert.equal(first.name, 'node-a');
+    assert.equal((await post(a.url, '/identities', first.identityChain())).status, 200);
+    const other = identityAt(tmpDir('same-2'), 'NODE-A');
+    assert.equal((await post(a.url, '/identities', other.identityChain())).body.error, 'key_changed');
+    // Asked for under any spelling, the node answers with the one it holds.
+    const chain = (await get(a.url, `/identities/${encodeURIComponent('NoDe-A')}`)).body as unknown as IdentityDoc[];
+    assert.equal(chain[0]!.key_id, first.keyId);
+    // A document signed under a non-canonical spelling is refused, not folded.
+    assert.equal((await post(a.url, '/identities', [docNamed('Node-A')])).body.error, 'bad_identity_name');
+  } finally { await a.stop(); }
+});
+
+test('a label mixing Cyrillic and Latin letters is refused, while an all-Cyrillic name is accepted and shown in Cyrillic', async () => {
+  const a = await start(tmpDir('script-a'), 'hub');
+  try {
+    // "аlice" with a Cyrillic а looks like alice; its punycode spelling too.
+    for (const bad of ['\u0430lice', 'xn--lice-43d', 'ops.\u0430lice.org', '\u0430da@example.org']) {
+      assert.throws(() => checkName(bad), /identity name/, bad);
+      assert.equal((await post(a.url, '/identities', [docNamed(bad)])).status, 400, bad);
+    }
+    const ru = identityAt(tmpDir('script-ru'), '\u0418\u0440\u043a\u0430');       // Ирка
+    assert.equal(ru.name, 'xn--80apgx');
+    assert.equal(shownName(ru.name), '\u0438\u0440\u043a\u0430');
+    assert.equal((await post(a.url, '/identities', ru.identityChain())).status, 200);
+  } finally { await a.stop(); }
+});
+
+test('a grant, a delegation and a follow written with a differently cased or composed name act on the same identity', async () => {
+  const a = await start(tmpDir('spell-a'), 'node-a', { silenceSec: 600 });
+  const bob = identityAt(tmpDir('spell-bob'), 'bob');
+  const alice = identityAt(tmpDir('spell-alice'), 'alice');
+  const bot = LocalIdentity.create(tmpDir('spell-bot'), 'bot.alice', new Date(T0 - DAY), { delegatedBy: 'alice' });
+  const host = await start(tmpDir('spell-host'), 'quiet-host');
+  try {
+    await vouch(a, bob, alice);
+    // The grant names BOB; bob reads.
+    await publish(a.url, a.me, [fact('ada', 'knows', 'grace'), grant('BOB', iso(T0 + DAY))], () => a.clock.t);
+    assert.equal((await post(a.url, '/ask', { query: `edge[${bookOf('node-a')}](F, S, R, T)` }, { as: bob })).status, 200);
+    // The delegation names Bot.Alice; bot.alice writes on it.
+    await publish(a.url, alice, [{ source: 'Bot.Alice', relation: 'roflenox:delegate', target: iso(T0 + DAY), perspective: 'policy', confidence: 1 }], () => a.clock.t);
+    assert.equal((await post(a.url, '/batches', batch(bot, [fact('bot', 'saw', 'x')], null, iso(a.clock.t)), { as: null })).status, 201);
+    // The follow names Quiet-Host: it is silent until quiet-host speaks, then not.
+    await publish(a.url, a.me, [{ source: 'Quiet-Host', relation: 'roflenox:follow', target: host.url, perspective: 'follows', confidence: 1 }], () => a.clock.t);
+    const unknown = async () => (((await post(a.url, '/ask', { query: 'edge(F, S, R, T)' })).body.unknown ?? []) as { identity: string }[]).map((u) => u.identity);
+    assert.deepEqual(await unknown(), ['quiet-host']);
+    await vouch(host, a.me);
+    await publish(host.url, host.me, [grant('node-a', iso(T0 + DAY)), fact('host', 'is', 'up')], () => host.clock.t);
+    assert.deepEqual(await pull(a, invitation(host), 'Quiet-Host', a.me), { identity: 'quiet-host', batches: 1 });
+    assert.deepEqual(await unknown(), []);
+  } finally { await a.stop(); await host.stop(); }
+});
+
+test('ada@example.org, Ada@Example.ORG and a fullwidth spelling of it are one identity; ada@\u043f\u0440\u0438\u043c\u0435\u0440.\u0440\u0444 is accepted and shown in Cyrillic; bot.ada@example.org is its delegated agent\'s name', async () => {
+  const a = await start(tmpDir('user-a'), 'hub');
+  try {
+    const spellings = ['ada@example.org', 'Ada@Example.ORG', '\uff21\uff24\uff21@example.org'];
+    assert.deepEqual(spellings.map(checkName), ['ada@example.org', 'ada@example.org', 'ada@example.org']);
+    const ada = identityAt(tmpDir('user-ada'), 'Ada@Example.ORG');
+    assert.equal(ada.name, 'ada@example.org');
+    const ru = checkName('ada@\u043f\u0440\u0438\u043c\u0435\u0440.\u0440\u0444');
+    assert.equal(ru, 'ada@xn--e1afmkfd.xn--p1ai');
+    assert.equal(shownName(ru), 'ada@\u043f\u0440\u0438\u043c\u0435\u0440.\u0440\u0444');
+    assert.equal((await post(a.url, '/identities', identityAt(tmpDir('user-ru'), ru).identityChain())).status, 200);
+    // bot.ada@example.org: the label "bot" under the parent ada@example.org.
+    await vouch(a, ada);
+    const bot = LocalIdentity.create(tmpDir('user-bot'), 'Bot.Ada@Example.org', new Date(T0 - DAY), { delegatedBy: 'ADA@example.org' });
+    assert.equal(bot.name, 'bot.ada@example.org');
+    await publish(a.url, ada, [{ source: 'bot.ada@example.org', relation: 'roflenox:delegate', target: iso(T0 + DAY), perspective: 'policy', confidence: 1 }], () => a.clock.t);
+    assert.equal((await post(a.url, '/batches', batch(bot, [fact('bot', 'did', 'x')], null, iso(a.clock.t)), { as: null })).status, 201);
   } finally { await a.stop(); }
 });

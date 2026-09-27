@@ -65,8 +65,7 @@
    "red": [
     "a batch claiming a time outside the window is marked stale and a re-attestation is requested",
     "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused",
-    "a re-attested batch keeps its digest and gains a second, fresh signature",
-    "an identity document dated past the allowed skew is refused"
+    "a re-attested batch keeps its digest and gains a second, fresh signature"
    ]
   },
   {
@@ -608,7 +607,7 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "    if (mode !== 'post') this.notFuture(m.claimed_at, receivedAt, 'the batch');\n",
+     "    this.notFuture(m.claimed_at, receivedAt, 'the batch');\n",
      ""
     ]
    ],
@@ -1334,8 +1333,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "    return facts.some((r) => (cur.get(String(r[0]))?.C ?? 0) > 0) ? all : [];",
-     "    void cur;\n    return facts.length > 0 ? all : [];"
+     "    return (await this.engine.sysRows(`trusts[${b}](${roflString(author)})`)).length > 0 ? all : [];",
+     "    return (await this.engine.sysRows(`edge[${b}](F, ${roflString(author)}, \"roflenox:trust_rules\", T)`)).length > 0 ? all : [];"
     ]
    ],
    "red": [
@@ -1734,8 +1733,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "      const embedders = [...new Set(named.filter((r) => (cur.get(String(r[0]))?.C ?? 0) > 0).map((r) => String(r[1])))].sort();",
-     "      const embedders = [...new Set(named.map((r) => String(r[1])))].sort();"
+     "      const embedders = [...new Set(named.filter((r) => (cur.get(String(r[0]))?.C ?? 0) > 0).map((r) => canonicalOrNull(r[1])).filter((x): x is string => x !== null))].sort();",
+     "      const embedders = [...new Set(named.map((r) => canonicalOrNull(r[1])).filter((x): x is string => x !== null))].sort();"
     ]
    ],
    "red": [
@@ -2633,90 +2632,6 @@
    ]
   },
   {
-   "id": "M191",
-   "title": "r_identity_names: a space is allowed in a name",
-   "file": "src/identity.ts",
-   "edits": [
-    [
-     "const NAME = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;",
-     "const NAME = /^[A-Za-z0-9][A-Za-z0-9._@ -]{0,127}$/;"
-    ]
-   ],
-   "red": [
-    "a name with a space, a non-ASCII letter or an invisible mark is refused, and a name of 128 allowed characters is accepted"
-   ]
-  },
-  {
-   "id": "M192",
-   "title": "r_identity_names: any Unicode letter is allowed in a name",
-   "file": "src/identity.ts",
-   "edits": [
-    [
-     "const NAME = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;",
-     "const NAME = /^[\\p{L}0-9][\\p{L}0-9._@-]{0,127}$/u;"
-    ]
-   ],
-   "red": [
-    "a name with a space, a non-ASCII letter or an invisible mark is refused, and a name of 128 allowed characters is accepted"
-   ]
-  },
-  {
-   "id": "M193",
-   "title": "r_identity_names: an invisible mark is allowed in a name",
-   "file": "src/identity.ts",
-   "edits": [
-    [
-     "const NAME = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;",
-     "const NAME = /^[A-Za-z0-9][A-Za-z0-9._@\\u200b\\u202e-]{0,127}$/;"
-    ]
-   ],
-   "red": [
-    "a name with a space, a non-ASCII letter or an invisible mark is refused, and a name of 128 allowed characters is accepted"
-   ]
-  },
-  {
-   "id": "M194",
-   "title": "r_identity_names: names stop at 127 characters",
-   "file": "src/identity.ts",
-   "edits": [
-    [
-     "const NAME = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;",
-     "const NAME = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,126}$/;"
-    ]
-   ],
-   "red": [
-    "a name with a space, a non-ASCII letter or an invisible mark is refused, and a name of 128 allowed characters is accepted"
-   ]
-  },
-  {
-   "id": "M195",
-   "title": "r_identity_names: names run to 129 characters",
-   "file": "src/identity.ts",
-   "edits": [
-    [
-     "const NAME = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;",
-     "const NAME = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,128}$/;"
-    ]
-   ],
-   "red": [
-    "a name with a space, a non-ASCII letter or an invisible mark is refused, and a name of 128 allowed characters is accepted"
-   ]
-  },
-  {
-   "id": "M196",
-   "title": "r_identity_names: the node does not check the name in an identity document",
-   "file": "src/identity.ts",
-   "edits": [
-    [
-     "  checkName(x.doc.identity);\n",
-     ""
-    ]
-   ],
-   "red": [
-    "a name with a space, a non-ASCII letter or an invisible mark is refused, and a name of 128 allowed characters is accepted"
-   ]
-  },
-  {
    "id": "M197",
    "title": "r_default_deny: anyone gets the full health",
    "file": "src/node.ts",
@@ -2736,8 +2651,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "      if (identity !== this.identity?.name && !(await this.visible(identity, caller))) {",
-     "      if (false) {"
+     "      if (identity === null || (identity !== this.identity?.name && !(await this.visible(identity, caller)))) {",
+     "      if (identity === null) {"
     ]
    ],
    "red": [
@@ -2750,8 +2665,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "((await this.visible(identity, caller)) ? this.chainOf(identity) : [])",
-     "this.chainOf(identity)"
+     "      if (identity === null || !(await this.visible(identity, caller))) return { digests: [], last_claimed_at: null };",
+     "      if (identity === null) return { digests: [], last_claimed_at: null };"
     ]
    ],
    "red": [
@@ -3092,6 +3007,249 @@
    ],
    "red": [
     "a mutant whose red test already fails on the unmutated tree is reported as a broken baseline, never as killed"
+   ]
+  },
+  {
+   "id": "M224",
+   "title": "r_rotation: time may run backwards within a chain",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (last !== undefined && Date.parse(m.claimed_at) < last) {",
+     "    if (false) {"
+    ]
+   ],
+   "red": [
+    "after a batch signed by the new key, a batch signed by the rotated key is refused whatever time it claims, and a batch claiming a time earlier than its predecessor is refused"
+   ]
+  },
+  {
+   "id": "M225",
+   "title": "r_rotation: an equal claimed time counts as backwards",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (last !== undefined && Date.parse(m.claimed_at) < last) {",
+     "    if (last !== undefined && Date.parse(m.claimed_at) <= last) {"
+    ]
+   ],
+   "red": [
+    "after a batch signed by the new key, a batch signed by the rotated key is refused whatever time it claims, and a batch claiming a time earlier than its predecessor is refused"
+   ]
+  },
+  {
+   "id": "M226",
+   "title": "r_rotation: a live POST from the future is only stale",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    this.notFuture(m.claimed_at, receivedAt, 'the batch');",
+     "    if (mode !== 'post') this.notFuture(m.claimed_at, receivedAt, 'the batch');"
+    ]
+   ],
+   "red": [
+    "a batch signed after its key's invalid_from is refused, and one dated 301 seconds past its receipt is refused as future-dated",
+    "a batch claiming a time outside the window is marked stale and a re-attestation is requested"
+   ]
+  },
+  {
+   "id": "M227",
+   "title": "r_identity_names: a name is not case-folded",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "  const ascii = domainToASCII(raw);",
+     "  const ascii = domainToASCII(raw) && raw;"
+    ]
+   ],
+   "red": [
+    "Node-A, node-a and NODE-A are one identity, and so are a composed and a decomposed accent and a name with a zero-width mark"
+   ]
+  },
+  {
+   "id": "M228",
+   "title": "r_identity_names: a label may mix scripts",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "    || labels.some((l) => !singleScript(domainToUnicode(l)))) return '';",
+     "    ) return '';"
+    ]
+   ],
+   "red": [
+    "a label mixing Cyrillic and Latin letters is refused, while an all-Cyrillic name is accepted and shown in Cyrillic"
+   ]
+  },
+  {
+   "id": "M229",
+   "title": "r_identity_names: a label may run to 64 characters",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "  if (ascii === '' || ascii.length > 253 || labels.some((l) => l.length === 0 || l.length > 63 || l.startsWith('-') || l.endsWith('-'))",
+     "  if (ascii === '' || ascii.length > 253 || labels.some((l) => l.length === 0 || l.length > 64 || l.startsWith('-') || l.endsWith('-'))"
+    ]
+   ],
+   "red": [
+    "a name with a space or a text-direction mark is refused, and names at the label and total length limits are accepted"
+   ]
+  },
+  {
+   "id": "M230",
+   "title": "r_identity_names: a name may run past 253 characters",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "  if (ascii === '' || ascii.length > 253 || labels.some((l) => l.length === 0 || l.length > 63 || l.startsWith('-') || l.endsWith('-'))",
+     "  if (ascii === '' || labels.some((l) => l.length === 0 || l.length > 63 || l.startsWith('-') || l.endsWith('-'))"
+    ],
+    [
+     "  if (canonical.length > 253) throw refuse();\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a name with a space or a text-direction mark is refused, and names at the label and total length limits are accepted"
+   ]
+  },
+  {
+   "id": "M231",
+   "title": "r_identity_names: a label may start or end with a hyphen",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "  if (ascii === '' || ascii.length > 253 || labels.some((l) => l.length === 0 || l.length > 63 || l.startsWith('-') || l.endsWith('-'))",
+     "  if (ascii === '' || ascii.length > 253 || labels.some((l) => l.length === 0 || l.length > 63)"
+    ]
+   ],
+   "red": [
+    "a name with a space or a text-direction mark is refused, and names at the label and total length limits are accepted"
+   ]
+  },
+  {
+   "id": "M232",
+   "title": "r_identity_names: the user part is not case-mapped",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     ".normalize('NFKC').toLowerCase().normalize('NFC');",
+     ".normalize('NFKC').normalize('NFC');"
+    ]
+   ],
+   "red": [
+    "ada@example.org, Ada@Example.ORG and a fullwidth spelling of it are one identity; ada@пример.рф is accepted and shown in Cyrillic; bot.ada@example.org is its delegated agent's name"
+   ]
+  },
+  {
+   "id": "M233",
+   "title": "r_identity_names: the user part is not width-mapped",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     ".normalize('NFKC').toLowerCase().normalize('NFC');",
+     ".normalize('NFC').toLowerCase().normalize('NFC');"
+    ]
+   ],
+   "red": [
+    "ada@example.org, Ada@Example.ORG and a fullwidth spelling of it are one identity; ada@пример.рф is accepted and shown in Cyrillic; bot.ada@example.org is its delegated agent's name"
+   ]
+  },
+  {
+   "id": "M234",
+   "title": "r_identity_names: a node takes a document under a non-canonical spelling",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "  checkCanonical(x.doc.identity, 'the document\\'s identity');",
+     "  checkName(x.doc.identity);"
+    ]
+   ],
+   "red": [
+    "Node-A, node-a and NODE-A are one identity, and so are a composed and a decomposed accent and a name with a zero-width mark"
+   ]
+  },
+  {
+   "id": "M235",
+   "title": "r_identity_names: a grant row keeps the name as written",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "  const name = (x: string) => roflString(checkName(x));",
+     "  const name = (x: string) => roflString(x);"
+    ]
+   ],
+   "red": [
+    "a grant, a delegation and a follow written with a differently cased or composed name act on the same identity"
+   ]
+  },
+  {
+   "id": "M236",
+   "title": "r_identity_names: a book is derived from the name as written",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "  return `b_${sha256hex(checkName(identity)).slice(0, 16)}`;",
+     "  return `b_${sha256hex(identity).slice(0, 16)}`;"
+    ]
+   ],
+   "red": [
+    "Node-A, node-a and NODE-A are one identity, and so are a composed and a decomposed accent and a name with a zero-width mark"
+   ]
+  },
+  {
+   "id": "M237",
+   "title": "r_identity_names: a pull takes the name as written",
+   "file": "src/client.ts",
+   "edits": [
+    [
+     "  const identity = checkName(named);",
+     "  const identity = named;"
+    ]
+   ],
+   "red": [
+    "a grant, a delegation and a follow written with a differently cased or composed name act on the same identity"
+   ]
+  },
+  {
+   "id": "M238",
+   "title": "r_identity_names: a followed feed's silence is judged under the name as written",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "follows.filter((r) => (cur.get(String(r[0]))?.C ?? 0) > 0).map((r) => canonicalOrNull(r[1]))",
+     "follows.filter((r) => (cur.get(String(r[0]))?.C ?? 0) > 0).map((r) => String(r[1]))"
+    ]
+   ],
+   "red": [
+    "a grant, a delegation and a follow written with a differently cased or composed name act on the same identity"
+   ]
+  },
+  {
+   "id": "M239",
+   "title": "r_rotation: the client claims its clock even when it stepped back",
+   "file": "src/client.ts",
+   "edits": [
+    [
+     "const claimTime = (now: number, last: number) => new Date(Math.max(now, last)).toISOString();",
+     "const claimTime = (now: number, last: number) => new Date(now + 0 * last).toISOString();"
+    ]
+   ],
+   "red": [
+    "a publisher whose clock steps back publishes on without a refusal, each batch claiming no earlier than the one before"
+   ]
+  },
+  {
+   "id": "M240",
+   "title": "r_rotation: the node's own writes claim its clock even when it stepped back",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "new Date(Math.max(this.now(), this.lastClaimed.get(me.name) ?? -Infinity)).toISOString()",
+     "new Date(this.now()).toISOString()"
+    ]
+   ],
+   "red": [
+    "a publisher whose clock steps back publishes on without a refusal, each batch claiming no earlier than the one before"
    ]
   }
  ]

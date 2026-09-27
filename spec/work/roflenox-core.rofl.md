@@ -77,3 +77,9 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_enox_compat`.
 - `roflenox_core` finished `r_enox_compat` at "047c616173ff5b28ed1f33cfb24ff4aec1d7febc".
 - `roflenox_core` takes `r_mutation_gate`.
+- `roflenox_core` finished `r_mutation_gate` at "3ca019fb84ae9d2aaeea0979e21e86715ec0b8b8".
+- `roflenox_core` takes `r_rotation`.
+- `roflenox_core` finished `r_rotation` at "07e4c49652e4dc5c8277573a363ecbdeecb2ef6d".
+- `roflenox_core` takes `r_identity_names`.
+- `roflenox_core` finished `r_identity_names` at "3afa102a9be65b5e69fc77ca7da2839d8684ba77".
+- `roflenox_core` takes `r_rotation`.

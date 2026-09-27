@@ -134,7 +134,7 @@ export const OPS: Op[] = [
     access: 'anyone', positional: ['literal'], say: explainSay, run: async (ctx, a) => needNode(ctx).whynot(a.literal as string, ctx.caller) },
   { name: 'chain', description: 'The digests of an identity\'s batches, in chain order (what any feed shows of it).',
     input: obj({ identity: str() }, ['identity']), access: 'anyone', positional: ['identity'],
-    run: async (ctx, a) => ({ identity: a.identity, digests: await needNode(ctx).readChain(a.identity as string, ctx.caller) }) },
+    run: async (ctx, a) => ({ identity: a.identity, ...(await needNode(ctx).readChain(a.identity as string, ctx.caller)) }) },
   { name: 'feed', description: 'An identity\'s batches after a digest, as signed; withheld where the reader may not have them.',
     input: obj({ identity: str(), after: str(), challenge: str() }, ['identity']), access: 'anyone', positional: ['identity'],
     http: { method: 'GET', path: '/feeds/:identity' },

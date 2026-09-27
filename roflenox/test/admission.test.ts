@@ -115,12 +115,12 @@ test('a batch claiming a time outside the window is marked stale and a re-attest
   const a = await start(tmpDir('stale'), 'node-a', { freshnessSec: 300 });
   try {
     const t = a.clock.t;
-    for (const claimed of [t - 301_000, t + 301_000]) {
-      const r = await post(a.url, '/batches', batch(a.me, [fact('a', 'r', 'b')], null, iso(claimed)));
-      assert.equal(r.status, 422);
-      assert.equal(r.body.error, 'stale');
-      assert.match(String(r.body.message), /re-attestation requested/);
-    }
+    const r = await post(a.url, '/batches', batch(a.me, [fact('a', 'r', 'b')], null, iso(t - 301_000)));
+    assert.equal(r.status, 422);
+    assert.equal(r.body.error, 'stale');
+    assert.match(String(r.body.message), /re-attestation requested/);
+    // Ahead of the receipt, nothing re-attests it: future-dated (r_freshness).
+    assert.equal((await post(a.url, '/batches', batch(a.me, [fact('a', 'r', 'b')], null, iso(t + 301_000)))).body.error, 'future_dated');
     assert.equal((await get(a.url, '/health')).body.facts, 0);
     // Inside the window, at its edge, is admitted.
     assert.equal((await post(a.url, '/batches', batch(a.me, [fact('a', 'r', 'b')], null, iso(t - 300_000)))).status, 201);

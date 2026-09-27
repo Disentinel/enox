@@ -14,6 +14,7 @@
 // loads the new one — the engine's `asserted` is then exactly the current
 // assertions. The log keeps every assertion; replay loads only the current.
 import { DELEGATE, EXPORT, factId, GRANT, permille, roflString, sha256hex, type Fact } from './facts.ts';
+import { checkName } from './identity.ts';
 
 export interface Current { P: string; C: number; S: number; follow?: string; ctl?: string }
 
@@ -25,11 +26,16 @@ export interface Current { P: string; C: number; S: number; follow?: string; ctl
  *  they are used; a follow keeps its own row below.) */
 function controlRow(book: string, f: Fact): string | undefined {
   const until = () => Math.floor(Date.parse(f.target) / 1000);
-  if (f.relation === GRANT) return `grant[${book}](${roflString(f.source)}, ${until()})`;
-  if (f.relation === DELEGATE) return `delegate[${book}](${roflString(f.source)}, ${until()})`;
-  if (f.relation === EXPORT) return `export[${book}](${roflString(f.source)}, ${roflString(f.target)})`;
+  // Names in control rows are canonical (r_identity_names): a grant to
+  // "Bob" acts for bob, and a name that is none refuses the batch.
+  const name = (x: string) => roflString(checkName(x));
+  if (f.relation === GRANT) return `grant[${book}](${name(f.source)}, ${until()})`;
+  if (f.relation === DELEGATE) return `delegate[${book}](${name(f.source)}, ${until()})`;
+  if (f.relation === EXPORT) return `export[${book}](${roflString(f.source)}, ${f.target === 'public' ? '"public"' : name(f.target)})`;
+  if (f.relation === TRUST) return `trusts[${book}](${name(f.source)})`;
   return undefined;
 }
+const TRUST = 'roflenox:trust_rules';
 const acting = (c: Current | undefined): c is Current & { ctl: string } => c?.ctl !== undefined && c.C > 0;
 
 /** A follow is a CURRENT assertion too: `follows[book](Name, b_<atom>)` — the
@@ -97,7 +103,7 @@ export class Assertions {
   }
 }
 
-const followRow = (book: string, name: string) => `follows[${book}](${roflString(name)}, b_${sha256hex(name).slice(0, 16)})`;
+const followRow = (book: string, name: string) => `follows[${book}](${roflString(checkName(name))}, b_${sha256hex(checkName(name)).slice(0, 16)})`;
 const row = (book: string, F: string, c: Current) => `asserted[${book}](${roflString(F)}, ${roflString(c.P)}, ${c.C}, ${c.S})`;
 
 /** Match literal arguments (ROFL terms) against a row of values: variables

@@ -12,6 +12,7 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { domainToASCII, domainToUnicode } from 'node:url';
 import { canonicalize } from './jcs.ts';
 import { batchDigest, Refusal, sha256hex } from './facts.ts';
 
@@ -25,20 +26,82 @@ export const CHECKPOINT_CONTEXT = 'roflenox-checkpoint-v1\n';
 /** A publisher's fresh signature over an old digest: {identity, key_id, digest, attested_at}. */
 export const REATTEST_CONTEXT = 'roflenox-reattest-v1\n';
 
-const NAME = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;
 const TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 
-export function checkName(name: string): string {
-  if (typeof name !== 'string' || !NAME.test(name)) {
-    throw new Refusal(400, 'bad_identity_name', `identity names are 1-128 of [A-Za-z0-9._@-], starting alphanumeric`);
+// NAMES (r_identity_names). A name is host-like (node-a, ops.example.org) or
+// user@domain, split at the LAST '@'. The domain — and a host-like name as a
+// whole — is normalised by IDNA UTS 46 (domainToASCII: NFC, case fold,
+// punycode); the part before the '@' by the PRECIS UsernameCaseMapped profile
+// of RFC 8265 (width and case mapping, NFC; letters, digits and printable
+// ASCII, no spaces). The CANONICAL form is the identity — its book, its pin,
+// its key file — and every door that compares names comes through here.
+// On top of the normalisation: a label is 1-63 characters and does not start
+// or end with '-', the whole is at most 253, and the letters of a label (or
+// of the user part) come from ONE script: "аlice" with a Cyrillic а looks
+// like "alice" and is refused (UTS 39 single-script).
+const SCRIPTS = ['Latin', 'Cyrillic', 'Greek', 'Armenian', 'Georgian', 'Hebrew', 'Arabic', 'Devanagari', 'Thai',
+  'Han', 'Hiragana', 'Katakana', 'Hangul'].map((sc) => [sc, new RegExp(`\\p{Script=${sc}}`, 'u')] as const);
+
+function singleScript(text: string): boolean {
+  const seen = new Set<string>();
+  for (const ch of text) {
+    if (!/\p{L}/u.test(ch)) continue;
+    seen.add(SCRIPTS.find(([, re]) => re.test(ch))?.[0] ?? `other:${ch}`);
   }
-  return name;
+  // Japanese mixes Han with its kana by design; anything else is one script.
+  return seen.size <= 1 || [...seen].every((x) => ['Han', 'Hiragana', 'Katakana'].includes(x));
 }
 
-/** The ROFL book of an identity. Derived from the NAME, so it carries no key. */
+function hostPart(raw: string): string {
+  const ascii = domainToASCII(raw);
+  const labels = ascii.split('.');
+  if (ascii === '' || ascii.length > 253 || labels.some((l) => l.length === 0 || l.length > 63 || l.startsWith('-') || l.endsWith('-'))
+    || labels.some((l) => !singleScript(domainToUnicode(l)))) return '';
+  return ascii;
+}
+
+/** The canonical form of a name, or a 400 bad_identity_name. Idempotent. */
+export function checkName(name: string): string {
+  const refuse = () => new Refusal(400, 'bad_identity_name',
+    'an identity name is host-like (letters, digits, - and _ in labels of up to 63, one script each) or user@domain; it has no spaces or control marks');
+  if (typeof name !== 'string' || name.length === 0 || name.length > 1024) throw refuse();
+  const at = name.lastIndexOf('@');
+  const host = hostPart(at < 0 ? name : name.slice(at + 1));
+  if (host === '') throw refuse();
+  let canonical = host;
+  if (at >= 0) {
+    const local = name.slice(0, at).normalize('NFKC').toLowerCase().normalize('NFC');
+    if (!/^[\p{L}\p{N}!-~]+$/u.test(local) || !singleScript(local)) throw refuse();
+    canonical = `${local}@${host}`;
+  }
+  if (canonical.length > 253) throw refuse();
+  return canonical;
+}
+
+/** A name taken from a fact, in canonical form — or null if it is none. */
+export function canonicalOrNull(name: unknown): string | null {
+  try { return checkName(name as string); } catch { return null; }
+}
+
+/** A name as a person reads it: the Unicode form of its canonical one. */
+export function shownName(name: string): string {
+  const c = checkName(name);
+  const at = c.lastIndexOf('@');
+  return at < 0 ? domainToUnicode(c) : `${c.slice(0, at)}@${domainToUnicode(c.slice(at + 1))}`;
+}
+
+/** A name that must already BE canonical (a signed document, a manifest). */
+function checkCanonical(name: unknown, what: string): string {
+  const c = checkName(name as string);
+  if (c !== name) throw new Refusal(400, 'bad_identity_name', `${what} is not in canonical form (it is ${c})`);
+  return c;
+}
+
+/** The ROFL book of an identity. Derived from the canonical NAME, so it
+ *  carries no key, and every spelling of one name is one book. */
 export function bookOf(identity: string): string {
-  return `b_${sha256hex(identity).slice(0, 16)}`;
+  return `b_${sha256hex(checkName(identity)).slice(0, 16)}`;
 }
 
 export function isTime(t: unknown): t is string {
@@ -189,8 +252,8 @@ export class LocalIdentity {
    *  self-signed document. Refuses to overwrite an existing one: a lost key is
    *  not silently replaced. The recovery key's private half is returned once,
    *  as `recoveryCode`, and stored nowhere. */
-  static create(dataDir: string, name: string, now: Date = new Date(), o: { delegatedBy?: string } = {}): LocalIdentity {
-    checkName(name);
+  static create(dataDir: string, given: string, now: Date = new Date(), o: { delegatedBy?: string } = {}): LocalIdentity {
+    const name = checkName(given);
     const key = crypto.generateKeyPairSync('ed25519').privateKey;
     const encKey = crypto.generateKeyPairSync('x25519').privateKey;
     const rec = newRecovery();
@@ -217,7 +280,7 @@ export class LocalIdentity {
     if (mode & 0o077) throw new Error(`the identity key file is readable by others (mode ${mode.toString(8)}); expected 600`);
     const j = JSON.parse(fs.readFileSync(p, 'utf8')) as KeyFile;
     const der = (b: string) => crypto.createPrivateKey({ key: Buffer.from(b, 'base64'), format: 'der', type: 'pkcs8' });
-    return new LocalIdentity(checkName(j.identity), der(j.private_key), der(j.enc_private_key), j.docs);
+    return new LocalIdentity(checkCanonical(j.identity, 'the key file\'s identity'), der(j.private_key), der(j.enc_private_key), j.docs);
   }
 
   /** The current signed identity document. */
@@ -319,7 +382,7 @@ export function checkIdentityDoc(d: unknown): IdentityDoc {
   if (!x || typeof x !== 'object' || !x.doc || typeof x.sig !== 'string' || typeof x.key_id !== 'string') {
     throw bad('an identity document is {doc, key_id, sig}');
   }
-  checkName(x.doc.identity);
+  checkCanonical(x.doc.identity, 'the document\'s identity');
   if (!Number.isInteger(x.doc.seq) || x.doc.seq < 0) throw bad('seq is a non-negative integer');
   if ((x.doc.seq === 0) !== (x.doc.prev === null)) throw bad('only the first document (seq 0) has no prev');
   if (x.doc.prev !== null && !HEX64.test(String(x.doc.prev))) throw bad('prev is 64 hex');
@@ -333,7 +396,7 @@ export function checkIdentityDoc(d: unknown): IdentityDoc {
   if (!x.doc.recovery || keyIdOf(String(x.doc.recovery.public_key)) !== x.doc.recovery.key_id) throw bad('malformed recovery key');
   if (!x.doc.enc || typeof x.doc.enc.public_key !== 'string') throw bad('malformed encryption key');
   if (!isTime(x.doc.issued_at)) throw bad('issued_at is RFC 3339 UTC');
-  if (x.doc.delegated_by !== undefined && (checkName(x.doc.delegated_by) === x.doc.identity)) throw bad('an identity is not its own agent');
+  if (x.doc.delegated_by !== undefined && (checkCanonical(x.doc.delegated_by, 'delegated_by') === x.doc.identity)) throw bad('an identity is not its own agent');
   return x;
 }
 
@@ -361,7 +424,7 @@ export function checkManifest(m: unknown): Manifest {
   const want = ['claimed_at', 'count', 'digest', 'identity', 'key_id', 'prev', 'sig'];
   if (Object.keys(x).sort().join(',') !== want.join(',')) throw bad(`a manifest has exactly ${want.join(', ')}`);
   if (typeof x.identity !== 'string') throw bad('identity is a string');
-  checkName(x.identity);
+  checkCanonical(x.identity, 'the manifest\'s identity');
   if (typeof x.key_id !== 'string' || !HEX64.test(x.key_id)) throw bad('key_id is 64 hex');
   if (x.prev !== null && (typeof x.prev !== 'string' || !HEX64.test(x.prev))) throw bad('prev is null or 64 hex');
   if (!isTime(x.claimed_at)) throw bad('claimed_at is RFC 3339 UTC with milliseconds, e.g. 2026-09-26T12:00:00.000Z');

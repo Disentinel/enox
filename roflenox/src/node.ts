@@ -21,7 +21,7 @@ import * as path from 'node:path';
 import { canonicalize } from './jcs.ts';
 import { batchDigest, decodeCell, EMBEDDER, factId, isSalt, newSalt, parseJsonl, Refusal, roflString, SEARCH, sha256hex, toJsonl, toRofl, type Fact } from './facts.ts';
 import {
-  bookOf, CHECKPOINT_CONTEXT, checkIdentityDoc, checkManifest, docHash, docSignedBy, FEED_CONTEXT, isTime, keyValidAt, LocalIdentity,
+  bookOf, canonicalOrNull, CHECKPOINT_CONTEXT, checkIdentityDoc, checkManifest, docHash, docSignedBy, FEED_CONTEXT, isTime, keyValidAt, LocalIdentity,
   REATTEST_CONTEXT, verifyIdentityDoc, verifyManifestSig, verifySigned,
   type Attestation, type Checkpoint, type FeedAttestation, type IdentityDoc, type KeyEntry, type Manifest,
 } from './identity.ts';
@@ -319,18 +319,25 @@ export class RoflenoxNode {
 
   /** An identity's document chain, as `caller` may learn it: an identity it
    *  may not see answers as an unknown one. The node's own is public. */
-  readIdentityChain(identity: string, caller: string | null): Promise<IdentityDoc[]> {
+  readIdentityChain(asked: string, caller: string | null): Promise<IdentityDoc[]> {
     return this.serial(async () => {
-      if (identity !== this.identity?.name && !(await this.visible(identity, caller))) {
-        throw new Refusal(404, 'unknown_identity', `${identity} is not known here`);
+      const identity = canonicalOrNull(asked);
+      if (identity === null || (identity !== this.identity?.name && !(await this.visible(identity, caller)))) {
+        throw new Refusal(404, 'unknown_identity', `${asked} is not known here`);
       }
       return this.identityChain(identity);
     }, true);
   }
 
-  /** An identity's batch digests as `caller` may learn them ([] if not). */
-  readChain(identity: string, caller: string | null): Promise<string[]> {
-    return this.serial(async () => ((await this.visible(identity, caller)) ? this.chainOf(identity) : []), true);
+  /** An identity's batch digests, and the latest time its chain claims, as
+   *  `caller` may learn them ([] and null if not). */
+  readChain(asked: string, caller: string | null): Promise<{ digests: string[]; last_claimed_at: string | null }> {
+    const identity = canonicalOrNull(asked);
+    return this.serial(async () => {
+      if (identity === null || !(await this.visible(identity, caller))) return { digests: [], last_claimed_at: null };
+      const last = this.lastClaimed.get(identity);
+      return { digests: this.chainOf(identity), last_claimed_at: last === undefined ? null : new Date(last).toISOString() };
+    }, true);
   }
 
   /** An identity's document chain as this node holds it. */
@@ -652,8 +659,10 @@ export class RoflenoxNode {
       if (facts.length !== m.count) throw new Refusal(422, 'count_mismatch', `signed count ${m.count}, found ${facts.length}`);
     }
 
-    // (A live POST is held to the freshness window in both directions below.)
-    if (mode !== 'post') this.notFuture(m.claimed_at, receivedAt, 'the batch');
+    // Never from the future, by any door (r_freshness, r_rotation): nothing
+    // can fix a date ahead of its receipt. A live POST is also held to the
+    // freshness window in the past, below (stale: a re-attestation fixes it).
+    this.notFuture(m.claimed_at, receivedAt, 'the batch');
     // 2. key valid at claimed_at.
     if (!keyValidAt(key, Date.parse(m.claimed_at))) {
       throw new Refusal(422, 'key_not_valid', `the key was not valid at the claimed time ${m.claimed_at}`);
@@ -715,6 +724,14 @@ export class RoflenoxNode {
       }
       throw new Refusal(409, 'chain_mismatch',
         `prev must be the head of ${m.identity}'s chain (${head ?? 'null: this is its first batch'})`);
+    }
+    // Time never runs backwards within one chain (r_rotation): with each key
+    // valid only until its rotation, a rotated key can then append nothing
+    // after a batch its successor signed, whatever time it claims.
+    const last = this.lastClaimed.get(m.identity);
+    if (last !== undefined && Date.parse(m.claimed_at) < last) {
+      throw new Refusal(409, 'time_backwards',
+        `${m.identity}'s batch claims ${m.claimed_at}, earlier than the batch before it (${new Date(last).toISOString()})`);
     }
     // User rules are checked here, with the batch: a rule that would conclude
     // outside its author's book refuses the whole batch.
@@ -866,7 +883,7 @@ export class RoflenoxNode {
     // (r_revocation_receipt): what was read before stays attested by its
     // batch digest, and nothing is read from now on.
     const cur = this.assertions.of(owner);
-    const grants = await this.engine.sysRows(`edge[${book}](F, ${roflString(requester)}, "roflenox:grant", U)`);
+    const grants = (await this.engine.sysRows(`edge[${book}](F, R, "roflenox:grant", U)`)).filter((r) => canonicalOrNull(r[1]) === requester);
     if (grants.some((r) => cur.get(String(r[0]))?.C === 0)) {
       throw new Refusal(410, 'grant_revoked', `${owner} revoked ${requester}'s grant to read its book`, { whynot });
     }
@@ -1008,9 +1025,9 @@ export class RoflenoxNode {
     if (author === op) return all;
     if (!op || !this.chains.has(op)) return [];
     const b = bookOf(op);
-    const facts = await this.engine.sysRows(`edge[${b}](F, ${roflString(author)}, "roflenox:trust_rules", T)`);
-    const cur = this.assertions.of(op);
-    return facts.some((r) => (cur.get(String(r[0]))?.C ?? 0) > 0) ? all : [];
+    // (A trusts row stands while the trust fact is current above 0, with the
+    // author's name canonical: src/assertions.ts.)
+    return (await this.engine.sysRows(`trusts[${b}](${roflString(author)})`)).length > 0 ? all : [];
   }
 
   /** The feeds `author` follows that have gone SILENT: nothing claimed within
@@ -1021,7 +1038,7 @@ export class RoflenoxNode {
     if (!this.chains.has(author)) return [];
     const cur = this.assertions.of(author);
     const follows = await this.engine.sysRows(`edge[${bookOf(author)}](F, P, "roflenox:follow", U)`);
-    const followed = [...new Set(follows.filter((r) => (cur.get(String(r[0]))?.C ?? 0) > 0).map((r) => String(r[1])))].sort();
+    const followed = [...new Set(follows.filter((r) => (cur.get(String(r[0]))?.C ?? 0) > 0).map((r) => canonicalOrNull(r[1])).filter((x): x is string => x !== null))].sort();
     const now = this.now();
     const out: Unknown[] = [];
     for (const p of followed) {
@@ -1113,7 +1130,8 @@ export class RoflenoxNode {
       if (!me) throw new Refusal(404, 'no_identity', 'this node has no identity to assert as');
       const jsonl = toJsonl(facts);
       const salt = newSalt();
-      const manifest = me.signBatch(jsonl, this.head(me.name), new Date(this.now()).toISOString(), salt);
+      // The later of the clock and the chain's last claim (r_rotation).
+      const manifest = me.signBatch(jsonl, this.head(me.name), new Date(Math.max(this.now(), this.lastClaimed.get(me.name) ?? -Infinity)).toISOString(), salt);
       return this.admitNow({ manifest, jsonl, salt, identity: me.identityChain() }, 'post', new Date(this.now()).toISOString(), [], me.name);
     });
   }
@@ -1133,7 +1151,7 @@ export class RoflenoxNode {
       const b = bookOf(op);
       const cur = this.assertions.of(op);
       const named = await this.engine.sysRows(`edge[${b}](F, E, ${roflString(EMBEDDER)}, "search")`);
-      const embedders = [...new Set(named.filter((r) => (cur.get(String(r[0]))?.C ?? 0) > 0).map((r) => String(r[1])))].sort();
+      const embedders = [...new Set(named.filter((r) => (cur.get(String(r[0]))?.C ?? 0) > 0).map((r) => canonicalOrNull(r[1])).filter((x): x is string => x !== null))].sort();
       if (embedders.length === 0) return { state: 'no_embedder' as const, key, hits: [] };
       for (const e of embedders.filter((x) => this.chains.has(x))) {
         const theirs = this.assertions.of(e);
@@ -1288,9 +1306,10 @@ export class RoflenoxNode {
    *  travels, marked withheld, so the chain still verifies. Before anything is
    *  signed or sent, a leak audit re-reads every outgoing line on its own.
    *  With a challenge, and when this node IS that identity, the head is attested. */
-  feed(identity: string, after: string | null, challenge: string | null = null, reader: string | null = null): Promise<{
+  feed(asked: string, after: string | null, challenge: string | null = null, reader: string | null = null): Promise<{
     identity: IdentityDoc[]; batches: FeedEntry[]; attestation?: FeedAttestation;
   }> {
+    const identity = canonicalOrNull(asked) ?? asked;
     return this.serial(async () => {
       const chain = this.chains.get(identity);
       const doc = this.idDocs.get(identity);

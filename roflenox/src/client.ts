@@ -3,7 +3,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { toJsonl, checkFact, newSalt, Refusal, type Fact } from './facts.ts';
-import type { IdentityDoc, LocalIdentity } from './identity.ts';
+import { checkName, type IdentityDoc, type LocalIdentity } from './identity.ts';
 import { signRequest } from './httpsig.ts';
 import { seal, type Envelope } from './seal.ts';
 
@@ -57,15 +57,20 @@ export async function headOf(node: string | OpCaller, identity: string): Promise
 /** `me`'s own chain head at `node`, asked as `me` (a node tells an identity
  *  its own chain); null before its first batch, or while `node` does not
  *  know it yet (its first batch is its introduction). */
-async function ownHead(node: OpCaller, me: LocalIdentity): Promise<string | null> {
+async function ownHead(node: OpCaller, me: LocalIdentity): Promise<{ prev: string | null; last: number }> {
   try {
-    const d = ((await node('chain', { identity: me.name })) as { digests: string[] }).digests;
-    return d.length ? d[d.length - 1]! : null;
+    const c = (await node('chain', { identity: me.name })) as { digests: string[]; last_claimed_at: string | null };
+    return { prev: c.digests.length ? c.digests[c.digests.length - 1]! : null, last: c.last_claimed_at ? Date.parse(c.last_claimed_at) : -Infinity };
   } catch (e) {
-    if (e instanceof RemoteRefusal && e.status === 401) return null;
+    if (e instanceof RemoteRefusal && e.status === 401) return { prev: null, last: -Infinity };
     throw e;
   }
 }
+
+/** What a batch claims: the later of the clock and the chain's last claim, as
+ *  a hybrid logical clock does — a publisher whose clock steps back keeps
+ *  publishing, and its chain's time never runs backwards (r_rotation). */
+const claimTime = (now: number, last: number) => new Date(Math.max(now, last)).toISOString();
 
 /** Make sure `node` knows `me` (trust on first use); idempotent. */
 export async function introduce(node: string | OpCaller, me: LocalIdentity): Promise<void> {
@@ -84,9 +89,9 @@ export function readFacts(text: string): Fact[] {
 /** Sign `facts` as `me` and admit them at a node. */
 export async function publishVia(node: OpCaller, me: LocalIdentity, facts: Fact[], now: () => number = Date.now) {
   const jsonl = toJsonl(facts);
-  const prev = await ownHead(node, me);
+  const { prev, last } = await ownHead(node, me);
   const salt = newSalt();
-  const manifest = me.signBatch(jsonl, prev, new Date(now()).toISOString(), salt);
+  const manifest = me.signBatch(jsonl, prev, claimTime(now(), last), salt);
   const r = await node('admit', { manifest, jsonl, salt, identity: me.identityChain() });
   return { identity: me.name, facts: facts.length, receipt: r.receipt as Record<string, unknown> };
 }
@@ -100,7 +105,8 @@ export const publish = (url: string, me: LocalIdentity, facts: Fact[], now: () =
  *  local node re-verifies every batch from scratch. The PEER is always spoken
  *  to over its wire path, GET /feeds/<identity>, which a static directory
  *  serves too. */
-export async function mirrorVia(local: OpCaller, link: string, identity: string, as?: LocalIdentity, now: () => number = Date.now): Promise<{ identity: string; batches: number }> {
+export async function mirrorVia(local: OpCaller, link: string, named: string, as?: LocalIdentity, now: () => number = Date.now): Promise<{ identity: string; batches: number }> {
+  const identity = checkName(named);                 // any spelling of the name: one identity (r_identity_names)
   const { peer, invited } = parseInvitation(link);
   // FIRST CONTACT (r_key_change_loud): what is pinned now is trusted from then
   // on. Over HTTPS the transport vouches for it; over plain HTTP only an
@@ -169,9 +175,9 @@ export async function ask(url: string, body: { query?: string; why?: string; why
  *  signed batch to `recipients`, whose encryption keys the node knows. */
 export async function publishSealedVia(node: OpCaller, me: LocalIdentity, facts: Fact[], recipients: string[], now: () => number = Date.now): Promise<Envelope> {
   const jsonl = toJsonl(facts);
-  const prev = await ownHead(node, me);
+  const { prev, last } = await ownHead(node, me);
   const salt = newSalt();
-  const manifest = me.signBatch(jsonl, prev, new Date(now()).toISOString(), salt);
+  const manifest = me.signBatch(jsonl, prev, claimTime(now(), last), salt);
   await node('admit', { manifest, jsonl, salt, identity: me.identityChain() });
   const keys = [];
   for (const r of recipients) {
