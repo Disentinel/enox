@@ -55,3 +55,5 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_asserted_by`.
 - `roflenox_core` finished `r_asserted_by` at "47c198a247231c85bf38ef70395a3fb9514f5306".
 - `roflenox_core` takes `r_confidence`.
+- `roflenox_core` finished `r_confidence` at "27f4b5e57621eae2ebf937f99d7cf3540c766a1e".
+- `roflenox_core` takes `r_revocation_receipt`.

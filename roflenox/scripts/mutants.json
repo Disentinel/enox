@@ -2532,6 +2532,34 @@
    "red": [
     "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing"
    ]
+  },
+  {
+   "id": "M183",
+   "title": "r_revocation_receipt: a revoked grant reads as never granted (403)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (grants.some((r) => cur.get(String(r[0]))?.C === 0)) {",
+     "    if (false) {"
+    ]
+   ],
+   "red": [
+    "a revoked grant answers 410 on the next read, while facts read before the revocation still verify against their batch digest"
+   ]
+  },
+  {
+   "id": "M184",
+   "title": "r_revocation_receipt: every refused read claims a revocation",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (grants.some((r) => cur.get(String(r[0]))?.C === 0)) {",
+     "    if (true) {"
+    ]
+   ],
+   "red": [
+    "a revoked grant answers 410 on the next read, while facts read before the revocation still verify against their batch digest"
+   ]
   }
  ]
 }

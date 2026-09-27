@@ -2,12 +2,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as http from 'node:http';
-import { bookOf, type LocalIdentity } from '../src/identity.ts';
+import { bookOf, verifyManifestSig, type IdentityDoc, type LocalIdentity } from '../src/identity.ts';
 import { listen } from '../src/http.ts';
-import { batchDigest, sha256hex, toJsonl } from '../src/facts.ts';
+import { batchDigest, factId, sha256hex, toJsonl } from '../src/facts.ts';
 import { signRequest } from '../src/httpsig.ts';
-import { mirror } from '../src/client.ts';
-import { batch, DAY, exportRule, fact, get, grant, identityAt, invitation, iso, post, start, T0, tmpDir, pull } from './helpers.ts';
+import { publish } from '../src/client.ts';
+import type { Manifest } from '../src/identity.ts';
+import { batch, DAY, exportRule, fact, get, grant, identityAt, invitation, iso, post, start, T0, tmpDir, pull, vouch } from './helpers.ts';
 
 const BOOK_A = bookOf('node-a');
 
@@ -190,4 +191,44 @@ test('a request signed for the public https URL verifies at a node listening on 
     assert.equal(await send(pa.url, 'enox.example.org', 'https://evil.example.org/ask', bob, body(a), a.clock.t), 401);
     assert.equal(await send(pa.url, 'enox.example.org', 'http://enox.example.org/ask', bob, body(a), a.clock.t), 401);
   } finally { await pa.close(); await pp.close(); await a.stop(); await plain.stop(); }
+});
+
+test('a revoked grant answers 410 on the next read, while facts read before the revocation still verify against their batch digest', async () => {
+  const a = await start(tmpDir('revoke-a'), 'node-a');
+  const bob = identityAt(tmpDir('revoke-bob'), 'bob');
+  const carol = identityAt(tmpDir('revoke-carol'), 'carol');
+  const q = { query: `edge[${bookOf('node-a')}](F, S, R, T)` };
+  try {
+    await vouch(a, bob, carol);
+    await publish(a.url, a.me, [fact('alice', 'knows', 'bob'), fact('alice', 'owns', 'x')], () => a.clock.t);
+    await publish(a.url, a.me, [grant('bob', iso(T0 + DAY))], () => a.clock.t);
+    // What bob reads while granted: the answers, and the signed batches they stand on.
+    const read = await post(a.url, '/ask', q, { as: bob });
+    assert.equal(read.status, 200);
+    const seen = (read.body.rows as { cells: string[] }[]).map((r) => r.cells[0]!);
+    const feed = (await get(a.url, '/feeds/node-a', { as: bob })).body as { identity: IdentityDoc[]; batches: { manifest: Manifest; jsonl: string; salt: string }[] };
+    assert.ok(feed.batches.every((x) => typeof x.jsonl === 'string'), 'bob was given the batches whole');
+
+    // node-a revokes: the grant re-asserted at confidence 0.
+    await publish(a.url, a.me, [{ ...grant('bob', iso(T0 + DAY)), confidence: 0 }], () => a.clock.t);
+    const next = await post(a.url, '/ask', q, { as: bob });
+    assert.equal(next.status, 410);
+    assert.equal(next.body.error, 'grant_revoked');
+    // Control: one never granted is refused, not told of a revocation.
+    assert.equal((await post(a.url, '/ask', q, { as: carol })).status, 403);
+
+    // What bob read before stays attested: each batch matches its digest and
+    // the publisher's signature, and every fact he was answered is in one.
+    const key = feed.identity[feed.identity.length - 1]!.doc.keys[0]!;
+    const held = new Set<string>();
+    for (const x of feed.batches) {
+      assert.equal(batchDigest(x.salt, x.jsonl), x.manifest.digest);
+      assert.ok(verifyManifestSig(x.manifest, key));
+      for (const l of x.jsonl.split('\n').filter(Boolean)) held.add(factId(JSON.parse(l)));
+    }
+    for (const F of seen) assert.ok(held.has(F), `fact ${F} is attested by a batch`);
+    // Positive control of the check: one changed byte no longer verifies.
+    const x0 = feed.batches[0]!;
+    assert.notEqual(batchDigest(x0.salt, x0.jsonl.replace('alice', 'alicf')), x0.manifest.digest);
+  } finally { await a.stop(); }
 });

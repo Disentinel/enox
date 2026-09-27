@@ -759,6 +759,14 @@ export class RoflenoxNode {
       throw new Refusal(401, 'unsigned', `${owner}'s book is not public; sign the request as an identity it grants`);
     }
     const whynot = await whyNotReadable(this.engine, requester, book, owner, Math.floor(this.now() / 1000));
+    // A grant its owner retired (confidence 0) is GONE, not missing
+    // (r_revocation_receipt): what was read before stays attested by its
+    // batch digest, and nothing is read from now on.
+    const cur = this.assertions.of(owner);
+    const grants = await this.engine.sysRows(`edge[${book}](F, ${roflString(requester)}, "roflenox:grant", U)`);
+    if (grants.some((r) => cur.get(String(r[0]))?.C === 0)) {
+      throw new Refusal(410, 'grant_revoked', `${owner} revoked ${requester}'s grant to read its book`, { whynot });
+    }
     throw new Refusal(403, 'no_grant', `${requester} has no live grant to read ${owner}'s book`, { whynot });
   }
 
