@@ -216,8 +216,8 @@ test('an identity nobody vouched for cannot be pinned by writing, introducing or
   const b = await start(tmpDir('squat-b'), 'node-b');
   const x = await start(tmpDir('squat-x'), 'node-a');           // an impostor: A's name, its own key
   const alice = identityAt(tmpDir('squat-alice'), 'alice');
-  const bot = LocalIdentity.create(tmpDir('squat-bot'), 'alice.bot', new Date(T0 - DAY), { delegatedBy: 'alice' });
-  const rogue = LocalIdentity.create(tmpDir('squat-rogue'), 'alice.rogue', new Date(T0 - DAY), { delegatedBy: 'alice' });
+  const bot = LocalIdentity.create(tmpDir('squat-bot'), 'bot.alice', new Date(T0 - DAY), { delegatedBy: 'alice' });
+  const rogue = LocalIdentity.create(tmpDir('squat-rogue'), 'rogue.alice', new Date(T0 - DAY), { delegatedBy: 'alice' });
   try {
     for (const n of [a, x]) await publish(n.url, n.me, [fact('alice', 'knows', n === a ? 'bob' : 'mallory'), exportRule('*', 'public')], () => n.clock.t);
     await vouch(b, alice);
@@ -252,7 +252,7 @@ test('an identity nobody vouched for cannot be pinned by writing, introducing or
 
     // A delegation from an identity B pins vouches for its agent — only for the
     // one it delegated.
-    await publish(b.url, alice, [{ source: 'alice.bot', relation: 'roflenox:delegate', target: iso(T0 + DAY), perspective: 'policy', confidence: 1 }], () => b.clock.t);
+    await publish(b.url, alice, [{ source: 'bot.alice', relation: 'roflenox:delegate', target: iso(T0 + DAY), perspective: 'policy', confidence: 1 }], () => b.clock.t);
     assert.equal((await post(b.url, '/batches', batch(bot, [fact('bot', 'saw', 'x')], null, iso(b.clock.t)), anon)).status, 201);
     refused(await post(b.url, '/batches', batch(rogue, [fact('rogue', 'saw', 'x')], null, iso(b.clock.t)), anon), 'an undelegated agent');
 
@@ -260,6 +260,32 @@ test('an identity nobody vouched for cannot be pinned by writing, introducing or
     assert.deepEqual(await pull(b, invitation(a), 'node-a'), { identity: 'node-a', batches: 1 });
     assert.equal(((await get(b.url, '/identities/node-a')).body as unknown as IdentityDoc[])[0]!.key_id, a.me.keyId);
   } finally { await a.stop(); await b.stop(); await x.stop(); }
+});
+
+test('a delegation to a name outside the parent\'s own names pins nothing, and the invited pull of that name\'s real owner still pins', async () => {
+  const a = await start(tmpDir('zone-a'), 'node-a');
+  const b = await start(tmpDir('zone-b'), 'node-b');
+  const alice = identityAt(tmpDir('zone-alice'), 'alice');
+  // Agents that name alice as their parent: only the last is under her.
+  const names = ['node-a', 'xalice', 'deep.bot.alice', 'alice.bot', 'bot.alice'];
+  const agents = names.map((n) => LocalIdentity.create(tmpDir('zone-agent'), n, new Date(T0 - DAY), { delegatedBy: 'alice' }));
+  try {
+    await publish(a.url, a.me, [fact('alice', 'knows', 'bob'), exportRule('*', 'public')], () => a.clock.t);
+    await vouch(b, alice);
+    // alice, trusted at B, delegates every one of those names.
+    await publish(b.url, alice, names.map((n) => ({ source: n, relation: 'roflenox:delegate', target: iso(T0 + DAY), perspective: 'policy', confidence: 1 })), () => b.clock.t);
+    const tried: string[][] = [];
+    for (const g of agents) {
+      const r = await post(b.url, '/batches', batch(g, [fact(g.name, 'claims', 'this name')], null, iso(b.clock.t)), { as: null });
+      tried.push([g.name, r.status === 201 ? 'pinned' : String(r.body.error)]);
+    }
+    assert.deepEqual(tried, [['node-a', 'not_vouched'], ['xalice', 'not_vouched'], ['deep.bot.alice', 'not_vouched'],
+      ['alice.bot', 'not_vouched'], ['bot.alice', 'pinned']]);
+    assert.equal((await get(b.url, '/identities/node-a')).status, 404);
+    // The real node-a, pulled by its invitation, pins its own key.
+    assert.deepEqual(await pull(b, invitation(a), 'node-a'), { identity: 'node-a', batches: 1 });
+    assert.equal(((await get(b.url, '/identities/node-a')).body as unknown as IdentityDoc[])[0]!.key_id, a.me.keyId);
+  } finally { await a.stop(); await b.stop(); }
 });
 
 test('a node that swaps its key without rotation is refused with a whynot', async () => {

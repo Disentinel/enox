@@ -49,3 +49,5 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_atomic_write` at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
 - `roflenox_core` finished `r_key_change_loud` at "6bfb1bbf0121614ca309293042adf2231ecc31d1".
 - `roflenox_core` takes `r_atomic_write`.
+- `roflenox_core` finished `r_atomic_write` at "cb8730b753d33b9d28115ad4db650776d2c5a154".
+- `roflenox_core` takes `r_key_change_loud`.

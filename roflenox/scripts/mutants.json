@@ -2245,8 +2245,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "    if (parent !== undefined && this.idDocs.has(parent)) {",
-     "    if (false && parent !== undefined && this.idDocs.has(parent)) {"
+     "    if (parent !== undefined && label !== '' && !label.includes('.') && this.idDocs.has(parent)) {",
+     "    if (false && parent !== undefined && label !== '' && !label.includes('.') && this.idDocs.has(parent)) {"
     ]
    ],
    "red": [
@@ -2335,6 +2335,48 @@
    ],
    "red": [
     "a backup killed between any two of its steps leaves a readable backup at the latest path"
+   ]
+  },
+  {
+   "id": "M169",
+   "title": "r_key_change_loud: a delegation vouches for any name",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (parent !== undefined && label !== '' && !label.includes('.') && this.idDocs.has(parent)) {",
+     "    if (parent !== undefined && this.idDocs.has(parent)) {"
+    ]
+   ],
+   "red": [
+    "a delegation to a name outside the parent's own names pins nothing, and the invited pull of that name's real owner still pins"
+   ]
+  },
+  {
+   "id": "M170",
+   "title": "r_key_change_loud: a delegation vouches for names any depth under the parent",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "label !== '' && !label.includes('.') && this.idDocs.has(parent)",
+     "label !== '' && this.idDocs.has(parent)"
+    ]
+   ],
+   "red": [
+    "a delegation to a name outside the parent's own names pins nothing, and the invited pull of that name's real owner still pins"
+   ]
+  },
+  {
+   "id": "M171",
+   "title": "r_key_change_loud: a name merely ending in the parent's counts as under it",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "identity.endsWith(`.${parent}`) ? identity.slice(0, identity.length - parent.length - 1) : ''",
+     "identity.endsWith(parent) ? identity.slice(0, identity.length - parent.length) : ''"
+    ]
+   ],
+   "red": [
+    "a delegation to a name outside the parent's own names pins nothing, and the invited pull of that name's real owner still pins"
    ]
   }
  ]

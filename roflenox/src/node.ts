@@ -375,15 +375,18 @@ export class RoflenoxNode {
 
   /** FIRST PIN (r_key_change_loud): an identity this node does not know is
    *  pinned only on its operator's word (`by`, the proven caller), or on a
-   *  live delegation to it from an identity pinned here. Anyone else's write,
-   *  introduction or pushed feed naming it is refused and pins nothing — else
-   *  whoever speaks first would own the name. */
+   *  live delegation to it from an identity pinned here — and a delegation
+   *  vouches only for a name under its parent, label.parent, the way a DNS
+   *  zone owns only its subdomains. Anyone else's write, introduction or
+   *  pushed feed naming it is refused and pins nothing — else whoever speaks
+   *  first (or any identity trusted here) would own the name. */
   private async vouch(identity: string, first: IdentityDoc, by: string | null, receivedAt: string): Promise<void> {
     if (by !== null && by === this.identity?.name) return;
     // The node's own identity, as its key file on this machine starts it.
     if (identity === this.identity?.name && docHash(first) === docHash(this.identity.identityChain()[0]!)) return;
     const parent = first.doc.delegated_by;
-    if (parent !== undefined && this.idDocs.has(parent)) {
+    const label = parent !== undefined && identity.endsWith(`.${parent}`) ? identity.slice(0, identity.length - parent.length - 1) : '';
+    if (parent !== undefined && label !== '' && !label.includes('.') && this.idDocs.has(parent)) {
       const at = Math.floor(Date.parse(receivedAt) / 1000);
       const until = (await this.engine.sysRows(`delegate[${bookOf(parent)}](${roflString(identity)}, U)`)).map((r) => Number(r[0]));
       if (until.some((u) => at < u)) return;
