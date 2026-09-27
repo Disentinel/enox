@@ -112,6 +112,8 @@ Declared as facts:
 - `r_backup` is stated in "owner 2026-09-26".
 - `r_backup` says "a backup is a copy of the log up to a committed receipt, verified by rebuilding a node from it; the node takes one on a schedule to a target outside its host, and at most one schedule period of writes can be lost".
 - `r_backup` is to be checked by "a node rebuilt from its latest backup answers every question the same as the node up to that backup".
+- `r_backup` says "a backup becomes the latest only after every file and directory it holds is on disk, so a power loss never leaves the latest path naming a torn copy".
+- `r_backup` is to be checked by "a backup syncs every file and directory it holds before it becomes the latest".
 - `r_derived_rebuildable` is about `durability`.
 - `r_derived_rebuildable` binds as `must`.
 - `r_derived_rebuildable` says "derived data such as embeddings can be rebuilt from primary data alone, and losing it never loses knowledge".
@@ -661,9 +663,11 @@ The queue:
 - `r_identity_names` is queued at 76.
 - `r_default_deny` is queued at 77.
 - `r_chain` is queued at 78.
+- `r_backup` is queued at 79.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 - `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
 - `r_key_change_loud` is rejected at "6bfb1bbf0121614ca309293042adf2231ecc31d1".
+- `r_atomic_write` is accepted at "cb8730b753d33b9d28115ad4db650776d2c5a154".
 
 Rejected after verification:
 
