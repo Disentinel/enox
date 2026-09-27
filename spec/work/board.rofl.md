@@ -10,7 +10,7 @@ default: main
 > из сообщений. Ведущий пишет ранг и приёмку в `spec/enox.rofl.md`; каждый
 > исполнитель пишет только в свой файл `spec/work/<имя>.rofl.md`.
 > Загрузка: `npm run repl -- spec/enox.rofl.md spec/work/*.rofl.md`, затем
-> `? R is next`, `? R awaits review`, `? R is in progress by W`, `? W is blocked on R by T`, `? R is rejected at V`.
+> `? R is next`, `? R awaits review`, `? R is in progress by W`, `? R is stuck for W by T`, `? R is taken out of order by W`, `? R is rejected at V`.
 
 Declared as facts:
 
@@ -37,3 +37,11 @@ Declared as facts:
 <a id="review"></a>A requirement R awaits review if some worker finished R at a revision V, unless R is settled at V.
 
 <a id="progress"></a>A requirement R is in progress by a worker W if W takes R, unless W finished R at some revision.
+
+<a id="stuck"></a>A requirement R is stuck for a worker W by a text T if W is blocked on R by T, unless R is accepted at some revision.
+
+> Взято не по порядку: исполнитель работает над R, хотя перед R в очереди
+> стоит открытое требование с меньшим рангом. Не запрет, а сигнал ведущему:
+> либо приоритет не дошёл, либо ранги устарели.
+
+<a id="out_of_order"></a>A requirement R is taken out of order by a worker W if R is in progress by W, R is behind some requirement.
