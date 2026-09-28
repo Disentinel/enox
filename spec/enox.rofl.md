@@ -299,6 +299,11 @@ Declared as facts:
 - `r_compat_parity` is to be checked by "update_assertion and delete_assertion answer within 100 ms and a read after a write within one second while writes keep arriving".
 - `r_compat_parity` is to be checked by "why agrees with ask for every literal ask returns, including conf".
 - `r_compat_parity` says "a timing bound in a check is met by the median of repeated answers on a shared machine, and every single answer still stays under one second".
+- `r_public_url_local` is about `transport`.
+- `r_public_url_local` binds as `must`.
+- `r_public_url_local` says "a node served behind a public URL still accepts signed requests from its own machine's local tools addressed to its local address; a request signature binds to whichever of the node's own addresses it was sent to, never to a foreign one".
+- `r_public_url_local` is stated in "deploying rofl.enox.dev, 2026-09-28: with --public-url set, import_enox and assert run on the host could not reach their own serve".
+- `r_public_url_local` is to be checked by "a node with a public URL admits an operator-signed local import sent to 127.0.0.1 and still refuses a signature made for another host".
 - `r_typed` says "every requirement is of exactly one kind from the closed list".
 - `r_typed` is stated in "owner 2026-09-26".
 - `r_typed` is to be checked by "a requirement with an unknown kind fails typing".
@@ -672,6 +677,7 @@ Kinds of the requirements:
 - `r_interface_parity` is of `constraint`.
 - `r_mutation_gate` is of `gate`.
 - `r_typed` is of `gate`.
+- `r_public_url_local` is of `reliability`.
 - `r_compat_parity` is of `feature`.
 - `r_single_writer` is of `reliability`.
 - `r_no_orphan_tests` is of `gate`.
@@ -745,6 +751,7 @@ The queue:
 - `r_domain_vouch` is queued at 82.
 - `r_single_writer` is queued at 83.
 - `r_compat_parity` is queued at 84.
+- `r_public_url_local` is queued at 85.
 - `r_mutation_gate` is queued at 73.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 - `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
