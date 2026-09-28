@@ -16,7 +16,7 @@
     "mutants": "node --experimental-strip-types --no-warnings scripts/mutants.ts --shards auto",
     "census": "node --experimental-strip-types --no-warnings scripts/census.ts",
     "perf": "node --experimental-strip-types --no-warnings --test --test-concurrency=1 --test-timeout=280000 --test-force-exit test/perf/*.test.ts",
-    "mutants:perf": "node --experimental-strip-types --no-warnings scripts/mutants.ts --perf --shards 2",
+    "mutants:perf": "node --experimental-strip-types --no-warnings scripts/mutants.ts --perf --shards 3",
     "hermetic5": "node --experimental-strip-types --no-warnings scripts/mutants.ts --suite hermetic5"
   }
 }

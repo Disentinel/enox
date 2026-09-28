@@ -10,9 +10,18 @@ import { RoflenoxNode } from './node.ts';
 import { LocalIdentity } from './identity.ts';
 import { handleRpc } from './mcp.ts';
 import { callOp, createIdentity, type Ctx } from './ops.ts';
+import { DataLock } from './lock.ts';
 
 export async function serveStdio(dataDir: string, input: NodeJS.ReadableStream = process.stdin,
   output: NodeJS.WritableStream = process.stdout): Promise<number> {
+  // The data directory first, before anything in it is read (r_single_writer).
+  const lock = DataLock.acquire(dataDir, 'stdio');
+  try {
+    return await run(dataDir, input, output);
+  } finally { lock.release(); }
+}
+
+async function run(dataDir: string, input: NodeJS.ReadableStream, output: NodeJS.WritableStream): Promise<number> {
   if (!LocalIdentity.load(dataDir)) createIdentity(dataDir);
   const node = await RoflenoxNode.open({ dataDir });
   for (const w of node.warnings) process.stderr.write(`WARNING: ${w}\n`);

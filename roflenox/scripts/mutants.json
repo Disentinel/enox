@@ -104,7 +104,7 @@
    "file": "src/log.ts",
    "edits": [
     [
-     "    if (jsonl !== null) writeFileAtomic(this.batchPath(manifest.identity, manifest.digest, 'jsonl'), jsonl, this.fault, 'jsonl');\n",
+     "    if (jsonl !== null) writeFileAtomic(this.batchPath(manifest.identity, manifest.digest, 'jsonl'), jsonl, this.fault, 'jsonl', false);\n",
      ""
     ]
    ],
@@ -1346,8 +1346,8 @@
    "file": "src/ops.ts",
    "edits": [
     [
-     "  return { ...ans, rows, ...(more ? { cut: true,",
-     "  return { ...ans, rows, ...(false ? { cut: true,"
+     "    ...(more ? { cut: true,",
+     "    ...(false ? { cut: true,"
     ]
    ],
    "red": [
@@ -1360,8 +1360,8 @@
    "file": "src/ops.ts",
    "edits": [
     [
-     "    if (c.h !== head) throw",
-     "    if (false) throw"
+     "    if (c.h === head) offset = c.o;",
+     "    if (true) offset = c.o;"
     ]
    ],
    "red": [
@@ -1459,7 +1459,7 @@
   },
   {
    "id": "M108",
-   "title": "B: a replaced assertion's engine row is kept",
+   "title": "B: a replaced control fact's engine row is kept (admission retracts nothing)",
    "file": "src/node.ts",
    "edits": [
     [
@@ -1468,7 +1468,7 @@
     ]
    ],
    "red": [
-    "re-asserting a fact with a new confidence leaves exactly one confidence for that identity, the latest"
+    "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing"
    ]
   },
   {
@@ -2152,7 +2152,7 @@
    "file": "src/log.ts",
    "edits": [
     [
-     "    if (jsonl !== null) writeFileAtomic(this.batchPath(manifest.identity, manifest.digest, 'jsonl'), jsonl, this.fault, 'jsonl');\n",
+     "    if (jsonl !== null) writeFileAtomic(this.batchPath(manifest.identity, manifest.digest, 'jsonl'), jsonl, this.fault, 'jsonl', false);\n",
      ""
     ],
     [
@@ -2170,8 +2170,8 @@
    "file": "src/log.ts",
    "edits": [
     [
-     "      writeFileAtomic(path.join(bookDir, `identity-${pinDigest}.json`), text, this.fault, 'identity');\n    }\n    if (jsonl",
-     "    }\n    if (jsonl"
+     "      writeFileAtomic(path.join(bookDir, `identity-${pinDigest}.json`), text, this.fault, 'identity');\n    }\n    // (The batch's",
+     "    }\n    // (The batch's"
     ],
     [
      "    return this.commit({ received_at: receivedAt, digest: manifest.digest, identity: manifest.identity, pin: pinDigest, ...extra });",
@@ -2384,8 +2384,8 @@
    "file": "src/enox.ts",
    "edits": [
     [
-     "asserted_by: [...(this.by.get(a.F) ?? [])].sort().join(', ') || null,",
-     "asserted_by: attr(a.F, 'asserted_by') ?? null,"
+     "asserted_by: [...(this.by.get(F) ?? [])].sort().join(', ') || null,",
+     "asserted_by: attr('asserted_by') ?? null,"
     ]
    ],
    "red": [
@@ -2846,7 +2846,7 @@
    "file": "src/enox.ts",
    "edits": [
     [
-     "claimed_by: attr(a.F, 'asserted_by') ?? null,",
+     "claimed_by: attr('asserted_by') ?? null,",
      "claimed_by: null,"
     ]
    ],
@@ -3517,6 +3517,272 @@
    ],
    "red": [
     "an internal IPv4 written in any IPv6 form, NAT64, 6to4, IPv4-compatible or mapped, is not a public address"
+   ]
+  },
+  {
+   "id": "M261",
+   "title": "serve takes no lock",
+   "file": "src/cli.ts",
+   "edits": [
+    [
+     "const lock = DataLock.acquire(data, 'serve');",
+     "const lock = { note() {}, release() {} } as unknown as DataLock;"
+    ]
+   ],
+   "red": [
+    "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing"
+   ]
+  },
+  {
+   "id": "M262",
+   "title": "stdio takes no lock",
+   "file": "src/stdio.ts",
+   "edits": [
+    [
+     "const lock = DataLock.acquire(dataDir, 'stdio');",
+     "const lock = { release() {} } as unknown as DataLock;"
+    ]
+   ],
+   "red": [
+    "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing"
+   ]
+  },
+  {
+   "id": "M263",
+   "title": "serve reads the key before it takes the lock",
+   "file": "src/cli.ts",
+   "edits": [
+    [
+     "  const lock = DataLock.acquire(data, 'serve');\n  if (!LocalIdentity.load(data)) createIdentity(data, f.name);",
+     "  if (!LocalIdentity.load(data)) createIdentity(data, f.name);\n  const lock = DataLock.acquire(data, 'serve');"
+    ]
+   ],
+   "red": [
+    "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing"
+   ]
+  },
+  {
+   "id": "M264",
+   "title": "every holder counts as dead",
+   "file": "src/lock.ts",
+   "edits": [
+    [
+     "export function alive(h: Holder): boolean {",
+     "export function alive(h: Holder): boolean {\n  if (h) return false;"
+    ]
+   ],
+   "red": [
+    "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing"
+   ]
+  },
+  {
+   "id": "M265",
+   "title": "a signing local op takes no lock",
+   "file": "src/cli.ts",
+   "edits": [
+    [
+     "  if (op.signs) {",
+     "  if (false && op.signs) {"
+    ]
+   ],
+   "red": [
+    "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing"
+   ]
+  },
+  {
+   "id": "M266",
+   "title": "a signing local op goes through any live holder",
+   "file": "src/cli.ts",
+   "edits": [
+    [
+     "h.url !== undefined && new URL(h.url).origin === new URL(url).origin;",
+     ";"
+    ]
+   ],
+   "red": [
+    "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing"
+   ]
+  },
+  {
+   "id": "M267",
+   "title": "release leaves the lock behind",
+   "file": "src/lock.ts",
+   "edits": [
+    [
+     "if (holderOf(this.dataDir)?.token === this.holder.token) fs.rmSync",
+     "if (false) fs.rmSync"
+    ]
+   ],
+   "red": [
+    "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing"
+   ]
+  },
+  {
+   "id": "M268",
+   "title": "r_compat_parity: recall matches names only",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "      if (meant.state === 'answered') {",
+     "      if (false) {"
+    ]
+   ],
+   "red": [
+    "recall finds an entity from a natural-language question that shares no word with its name"
+   ]
+  },
+  {
+   "id": "M269",
+   "title": "r_compat_parity: semantic_search rows carry no staleness",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "staleness({ ...g.record(nd!), similarity: sim(h.score) }, ctx.now())",
+     "({ ...g.record(nd!), similarity: sim(h.score) })"
+    ]
+   ],
+   "red": [
+    "semantic_search results carry age_days and stale like the base"
+   ]
+  },
+  {
+   "id": "M270",
+   "title": "r_compat_parity: a domain with no TTL of its own goes stale after 90 days",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "?? STALE_TTL_DEFAULT)",
+     "?? 90)"
+    ]
+   ],
+   "red": [
+    "semantic_search results carry age_days and stale like the base"
+   ]
+  },
+  {
+   "id": "M271",
+   "title": "r_compat_parity: an integer property takes any number",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "    if (p.type === 'integer' && t === 'number' && !Number.isInteger(v)) throw",
+     "    if (false) throw"
+    ]
+   ],
+   "red": [
+    "a fractional proof_depth is refused"
+   ]
+  },
+  {
+   "id": "M272",
+   "title": "r_compat_parity: a batch item's proof_depth may be fractional",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "  if (a.proof_depth !== undefined && !Number.isInteger(a.proof_depth)) throw",
+     "  if (false) throw"
+    ]
+   ],
+   "red": [
+    "a fractional proof_depth is refused"
+   ]
+  },
+  {
+   "id": "M273",
+   "title": "r_compat_parity: the embedder sends every missing text in one call",
+   "file": "executors/embedder/embedder.ts",
+   "edits": [
+    [
+     "for (const [i, j] of buckets(missing.map(([, t]) => t.length))) {",
+     "for (const [i, j] of [[0, missing.length]] as [number, number][]) {"
+    ]
+   ],
+   "red": [
+    "the embedder embeds a book of mixed text lengths in bounded memory and finishes although writes land during its read"
+   ]
+  },
+  {
+   "id": "M274",
+   "title": "r_compat_parity: the embedder embeds whole long texts",
+   "file": "executors/embedder/embedder.ts",
+   "edits": [
+    [
+     "d.text.slice(0, MAX_CHARS)",
+     "d.text"
+    ]
+   ],
+   "red": [
+    "the embedder embeds a book of mixed text lengths in bounded memory and finishes although writes land during its read"
+   ]
+  },
+  {
+   "id": "M275",
+   "title": "r_compat_parity: the embedder does not resume a read a write interrupted",
+   "file": "executors/embedder/embedder.ts",
+   "edits": [
+    [
+     "...(cursor ? { cursor, resume: true } : {})",
+     "...(cursor ? { cursor } : {})"
+    ]
+   ],
+   "red": [
+    "the embedder embeds a book of mixed text lengths in bounded memory and finishes although writes land during its read"
+   ]
+  },
+  {
+   "id": "M276",
+   "title": "r_compat_parity: a stale cursor cannot be resumed",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "    else if (a.resume === true && typeof c.k === 'string') {",
+     "    else if (false) {"
+    ]
+   ],
+   "red": [
+    "the embedder embeds a book of mixed text lengths in bounded memory and finishes although writes land during its read"
+   ]
+  },
+  {
+   "id": "M277",
+   "title": "r_compat_parity: why asks the engine about conf, persp and asserted",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (rel === 'conf' || rel === 'persp' || rel === 'asserted') return this.explainAssertion(",
+     "    if (false) return this.explainAssertion("
+    ]
+   ],
+   "red": [
+    "why agrees with ask for every literal ask returns, including conf"
+   ]
+  },
+  {
+   "id": "M278",
+   "title": "r_compat_parity: the main world keeps asserted rows, retracting the replaced one",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "      next.set(F, cur);\n",
+     "      if (old && !next.has(F)) retract.push(row(book, F, old));\n      next.set(F, cur);\n      load.push(`${row(book, F, cur)}.`);\n"
+    ]
+   ],
+   "red": [
+    "update_assertion and delete_assertion answer within 100 ms and a read after a write within one second while writes keep arriving"
+   ]
+  },
+  {
+   "id": "M279",
+   "title": "r_compat_parity: the Enox view re-derives everything on each write",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "    const subjects = [...this.dirtySubjects];",
+     "    const subjects = [...new Set([...this.dirtySubjects, ...this.attrFacts.keys()])];\n    for (const F of this.assertionIds) this.dirtyEdges.add(F);"
+    ]
+   ],
+   "red": [
+    "update_assertion and delete_assertion answer within 100 ms and a read after a write within one second while writes keep arriving"
    ]
   }
  ]

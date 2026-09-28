@@ -156,6 +156,18 @@
    "kind": "dependency",
    "match": "@huggingface/transformers@3.7.0",
    "why": "the embedder's learned model (r_semantic_search): runs a multilingual sentence encoder locally via ONNX. Pinned at 3.7.0 because its onnxruntime-node 1.21 still ships macOS x64 (4.x does not). Separate process and package; the core stays zero-deps"
+  },
+  {
+   "file": "src/lock.ts",
+   "kind": "store",
+   "match": ".writeFileSync(",
+   "why": "the data directory's lock: who holds it (pid, host, role, url), written whole into a temp file and linked into place (r_single_writer); not a store of facts"
+  },
+  {
+   "file": "src/lock.ts",
+   "kind": "store",
+   "match": ".renameSync(",
+   "why": "the data directory's lock: a serve adds the URL it listens at, replacing its own lock file whole (r_single_writer)"
   }
  ]
 }

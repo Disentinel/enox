@@ -29,23 +29,56 @@ import { EMBEDDING, type Fact } from '../../src/facts.ts';
 import { cosine, decode, embeddingKey, encode, modelFromEnv, type Model } from './embed.ts';
 
 const TOP = 50;
-const BATCH = 1000;
 
-type Row = { identity: string; cells: (string | number)[] };
+// MEMORY (r_compat_parity). A model pads every text of one call to the
+// longest in it: 1000 texts with one long one cost 1000 × the long one (29 GB
+// measured on the owner's book). So a call holds texts of similar length —
+// sorted by length, packed while count × longest stays within PAD_BUDGET
+// characters, and never more than BATCH texts — and a text is cut at
+// MAX_CHARS, past what the model reads anyway (512 tokens for e5).
+export const BATCH = 64;
+export const PAD_BUDGET = 32_768;
+export const MAX_CHARS = 2_048;
 
-/** Every row of one question, page by page. */
-async function askAll(node: OpCaller, query: string): Promise<Row[]> {
-  const out: Row[] = [];
-  let cursor: string | undefined;
-  do {
-    const r = await node('ask', { query, limit: 10_000, ...(cursor ? { cursor } : {}) }) as { rows: Row[]; cut?: boolean; cursor?: string };
-    out.push(...r.rows);
-    cursor = r.cut ? r.cursor : undefined;
-  } while (cursor);
+/** Texts in calls of bounded padded size: [start, end) ranges of `texts`,
+ *  which must be sorted by length. */
+export function buckets(lengths: number[], budget = PAD_BUDGET, most = BATCH): [number, number][] {
+  const out: [number, number][] = [];
+  let i = 0;
+  while (i < lengths.length) {
+    let j = i + 1;
+    while (j < lengths.length && j - i < most && (j + 1 - i) * Math.max(1, lengths[j]!) <= budget) j++;
+    out.push([i, j]);
+    i = j;
+  }
   return out;
 }
 
-interface Doc { kind: 'node' | 'fact'; id: string; text: string }
+type Row = { identity: string; cells: (string | number)[] };
+
+export interface ReadOptions {
+  /** Rows per page (default the node's most, 10 000). */
+  pageSize?: number;
+  /** Called after each page is read (a test lands a write here). */
+  onPage?: (page: number) => Promise<void> | void;
+}
+
+/** Every row of one question, page by page. A write that lands between two
+ *  pages would make the next page refuse (cursor_stale); the read RESUMES
+ *  instead, after the last row it had, in the answer of the log as it is now.
+ *  A row written behind its position is left for the next read. */
+async function askAll(node: OpCaller, query: string, o: ReadOptions = {}): Promise<Row[]> {
+  const out: Row[] = [];
+  let cursor: string | undefined;
+  let pages = 0;
+  do {
+    const r = await node('ask', { query, limit: o.pageSize ?? 10_000, ...(cursor ? { cursor, resume: true } : {}) }) as { rows: Row[]; cut?: boolean; cursor?: string };
+    out.push(...r.rows);
+    cursor = r.cut ? r.cursor : undefined;
+    if (cursor) await o.onPage?.(++pages);
+  } while (cursor);
+  return out;
+}
 
 /** What there is to search in a book: its entities and its assertions, as text. */
 function docsOf(rows: Row[]): Doc[] {
@@ -75,14 +108,14 @@ function docsOf(rows: Row[]): Doc[] {
 }
 
 /** Answer the search intents addressed to `me`. Returns how many were answered. */
-export async function answerSearches(url: string, me: LocalIdentity, model: Model, log: (s: string) => void = () => {}): Promise<number> {
+export async function answerSearches(url: string, me: LocalIdentity, model: Model, log: (s: string) => void = () => {}, o: ReadOptions = {}): Promise<number> {
   const node = httpCaller(url, me);
   const intents = (await pullIntents(url, me)).filter((i) => i.kind === 'search');
   if (intents.length === 0) return 0;
 
   // The index, rebuilt from this embedder's own book in the log.
   const index = new Map<string, Float32Array>();
-  const own = await askAll(node, `edge[${bookOf(me.name)}](F, K, ${JSON.stringify(EMBEDDING)}, V)`).catch((e: unknown) => {
+  const own = await askAll(node, `edge[${bookOf(me.name)}](F, K, ${JSON.stringify(EMBEDDING)}, V)`, o).catch((e: unknown) => {
     if (e instanceof RemoteRefusal && e.reason === 'unknown_book') return [];    // nothing published yet
     throw e;
   });
@@ -96,10 +129,11 @@ export async function answerSearches(url: string, me: LocalIdentity, model: Mode
   for (const i of intents) byAuthor.set(i.author, [...(byAuthor.get(i.author) ?? []), i]);
   const results: Fact[] = [];
   for (const [author, asked] of byAuthor) {
-    const docs = docsOf(await askAll(node, `edge[${bookOf(author)}](F, S, R, T)`));
-    const missing = [...new Map(docs.map((d) => [embeddingKey(model.id, d.text), d.text])).entries()].filter(([k]) => !index.has(k));
-    for (let i = 0; i < missing.length; i += BATCH) {
-      const chunk = missing.slice(i, i + BATCH);
+    const docs = docsOf(await askAll(node, `edge[${bookOf(author)}](F, S, R, T)`, o));
+    const missing = [...new Map(docs.map((d) => [embeddingKey(model.id, d.text), d.text.slice(0, MAX_CHARS)])).entries()]
+      .filter(([k]) => !index.has(k)).sort((x, y) => x[1].length - y[1].length);
+    for (const [i, j] of buckets(missing.map(([, t]) => t.length))) {
+      const chunk = missing.slice(i, j);
       const vs = await model.embed(chunk.map(([, t]) => t), 'passage');
       const facts = chunk.map(([k], j) => {
         // Quantised as it will be read back, so this run ranks as a rebuild would.

@@ -9,10 +9,16 @@
 // incremental evaluate this family goes back into rules.
 //
 // What it does instead: an identity's later assertion of a fact (later in its
-// chain) replaces the earlier one. Admission knows the chain order, so it
-// RETRACTS the replaced asserted[book](F, P, C, S) row from the engine and
-// loads the new one — the engine's `asserted` is then exactly the current
-// assertions. The log keeps every assertion; replay loads only the current.
+// chain) replaces the earlier one. Admission knows the chain order and keeps
+// the current assertion of each fact HERE; asserted(F, P, C, S), conf(F, C)
+// and persp(F, P) are answered from it (node.askAssertions), and why/whynot
+// explain from it too. The main world holds no asserted rows: rofl-serve's
+// retract took 0.15–20 s per row at 200 000 facts (measured 2026-09-28), so
+// an update or delete, each replacing one assertion, took seconds
+// (r_compat_parity). Only the rows a fact's current assertion ACTS through —
+// a grant, delegation, export, trust or follow — are loaded into, and
+// retracted from, the main world; a rule world loads the asserted rows whole.
+// The log keeps every assertion; replay loads only the current.
 import { DELEGATE, EXPORT, factId, GRANT, permille, roflString, sha256hex, type Fact } from './facts.ts';
 import { checkName } from './identity.ts';
 
@@ -66,14 +72,10 @@ export class Assertions {
       const F = factId(f);
       const old = next.get(F) ?? m.get(F);
       if (old && old.S > seq) continue;                 // never happens in chain order; guard anyway
-      if (old && !next.has(F)) {
-        retract.push(row(book, F, old));
-        if (old.follow !== undefined && old.C > 0) unfollowed.add(old.follow);
-      }
+      if (old && !next.has(F) && old.follow !== undefined && old.C > 0) unfollowed.add(old.follow);
       const ctl = controlRow(book, f);
       const cur: Current = { P: f.perspective, C: permille(f.confidence), S: seq, ...(f.relation === FOLLOW ? { follow: f.source } : {}), ...(ctl ? { ctl } : {}) };
       next.set(F, cur);
-      load.push(`${row(book, F, cur)}.`);
       if (cur.follow !== undefined && cur.C > 0) load.push(`${followRow(book, cur.follow)}.`);
     }
     // A control row changes only when the fact starts or stops acting: loaded
@@ -95,11 +97,13 @@ export class Assertions {
     return { retract, load: load.length ? `${load.join('\n')}\n` : '', apply: () => { for (const [F, c] of next) m.set(F, c); } };
   }
 
-  /** Every current assertion of an identity, as ROFL (replay, rule worlds). */
-  lines(identity: string, book: string): string {
+  /** Every current assertion of an identity, as ROFL: its control and follow
+   *  rows (the main world), and with `asserted` its asserted rows too (rule
+   *  worlds, where an author's rules may read them). */
+  lines(identity: string, book: string, asserted = false): string {
     const m = this.by.get(identity);
     if (!m) return '';
-    return [...m].map(([F, c]) => `${row(book, F, c)}.\n${c.follow !== undefined && c.C > 0 ? `${followRow(book, c.follow)}.\n` : ''}${acting(c) ? `${c.ctl}.\n` : ''}`).join('');
+    return [...m].map(([F, c]) => `${asserted ? `${row(book, F, c)}.\n` : ''}${c.follow !== undefined && c.C > 0 ? `${followRow(book, c.follow)}.\n` : ''}${acting(c) ? `${c.ctl}.\n` : ''}`).join('');
   }
 }
 

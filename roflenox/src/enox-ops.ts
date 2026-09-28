@@ -14,6 +14,7 @@ const obj = (properties: Record<string, Prop>, required: string[] = []): Schema 
   ({ type: 'object', required, properties, additionalProperties: false });
 const s = (description?: string): Prop => ({ type: 'string', ...(description ? { description } : {}) });
 const n = (description?: string): Prop => ({ type: 'number', ...(description ? { description } : {}) });
+const int = (description?: string): Prop => ({ type: 'integer', ...(description ? { description } : {}) });
 const b = (description?: string): Prop => ({ type: 'boolean', ...(description ? { description } : {}) });
 const pretty = (r: unknown) => JSON.stringify(r, null, 2);
 const plain = (r: unknown) => String(r);
@@ -62,13 +63,22 @@ async function write(ctx: Ctx, facts: Fact[]): Promise<void> {
   if (facts.length) await node(ctx).assertAsSelf(uniq(facts));
 }
 
+/** Enox's staleness, as the base adds it to semantic_search rows: the age of
+ *  the entity's updated_at in whole days, and stale past its domain's TTL. */
+function staleness<T extends { domain: string; updated_at: string | null }>(row: T, now: number): T & { age_days?: number; stale?: boolean } {
+  if (!row.updated_at) return row;
+  const age_days = Math.round((now - Date.parse(row.updated_at)) / 86_400_000);
+  return { ...row, age_days, stale: age_days > (STALE_TTL[row.domain || 'default'] ?? STALE_TTL_DEFAULT) };
+}
+const STALE_TTL_DEFAULT = 365;
+
 const confStr = (e: Edge) => (e.confidence < 1 ? ` (${e.confidence})` : '');
 const byStr = (e: Edge) => (e.asserted_by ? ` [by ${e.asserted_by}${e.claimed_by ? `, claims ${JSON.stringify(e.claimed_by)}` : ''}]` : '');
 const NOT_FOUND = (term: string) => refuseText(`Entity "${term}" not found`);
 
 const ASSERTION: Record<string, Prop> = {
   source: s(), target: s(), relation: s(), source_type: s(), source_domain: s(), target_type: s(), target_domain: s(),
-  confidence: n(), context: s(), asserted_by: s(), proof_depth: n(),
+  confidence: n(), context: s(), asserted_by: s(), proof_depth: int('an integer (PROTOCOL): the depth of the proof behind the assertion'),
 };
 
 export const ENOX_OPS: Op[] = [
@@ -170,7 +180,7 @@ export const ENOX_OPS: Op[] = [
       });
       return L.join('\n');
     } },
-  { name: 'recall', description: 'Broad "what do we know about X" — text search (semantic part needs the embedder executor), packed into a token budget.',
+  { name: 'recall', description: 'Broad "what do we know about X" — names and meaning (the meaning part is the embedder executor\'s, when one is named), packed into a token budget.',
     input: obj({ query: s(), budget: n(), domain: s() }, ['query']), access: 'anyone',
     text: (r) => ((r as { message?: string }).message ? JSON.stringify(r) : pretty(r)),
     run: async (ctx, a) => {
@@ -178,8 +188,24 @@ export const ENOX_OPS: Op[] = [
       const q = (a.query as string).toLowerCase();
       const budget = (a.budget as number | undefined) ?? 1500;
       const chars = budget * 4;
-      const hits = [...g.nodes.values()].filter((x) => x.name.toLowerCase().includes(q) && (a.domain === undefined || x.domain.startsWith(a.domain as string)))
-        .slice(0, 20).map((x) => ({ x, score: x.name.toLowerCase() === q ? 10 : 5 })).sort((p, r) => r.score - p.score);
+      const inDomain = (x: { domain: string }) => a.domain === undefined || x.domain.startsWith(a.domain as string);
+      const hits = [...g.nodes.values()].filter((x) => x.name.toLowerCase().includes(q) && inDomain(x))
+        .slice(0, 20).map((x) => ({ x, score: x.name.toLowerCase() === q ? 10 : 5 }));
+      // Meaning as well as names, as the base does: the embedder's answer to
+      // this search (the operator's recall asks it, like semantic_search), its
+      // entity hits at 0.25 and above weighted 5×. With no embedder named, or
+      // before it has answered, recall is the name match alone.
+      const meant = await node(ctx).meaningSearch(a.query as string, ctx.caller);
+      if (meant.state === 'answered') {
+        for (const h of meant.hits) {
+          if (h.kind !== 'node' || h.score < 0.25) continue;
+          const had = hits.find((p) => p.x.id === h.id);
+          if (had) { had.score += h.score * 5; continue; }
+          const x = g.nodes.get(h.id);                  // only what the caller may read
+          if (x && inDomain(x)) hits.push({ x, score: h.score * 5 });
+        }
+      }
+      hits.sort((p, r) => r.score - p.score);
       if (!hits.length) return { nodes: [], edges: [], message: 'No matches found' };
       let used = 0;
       const nodes: unknown[] = [];
@@ -224,7 +250,7 @@ export const ENOX_OPS: Op[] = [
       const sim = (x: number) => Math.round(x * 1000) / 1000;
       const nodes = r.hits.filter((h) => h.kind === 'node').map((h) => ({ h, nd: g.nodes.get(h.id) }))
         .filter(({ nd }) => nd && (domain === undefined || nd.domain.startsWith(domain)))
-        .slice(0, topK).map(({ h, nd }) => ({ ...g.record(nd!), similarity: sim(h.score) }));
+        .slice(0, topK).map(({ h, nd }) => staleness({ ...g.record(nd!), similarity: sim(h.score) }, ctx.now()));
       const byF = new Map(g.edges.map((e) => [e.F, e]));
       const edges = r.hits.filter((h) => h.kind === 'fact').map((h) => ({ h, e: byF.get(h.id) }))
         .filter(({ e }) => e && (domain === undefined || (g.nodes.get(e.source)?.domain ?? '').startsWith(domain)))
@@ -334,10 +360,10 @@ export const ENOX_OPS: Op[] = [
         asserted_by: r.result.asserted_by, claimed_by: r.result.claimed_by, fact_id: r.result.fact_id, created: r.result.created };
     } },
   { name: 'update_assertion', description: 'Change an assertion\'s confidence/context/author: a new assertion that supersedes.',
-    input: obj({ fact_id: s(), confidence: n(), context: s(), asserted_by: s(), proof_depth: n() }, ['fact_id']), access: 'operator', text: pretty,
+    input: obj({ fact_id: s(), confidence: n(), context: s(), asserted_by: s(), proof_depth: ASSERTION.proof_depth! }, ['fact_id']), access: 'operator', text: pretty,
     run: async (ctx, a) => {
       const g = await graph(ctx);
-      const e = g.edges.find((x) => x.fact_id === a.fact_id);
+      const e = g.edgeByFactId(a.fact_id as string);
       if (!e) throw refuseText(`Assertion ${a.fact_id} not found`);
       const t = new Date().toISOString();
       const confidence = (a.confidence as number | undefined) ?? e.confidence;
@@ -353,7 +379,7 @@ export const ENOX_OPS: Op[] = [
     input: obj({ fact_id: s() }, ['fact_id']), access: 'operator', text: plain,
     run: async (ctx, a) => {
       const g = await graph(ctx);
-      const e = g.edges.find((x) => x.fact_id === a.fact_id);
+      const e = g.edgeByFactId(a.fact_id as string);
       if (!e) throw refuseText(`Assertion ${a.fact_id} not found`);
       await write(ctx, [{ source: e.source, relation: e.relation, target: e.target, perspective: ENOX_PERSPECTIVE, confidence: 0 },
         meta(e.F, 'deleted_at', new Date().toISOString())]);

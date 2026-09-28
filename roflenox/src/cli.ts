@@ -32,6 +32,7 @@ import { createServer, listen } from './http.ts';
 import { httpCaller } from './client.ts';
 import { callOp, createIdentity, isLocal, OP, OPS, type Op } from './ops.ts';
 import { serveStdio } from './stdio.ts';
+import { alive, DataLock, holderOf, refusal } from './lock.ts';
 
 const GLOBAL = new Set(['data', 'url']);
 const SERVE = ['port', 'host', 'public-url', 'freshness', 'checkpoint-window', 'backup-to', 'backup-every', 'name', 'domain-vouch'];
@@ -52,7 +53,7 @@ function coerce(op: Op, key: string, v: string): unknown {
   const p = op.input.properties[key];
   if (!p) throw new Error(`${op.name} takes no --${key}`);
   if (p.type === 'string') return v;
-  if (p.type === 'number') return Number(v);
+  if (p.type === 'number' || p.type === 'integer') return Number(v);
   if (p.type === 'boolean') return v === 'true';
   try { return JSON.parse(v); } catch { return v; }
 }
@@ -69,6 +70,8 @@ export function usage(): string {
 }
 
 async function serve(data: string, f: Record<string, string>): Promise<number> {
+  // The data directory first, before anything in it is read (r_single_writer).
+  const lock = DataLock.acquire(data, 'serve');
   if (!LocalIdentity.load(data)) createIdentity(data, f.name);
   const node = await RoflenoxNode.open({
     dataDir: data,
@@ -81,6 +84,7 @@ async function serve(data: string, f: Record<string, string>): Promise<number> {
   for (const w of node.warnings) process.stderr.write(`WARNING: ${w}\n`);
   const server = createServer(node);
   const at = await listen(server, Number(f.port ?? 7380), f.host ?? '127.0.0.1');
+  lock.note(at);
   process.stdout.write(`serving ${node.identity!.name} at ${at}\n`);
   if (f['backup-to']) {
     // A backup on a schedule (r_backup): at most one period of writes is lost.
@@ -94,6 +98,7 @@ async function serve(data: string, f: Record<string, string>): Promise<number> {
   const stop = async () => {
     server.close();
     await node.close();
+    lock.release();
     process.exit(0);
   };
   process.on('SIGINT', stop);
@@ -117,6 +122,22 @@ async function main(argv: string[]): Promise<number> {
   for (const [k, v] of Object.entries(f)) if (!GLOBAL.has(k)) args[k] = coerce(op, k, v);
   (op.positional ?? []).forEach((k, i) => { if (pos[i] !== undefined && args[k] === undefined) args[k] = coerce(op, k, pos[i]!); });
 
+  // A local operation that signs owns the data directory while it runs
+  // (r_single_writer) — or, when a serve owns it and this op talks to that
+  // serve's URL, goes through it: the op writes nothing in the directory, and
+  // its batch is admitted by the one process that keeps the log.
+  let lock: DataLock | null = null;
+  if (op.signs) {
+    const h = holderOf(data);
+    const through = h !== null && alive(h) && h.url !== undefined && new URL(h.url).origin === new URL(url).origin;
+    if (!through) lock = DataLock.acquire(data, `roflenox ${op.name}`);
+  }
+  try {
+    return await runOp(op, args, data, url);
+  } finally { lock?.release(); }
+}
+
+async function runOp(op: Op, args: Record<string, unknown>, data: string, url: string): Promise<number> {
   const me = LocalIdentity.load(data) ?? undefined;
   const remote = httpCaller(url, me);
   const result = isLocal(op)

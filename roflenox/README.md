@@ -145,11 +145,14 @@ backed up 2 receipts to /tmp/roflenox-demo/backup/latest
 directory, with no HTTP server. The caller is this machine's own identity,
 so the local-only operations are offered as tools too.
 
-> **Warning: never run `stdio` while `serve` is running on the same data
-> directory.** Nothing stops you, and the two processes then sign competing
-> successors of the same batch. The node records that as a fork of its own
-> chain and **refuses to start** after that (see "Known defects" below).
+> One process owns a data directory at a time. While `serve` runs on it,
+> `stdio` on the same directory refuses to start and names the holder:
+> `roflenox: the data directory … is held by serve (pid …, at http://127.0.0.1:7380); …`.
 > Stop `serve` first, as step 4 does, or give each one its own data directory.
+> A local operation that signs (`publish`, `rotate`, `import_enox`, …) goes
+> through a running `serve` when `--url` is that serve's; otherwise it takes the
+> directory itself for as long as it runs. A holder killed without letting go
+> leaves a stale lock (`<data>/lock`), which the next process takes over.
 
 This proves it works by speaking raw JSON-RPC to the server: `initialize`,
 then `tools/list`, then one `tools/call`:
@@ -283,13 +286,6 @@ rm -rf "$DEMO"
 
 ## Known defects (found while writing this guide)
 
-1. **Running `stdio` and `serve` on one data directory forks the node's own
-   chain, and the node will not start again.** There is no lock on the data
-   directory. To reproduce, start from a data dir with one asserted fact and
-   `serve` running on it. Then send `tools/call assert` (one fact) through
-   `./src/cli.ts stdio` on the same `ROFLENOX_DATA`. It answers
-   `admitted: true`, but the running `serve` does not see the fact (`ask`
-   returns 0 rows). Next, `./src/cli.ts assert …` through `serve` also answers
-   `admitted: true`. Stop `serve` and start it again, and it exits with:
-   `roflenox: log batch node.example.org/… no longer verifies (node.example.org signed two successors of …; both are kept as proof of the fork); refusing to start`.
-   Until this is fixed, run exactly one process per data directory.
+1. Fixed: running `stdio` beside `serve` on one data directory used to fork the
+   node's own chain. The data directory is now locked (see step 5), and the
+   second process refuses before it reads or writes anything.

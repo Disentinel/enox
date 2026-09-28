@@ -34,7 +34,7 @@ import { DomainVouch, type DomainTransport } from './domain.ts';
 import { verifyRequest } from './httpsig.ts';
 import { compileRule, RULE } from './rules.ts';
 import { RESULT } from './executor.ts';
-import { Assertions, match } from './assertions.ts';
+import { Assertions, match, type Current } from './assertions.ts';
 import { whyNotDelegated, whyNotReadable } from './expiry.ts';
 import { open as openSealed, type Envelope } from './seal.ts';
 
@@ -124,6 +124,10 @@ function programOf(v: Verified, seq: number): string {
   // src/assertions.ts (it replaces the superseded/current/view rules).
   return toRofl(v.facts, bookOf(v.manifest.identity), seq, false);
 }
+
+/** The cells of a current assertion as conf(F, C), persp(F, P) or asserted(F, P, C, S) holds them. */
+const assertionCells = (rel: string, F: string, c: Current): (string | number)[] =>
+  rel === 'conf' ? [F, c.C] : rel === 'persp' ? [F, c.P] : [F, c.P, c.C, c.S];
 
 /** One hit of a search by meaning: an entity ("node") or a fact, by id. */
 export interface SearchHit { kind: 'node' | 'fact'; id: string; score: number }
@@ -908,7 +912,7 @@ export class RoflenoxNode {
       await this.requireBook(query, requester, scope, false);
       this.fault('engine:ask');
       const { rel, book, args } = parseLiteral(query);
-      if (perspective !== null || rel === 'conf' || rel === 'persp') {
+      if (perspective !== null || rel === 'conf' || rel === 'persp' || rel === 'asserted') {
         const a = await this.askAssertions(rel, book, args, scope, perspective);
         const forked = this.forkedUnknowns(scope, book);
         if (forked.length) a.unknown = [...(a.unknown ?? []), ...forked];
@@ -944,8 +948,8 @@ export class RoflenoxNode {
     }, true);
   }
 
-  /** conf(F, C), persp(F, P), and edge(F, S, R, T) restricted to a
-   *  perspective — from the current assertions admission keeps
+  /** conf(F, C), persp(F, P), asserted(F, P, C, S), and edge(F, S, R, T)
+   *  restricted to a perspective — from the current assertions admission keeps
    *  (src/assertions.ts), within the reader's scope. */
   private async askAssertions(rel: string, book: string | null, args: string, scope: Map<string, BookScope>, perspective: string | null): Promise<AskAnswer> {
     const a = splitArgs(args);
@@ -966,11 +970,11 @@ export class RoflenoxNode {
         }
       }
     } else {
-      if (a.length !== 2) throw new Refusal(400, 'bad_query', `${rel} takes 2 arguments`);
+      if (a.length !== (rel === 'asserted' ? 4 : 2)) throw new Refusal(400, 'bad_query', `${rel} takes ${rel === 'asserted' ? 4 : 2} arguments`);
       for (const [, sc] of books) {
         for (const [F, c] of this.assertions.of(sc.identity)) {
           if (sc.only !== null && !sc.only.has(F)) continue;
-          const m = match(a, [F, rel === 'conf' ? c.C : c.P]);
+          const m = match(a, assertionCells(rel, F, c));
           if (m) rows.push({ identity: sc.identity, cells: m.cells });
         }
       }
@@ -994,6 +998,7 @@ export class RoflenoxNode {
     await this.requireBook(query, requester, scope, true);
     this.fault('engine:explain');
     const { rel, book, args } = parseLiteral(query);
+    if (rel === 'conf' || rel === 'persp' || rel === 'asserted') return this.explainAssertion(op, rel, book, args, scope);
     const out = rel === 'answered'
       ? [...scope].filter(([b, sc]) => sc.only === null && (book === null || b === book)).map(([, sc]) => ({ identity: sc.identity, holds: false, text: `whynot answered: ${sc.identity} has no rules here` }))
       : await (op === 'why' ? this.engine.why(query, scope) : this.engine.whynot(query, scope));
@@ -1009,6 +1014,31 @@ export class RoflenoxNode {
       if (w.partial) e.unknown = { reason: w.holes.join('; '), budget: this.ruleBudget, unit: 'steps' };
     }
     return out;
+  }
+
+  /** why/whynot conf(F, C), persp(F, P) and asserted(F, P, C, S): explained
+   *  from the current assertions, where ask answers them (askAssertions), so
+   *  the two agree (r_compat_parity). */
+  private explainAssertion(op: 'why' | 'whynot', rel: 'conf' | 'persp' | 'asserted', book: string | null, args: string, scope: Map<string, BookScope>): Explanation[] {
+    const a = splitArgs(args);
+    if (a.length !== (rel === 'asserted' ? 4 : 2)) throw new Refusal(400, 'bad_query', `${rel} takes ${rel === 'asserted' ? 4 : 2} arguments`);
+    const books = [...scope].filter(([b, sc]) => sc.only === null && (book === null || b === book)).sort((x, y) => (x[0] < y[0] ? -1 : 1));
+    return books.map(([b, sc]) => {
+      const lit = `${rel}[${b}](${a.join(',')})`;
+      const cur = this.assertions.of(sc.identity);
+      const row = (F: string, c: Current) => `asserted[${b}](${roflString(F)},${roflString(c.P)},${c.C},${c.S})`;
+      const hit = [...cur].find(([F, c]) => match(a, assertionCells(rel, F, c)) !== null);
+      if (hit) {
+        const why = `${lit} [the current assertion]\n  ${row(hit[0], hit[1])} [${sc.identity}'s latest assertion of the fact: batch ${hit[1].S} of its chain]`;
+        return { identity: sc.identity, holds: true, text: op === 'why' ? why : `whynot ${lit}: it holds —\n  ${why}` };
+      }
+      // Not held: say what the fact's current assertion is, if it has one.
+      const F = /^"/.test(a[0]!) ? JSON.parse(a[0]!) as string : null;
+      const c = F !== null ? cur.get(F) : undefined;
+      const reason = c ? `the current assertion of the fact is ${row(F!, c)}`
+        : F !== null ? `${sc.identity} holds no assertion of that fact` : `no current assertion of ${sc.identity}'s matches`;
+      return { identity: sc.identity, holds: false, text: op === 'why' ? `${lit} does not hold; ${reason}` : `whynot ${lit}:\n  ${reason}` };
+    });
   }
 
   private headsOf(author: string): Set<string> {
@@ -1094,7 +1124,7 @@ export class RoflenoxNode {
     for (const b of [own, ...foreign]) {
       const id = owners.get(b);
       if (!id) continue;
-      const text = (this.programs.get(id) ?? []).join('') + this.assertions.lines(id, b);
+      const text = (this.programs.get(id) ?? []).join('') + this.assertions.lines(id, b, true);
       if (text) await w.session.load(text, id);
       if (b !== own || ranging) await w.session.load(mayReadRules(b, id), 'roflenox');
     }

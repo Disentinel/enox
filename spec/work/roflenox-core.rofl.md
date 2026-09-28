@@ -103,3 +103,6 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_no_orphan_tests` at "401323a64dfa1c3eea9ab4aea24143fc54818ed7".
 - `roflenox_core` takes `r_domain_vouch`.
 - `roflenox_core` finished `r_domain_vouch` at "85a2cfc1bfc3969bc9de6f5c9ab62422faa255dd".
+- `roflenox_core` takes `r_single_writer`.
+- `roflenox_core` finished `r_single_writer` at "3b85c6fa439a297cbabe1ac16852031c02a61370".
+- `roflenox_core` takes `r_compat_parity`.

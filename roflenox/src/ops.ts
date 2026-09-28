@@ -24,7 +24,7 @@ import type { RoflenoxNode } from './node.ts';
 import { ENOX_OPS } from './enox-ops.ts';
 
 /** A property; no `type` means any JSON value. */
-export type Prop = { type?: 'string' | 'number' | 'boolean' | 'array' | 'object'; description?: string; items?: unknown };
+export type Prop = { type?: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object'; description?: string; items?: unknown };
 export interface Schema { type: 'object'; required?: string[]; properties: Record<string, Prop>; additionalProperties: false }
 
 export interface Ctx {
@@ -44,6 +44,9 @@ export interface Op {
   description: string;
   input: Schema;
   access: 'anyone' | 'operator' | { local: string };
+  /** A local op that signs with, or makes, this machine's key: from the CLI it
+   *  owns the data directory while it runs (r_single_writer, src/lock.ts). */
+  signs?: true;
   /** CLI convenience: properties that may also be given positionally, in order. */
   positional?: string[];
   /** A wire alias. `:x` path segments and GET query parameters become args;
@@ -86,7 +89,12 @@ const explainSay = (r: { identity: string; text: string }[]) => r.map((e) => `[$
  /** Answer limits (r_answer_limits): no answer is silently truncated. A longer
  *  one comes back `cut: true` with a `cursor`; the cursor names the question,
  *  the asker and the log state, so a page of a changed log is refused rather
- *  than stitched from two different answers. */
+ *  than stitched from two different answers — unless the asker says `resume`:
+ *  then the page continues after the last row it had, in the answer of the
+ *  log as it is now, marked `resumed: true` (rows are in one fixed order).
+ *  A reader that must finish while writes keep arriving (the embedder,
+ *  r_compat_parity) takes that: rows written behind its position are left
+ *  for its next read. */
 export const DEFAULT_LIMIT = 1000;
 export const MAX_LIMIT = 10_000;
 
@@ -94,18 +102,25 @@ function page(ctx: Ctx, a: Record<string, unknown>, ans: { vars: string[]; rows:
   const limit = Math.min(MAX_LIMIT, Math.max(1, Math.floor((a.limit as number | undefined) ?? DEFAULT_LIMIT)));
   const head = (ctx.node!.health() as { log_head: string }).log_head;
   const q = createHash('sha256').update(JSON.stringify([a.query, a.perspective ?? null, ctx.caller])).digest('hex').slice(0, 16);
+  const key = (r: unknown) => { const x = r as { identity: string; cells: unknown[] }; return JSON.stringify([x.identity, x.cells]); };
   let offset = 0;
+  let resumed = false;
   if (a.cursor !== undefined) {
-    let c: { q: string; o: number; h: string };
+    let c: { q: string; o: number; h: string; k: string };
     try { c = JSON.parse(Buffer.from(a.cursor as string, 'base64url').toString('utf8')); } catch { throw new Refusal(400, 'bad_cursor', 'not a cursor'); }
     if (c.q !== q) throw new Refusal(400, 'bad_cursor', 'this cursor belongs to another question or asker');
-    if (c.h !== head) throw new Refusal(409, 'cursor_stale', 'the log has changed since the first page; ask again from the start');
-    offset = c.o;
+    if (c.h === head) offset = c.o;
+    else if (a.resume === true && typeof c.k === 'string') {
+      offset = ans.rows.findIndex((r) => key(r) > c.k);
+      if (offset < 0) offset = ans.rows.length;
+      resumed = true;
+    } else throw new Refusal(409, 'cursor_stale', 'the log has changed since the first page; ask again from the start (or ask with resume to continue after the last row)');
   }
   const rows = ans.rows.slice(offset, offset + limit);
   const more = offset + limit < ans.rows.length;
-  return { ...ans, rows, ...(more ? { cut: true, cursor: Buffer.from(JSON.stringify({ q, o: offset + limit, h: head })).toString('base64url'),
-    total: ans.rows.length } : {}) };
+  return { ...ans, rows, ...(resumed ? { resumed: true } : {}),
+    ...(more ? { cut: true, cursor: Buffer.from(JSON.stringify({ q, o: offset + limit, h: head, k: key(rows[rows.length - 1]) })).toString('base64url'),
+      total: ans.rows.length } : {}) };
 }
 
 const FACT_ITEMS = { type: 'object', required: ['source', 'relation', 'target', 'perspective', 'confidence'] };
@@ -125,7 +140,8 @@ export const OPS: Op[] = [
     access: 'anyone', positional: ['identity'], http: { method: 'GET', path: '/identities/:identity' },
     run: async (ctx, a) => needNode(ctx).readIdentityChain(a.identity as string, ctx.caller) },
   { name: 'ask', description: `Ask one ROFL literal, e.g. edge(F, S, R, T); optional perspective restricts edge questions. At most \`limit\` rows (default ${DEFAULT_LIMIT}); a longer answer is marked cut, with a cursor for the next page.`,
-    input: obj({ query: str('one ROFL literal'), perspective: str(), limit: { type: 'number' }, cursor: str('from the previous page') }, ['query']),
+    input: obj({ query: str('one ROFL literal'), perspective: str(), limit: { type: 'number' }, cursor: str('from the previous page'),
+      resume: { type: 'boolean', description: 'with a cursor of a log that has changed since: continue after its last row instead of refusing' } }, ['query']),
     access: 'anyone', positional: ['query'], http: { method: 'POST', path: '/ask' }, say: rowsSay,
     run: async (ctx, a) => page(ctx, a, await needNode(ctx).ask(a.query as string, ctx.caller, (a.perspective as string | undefined) ?? null)) },
   { name: 'why', description: 'Why a ground literal holds, in the books you may read whole.', input: obj({ literal: str() }, ['literal']),
@@ -168,21 +184,21 @@ export const OPS: Op[] = [
     access: 'anyone', http: { method: 'POST', path: '/sealed', status: 201 },
     run: async (ctx, a) => ({ admitted: true, receipt: await needNode(ctx).admitSealed(a, ctx.caller) }) },
   // ---- local: they need the key, the code or the disk of this machine ---------
-  { name: 'init', description: 'Create this machine\'s identity (the recovery code is shown once).', input: obj({ name: str() }),
+  { name: 'init', signs: true, description: 'Create this machine\'s identity (the recovery code is shown once).', input: obj({ name: str() }),
     access: { local: 'it creates the private key on this machine' },
     say: (r) => `identity ${r.identity} ready in ${r.dataDir}`,
     run: async (ctx, a) => {
       const me = LocalIdentity.load(ctx.dataDir!) ?? createIdentity(ctx.dataDir!, a.name as string | undefined);
       return { identity: me.name, dataDir: ctx.dataDir };
     } },
-  { name: 'publish', description: 'Sign the facts in a JSONL file as this identity and admit them.', input: obj({ file: str() }, ['file']),
+  { name: 'publish', signs: true, description: 'Sign the facts in a JSONL file as this identity and admit them.', input: obj({ file: str() }, ['file']),
     access: { local: 'it signs with the private key on this machine' }, positional: ['file'],
     say: (r) => `published ${r.facts} facts as ${r.identity}`,
     run: async (ctx, a) => {
       const { publishVia, readFacts } = await import('./client.ts');
       return publishVia(ctx.call, localIdentity(ctx), readFacts(fs.readFileSync(a.file as string, 'utf8')), ctx.now);
     } },
-  { name: 'mirror', description: 'Pull an identity\'s feed from a peer URL (or its invitation link, the first time over plain HTTP) and admit it here.', input: obj({ peer: str(), identity: str() }, ['peer', 'identity']),
+  { name: 'mirror', signs: true, description: 'Pull an identity\'s feed from a peer URL (or its invitation link, the first time over plain HTTP) and admit it here.', input: obj({ peer: str(), identity: str() }, ['peer', 'identity']),
     access: { local: 'it signs its requests to the peer with the private key on this machine' }, positional: ['peer', 'identity'],
     say: (r) => `mirrored ${r.batches} batches of ${r.identity}`,
     run: async (ctx, a) => {
@@ -197,14 +213,14 @@ export const OPS: Op[] = [
       const me = localIdentity(ctx);
       return { identity: me.name, link: invitationLink(a.at as string, me) };
     } },
-  { name: 'rotate', description: 'A new key, signed over by the current one.', input: obj({}),
+  { name: 'rotate', signs: true, description: 'A new key, signed over by the current one.', input: obj({}),
     access: { local: 'it replaces the private key on this machine' }, say: (r) => `rotated ${r.identity}'s key`,
     run: async (ctx) => {
       const next = localIdentity(ctx).rotate(ctx.dataDir!, new Date(ctx.now()));
       await ctx.call('introduce', { chain: next.identityChain() });
       return { identity: next.name };
     } },
-  { name: 'recover', description: 'Revoke every key with the backup code and start a new one.', input: obj({ code: str(), name: str() }, ['code']),
+  { name: 'recover', signs: true, description: 'Revoke every key with the backup code and start a new one.', input: obj({ code: str(), name: str() }, ['code']),
     access: { local: 'it takes the backup code, which never crosses a network' }, positional: ['code'],
     say: (r) => `recovered ${r.identity}: every earlier key is revoked and a new one is in use`,
     run: async (ctx, a) => {
@@ -219,7 +235,7 @@ export const OPS: Op[] = [
   { name: 'backup', description: 'Copy the log up to its last receipt into <to>/latest, verified by a rebuild.', input: obj({ to: str() }, ['to']),
     access: { local: 'it reads this machine\'s data directory' }, say: (r) => `backed up ${r.receipts} receipts to ${r.dir}`,
     run: async (ctx, a) => (await import('./backup.ts')).backup(ctx.dataDir!, a.to as string, { now: ctx.now }) },
-  { name: 'checkpoint', description: 'Write the public feed and a signed checkpoint into a static directory.', input: obj({ out: str() }, ['out']),
+  { name: 'checkpoint', signs: true, description: 'Write the public feed and a signed checkpoint into a static directory.', input: obj({ out: str() }, ['out']),
     access: { local: 'it signs with the private key on this machine and writes to its disk' },
     say: (r) => `checkpointed ${r.identity}'s public feed into ${r.out}`,
     run: async (ctx, a) => {
@@ -228,7 +244,7 @@ export const OPS: Op[] = [
       await writeStaticFeedVia(ctx.call, me, a.out as string, ctx.now);
       return { identity: me.name, out: a.out };
     } },
-  { name: 'seal', description: 'Publish facts privately: admit them, then seal the batch to recipients into a file.',
+  { name: 'seal', signs: true, description: 'Publish facts privately: admit them, then seal the batch to recipients into a file.',
     input: obj({ file: str(), to: str('comma-separated identities'), out: str() }, ['file', 'to', 'out']),
     access: { local: 'it signs with the private key on this machine and writes to its disk' }, positional: ['file'],
     say: (r) => `sealed a batch of ${r.identity} for ${r.to} into ${r.out}`,
@@ -246,7 +262,7 @@ export const OPS: Op[] = [
       const text = /^https?:/.test(p) ? await (await fetch(p)).text() : fs.readFileSync(p, 'utf8');
       return ctx.call('admit_sealed', JSON.parse(text));
     } },
-  { name: 'import_enox', description: 'Import an Enox snapshot (JSONL of _type node/edge) as this identity; repeatable.',
+  { name: 'import_enox', signs: true, description: 'Import an Enox snapshot (JSONL of _type node/edge) as this identity; repeatable.',
     input: obj({ file: str(), batch_size: { type: 'number' } }, ['file']), access: { local: 'it signs with the private key on this machine and reads a file on its disk' },
     positional: ['file'],
     say: (r) => `imported ${r.entities} entities and ${r.assertions} assertions as ${r.facts} facts in ${r.batches} batches (${r.admitted} admitted, ${r.skipped} already held)`,
@@ -255,7 +271,7 @@ export const OPS: Op[] = [
       return importEnox(ctx.call, localIdentity(ctx), fs.readFileSync(a.file as string, 'utf8'),
         { batchSize: a.batch_size as number | undefined, now: ctx.now });
     } },
-  { name: 'follow', description: 'Keep mirrors current: run this identity\'s follow executor (every roflenox:follow fact it holds) until stopped.',
+  { name: 'follow', signs: true, description: 'Keep mirrors current: run this identity\'s follow executor (every roflenox:follow fact it holds) until stopped.',
     input: obj({ interval_ms: { type: 'number' }, rounds: { type: 'number' } }),
     access: { local: 'it signs its pulls with the private key on this machine and runs as a process here' },
     say: (r) => `followed for ${r.rounds} rounds`,
@@ -297,7 +313,9 @@ export function validate(op: Op, args: unknown): Record<string, unknown> {
     if (!p) throw new Refusal(400, 'bad_args', `${op.name} takes no ${k}`);
     if (v === undefined || p.type === undefined) continue;
     const t = Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v;
-    if (t !== p.type) throw new Refusal(400, 'bad_args', `${op.name}: ${k} is ${p.type}, not ${t}`);
+    // An integer is a number with no fraction (JSON Schema's "integer").
+    if (p.type === 'integer' && t === 'number' && !Number.isInteger(v)) throw new Refusal(400, 'bad_args', `${op.name}: ${k} is an integer, not ${v}`);
+    if (t !== (p.type === 'integer' ? 'number' : p.type)) throw new Refusal(400, 'bad_args', `${op.name}: ${k} is ${p.type}, not ${t}`);
   }
   return a;
 }

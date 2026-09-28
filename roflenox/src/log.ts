@@ -58,13 +58,15 @@ function fsyncDir(dir: string): void {
   try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
 }
 
-export function writeFileAtomic(p: string, data: string, fault: Fault = () => {}, label = path.basename(p)): void {
+/** `syncDir: false` leaves the directory's fsync to the caller's next write
+ *  in the same directory (it must come before anything names the file). */
+export function writeFileAtomic(p: string, data: string, fault: Fault = () => {}, label = path.basename(p), syncDir = true): void {
   const tmp = `${p}.tmp-${process.pid}`;
   const fd = fs.openSync(tmp, 'w', 0o644);
   try { fs.writeSync(fd, data); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
   fault(`${label}:temp-written`);
   fs.renameSync(tmp, p);
-  fsyncDir(path.dirname(p));
+  if (syncDir) fsyncDir(path.dirname(p));
   fault(`${label}:renamed`);
 }
 
@@ -166,7 +168,9 @@ export class Log {
       pinDigest = sha256hex(text);
       writeFileAtomic(path.join(bookDir, `identity-${pinDigest}.json`), text, this.fault, 'identity');
     }
-    if (jsonl !== null) writeFileAtomic(this.batchPath(manifest.identity, manifest.digest, 'jsonl'), jsonl, this.fault, 'jsonl');
+    // (The batch's two files share a directory: one fsync of it, after the
+    // manifest's rename, makes both renames durable before the receipt.)
+    if (jsonl !== null) writeFileAtomic(this.batchPath(manifest.identity, manifest.digest, 'jsonl'), jsonl, this.fault, 'jsonl', false);
     writeFileAtomic(this.batchPath(manifest.identity, manifest.digest, 'manifest.json'), canonicalize(manifest), this.fault, 'manifest');
     return this.commit({ received_at: receivedAt, digest: manifest.digest, identity: manifest.identity, pin: pinDigest, ...extra });
   }
@@ -204,13 +208,13 @@ export class Log {
 
   private commit(receipt: Receipt): Receipt {
     const line = `${canonicalize(receipt)}\n`;
-    // Written in two halves with an fsync between, so a crash test can stop the
-    // real code with a torn line on disk instead of a test forging one.
+    // Written in two halves, so a crash test can stop the real code with a
+    // torn line on disk instead of a test forging one (a killed process's
+    // writes stay in the page cache; one fsync makes the line durable).
     const fd = fs.openSync(this.indexPath, 'a');
     try {
       const half = Math.floor(line.length / 2);
       fs.writeSync(fd, line.slice(0, half));
-      fs.fsyncSync(fd);
       this.fault('index:half-written');
       fs.writeSync(fd, line.slice(half));
       fs.fsyncSync(fd);
