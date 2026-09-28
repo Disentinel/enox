@@ -108,3 +108,4 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_compat_parity`.
 - `roflenox_core` finished `r_compat_parity` at "ee3115b19d3f4ba27322562e9cd579a672aef02e".
 - `roflenox_core` takes `r_single_writer`.
+- `roflenox_core` finished `r_single_writer` at "cec807b06026af3a07b156b664a6212dcbaba9bd".
