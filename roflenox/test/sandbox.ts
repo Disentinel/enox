@@ -64,7 +64,9 @@ export interface Nested { status: number | null; pass: number; fail: number; rep
  *  leaves a handle open never exits, and times out as a failure. */
 export function nestedSuite(files: string[], env = sandboxEnv(), timeoutMs = 90_000): Nested {
   const t0 = Date.now();
-  const r = isolated(['--experimental-strip-types', '--no-warnings', '--test', '--test-concurrency=2', '--test-timeout=60000', ...files], env, timeoutMs);
+  // Four files at a time: five whole runs must fit the gate's budget (measured
+  // under load: 44–48 s a run at 4, 60–96 s at 2).
+  const r = isolated(['--experimental-strip-types', '--no-warnings', '--test', '--test-concurrency=4', '--test-timeout=60000', ...files], env, timeoutMs);
   return {
     status: r.status, stderr: `${r.stderr ?? ''}${r.error ? String(r.error) : ''}`, ms: Date.now() - t0,
     pass: Number(/# pass (\d+)/.exec(r.stdout ?? '')?.[1] ?? -1), fail: Number(/# fail (\d+)/.exec(r.stdout ?? '')?.[1] ?? -1),

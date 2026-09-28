@@ -232,7 +232,7 @@ export class Engine {
         rows.push({ identity: sc.identity, cells });
       }
     }
-    rows.sort((x, y) => cmp(JSON.stringify([x.identity, x.cells]), JSON.stringify([y.identity, y.cells])));
+    sortRows(rows);
     return { vars, rows };
   }
 
@@ -279,6 +279,16 @@ async function engineCall<T>(f: () => Promise<T>): Promise<T> {
 }
 
 function cmp(a: string, b: string): number { return a < b ? -1 : a > b ? 1 : 0; }
+
+/** Rows in their one fixed order — by [identity, cells] as JSON — each key
+ *  made once (in the comparator it was made 2 log n times a row: seconds at
+ *  200 000 rows). In place. */
+export function sortRows<T extends { identity: string; cells: unknown[] }>(rows: T[]): T[] {
+  const keyed = rows.map((r) => ({ k: JSON.stringify([r.identity, r.cells]), r }));
+  keyed.sort((x, y) => cmp(x.k, y.k));
+  keyed.forEach((x, i) => { rows[i] = x.r; });
+  return rows;
+}
 
 /** Split a literal's arguments at top-level commas (strings may hold commas). */
 export function splitArgs(args: string): string[] {

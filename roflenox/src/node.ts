@@ -27,7 +27,7 @@ import {
 } from './identity.ts';
 import { Log, writeFileAtomic, type Fault, type Receipt } from './log.ts';
 import {
-  answeredRule, bookRules, DEFAULT_ROFL_BIN, Engine, mayReadRules, parseLiteral, resultRule, splitArgs, SYSTEM_BOOK,
+  answeredRule, bookRules, DEFAULT_ROFL_BIN, Engine, mayReadRules, parseLiteral, resultRule, sortRows, splitArgs, SYSTEM_BOOK,
   type AskAnswer, type BookScope, type Explanation, type Unknown, type World,
 } from './engine.ts';
 import { DomainVouch, type DomainTransport } from './domain.ts';
@@ -943,7 +943,7 @@ export class RoflenoxNode {
       }
       unknown.push(...this.forkedUnknowns(scope, book));
       if (unknown.length) ans.unknown = unknown;
-      ans.rows.sort((x, y) => { const p = JSON.stringify([x.identity, x.cells]), q = JSON.stringify([y.identity, y.cells]); return p < q ? -1 : p > q ? 1 : 0; });
+      sortRows(ans.rows);
       return ans;
     }, true);
   }
@@ -979,7 +979,7 @@ export class RoflenoxNode {
         }
       }
     }
-    rows.sort((x, y) => { const p = JSON.stringify([x.identity, x.cells]), q = JSON.stringify([y.identity, y.cells]); return p < q ? -1 : p > q ? 1 : 0; });
+    sortRows(rows);
     return { vars, rows };
   }
 

@@ -19,6 +19,12 @@ export interface Holder { pid: number; host: string; role: string; since: string
 
 /** A takeover mutex older than this was left by a taker that died. */
 export const TAKEOVER_STALE_MS = 10_000;
+/** How often, and how long apart, a process races for a lock another is
+ *  taking over (a takeover is a read and an unlink: microseconds, unless the
+ *  machine is loaded). */
+export const TAKEOVER_ATTEMPTS = 200;
+export const TAKEOVER_PAUSE_MS = 5;
+const PAUSE = new Int32Array(new SharedArrayBuffer(4));
 
 export const lockPath = (dataDir: string) => path.join(dataDir, 'lock');
 
@@ -69,7 +75,7 @@ export class DataLock {
     const me: Holder = { pid: process.pid, host: os.hostname(), role, since: new Date((o.now ?? Date.now)()).toISOString(),
       token: crypto.randomBytes(12).toString('hex') };
     const target = lockPath(dataDir);
-    for (let attempt = 0; attempt < 5; attempt++) {
+    for (let attempt = 0; attempt < TAKEOVER_ATTEMPTS; attempt++) {
       const tmp = `${target}.${process.pid}.${me.token}`;
       fs.writeFileSync(tmp, JSON.stringify(me), { mode: 0o600 });
       try {
@@ -83,22 +89,24 @@ export class DataLock {
       const h = holderOf(dataDir);
       if (h === null) continue;                       // released meanwhile: try again
       if (alive(h)) throw refusal(dataDir, h);
-      DataLock.takeOver(dataDir, h);
+      // Stale: take it over — or, while another taker is at it, give it a
+      // moment and race for the name again.
+      if (!DataLock.takeOver(dataDir, h)) Atomics.wait(PAUSE, 0, 0, TAKEOVER_PAUSE_MS);
     }
     const h = holderOf(dataDir);
-    throw refusal(dataDir, h ?? { pid: -1, host: '?', role: 'another process', since: '?', token: '' });
+    throw refusal(dataDir, h && alive(h) ? h : { pid: -1, host: '?', role: 'a process taking over a stale lock', since: '?', token: '' });
   }
 
   /** Remove a stale lock — only the one that was seen stale, and only by one
    *  taker at a time; everyone then races for the name again. */
-  private static takeOver(dataDir: string, stale: Holder): void {
+  private static takeOver(dataDir: string, stale: Holder): boolean {
     const mutex = `${lockPath(dataDir)}.takeover`;
     try { fs.mkdirSync(mutex); } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
       // Another taker is at it (a takeover is a read and an unlink); one that
       // died in the middle left its mutex, which is removed once it is old.
       try { if (Date.now() - fs.statSync(mutex).mtimeMs > TAKEOVER_STALE_MS) fs.rmdirSync(mutex); } catch { /* gone meanwhile */ }
-      return;
+      return false;
     }
     try {
       const now = holderOf(dataDir);
@@ -106,6 +114,7 @@ export class DataLock {
     } finally {
       fs.rmdirSync(mutex);
     }
+    return true;
   }
 
   /** Say where this holder can be reached (serve, once it listens): a local

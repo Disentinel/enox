@@ -113,7 +113,14 @@ test('a second serve or stdio on a data directory another process holds refuses 
       const c = spawn(NODE[0], [...NODE.slice(1), '--input-type=module', '-e', racer]);
       let out = '';
       c.stdout.on('data', (d) => { out += d; });
-      return { c, said: new Promise<string>((r) => c.stdout.on('data', () => { if (out.includes('\n')) r(out.trim()); })), exit: new Promise((r) => c.once('exit', r)) };
+      let err = '';
+      c.stderr.on('data', (d) => { err += d; });
+      // What it said, or — if it died without a word — how it died.
+      const said = new Promise<string>((r) => {
+        c.stdout.on('data', () => { if (out.includes('\n')) r(out.trim()); });
+        c.once('exit', (code) => r(out.trim() || `exited ${code}: ${err}`));
+      });
+      return { c, said, exit: new Promise((r) => c.once('exit', r)) };
     });
     try {
       const said = await Promise.all(racers.map((r) => r.said));
@@ -158,9 +165,25 @@ test('eight concurrent local publishes through one serve are all admitted, in on
     const fdir = tmpDir('lock-eight-f');
     const fifos = Array.from({ length: 8 }, (_, i) => path.join(fdir, `f${i}.jsonl`));
     for (const p of fifos) assert.equal(spawnSync('mkfifo', [p]).status, 0, 'mkfifo');
-    const running = fifos.map((f) => cli(['publish', f], A.url));
-    const ends = await Promise.all(fifos.map((p) => fs.promises.open(p, 'w')));   // each opens once its reader has
-    await Promise.all(ends.map((h, i) => h.writeFile(`{"source":"ada","relation":"wrote","target":"note ${i}","perspective":"p","confidence":1}\n`).then(() => h.close())));
+    let exited = 0;
+    const running = fifos.map((f) => cli(['publish', f], A.url).finally(() => { exited++; }));
+    // A pipe opens for writing (without blocking) once its reader is there;
+    // a publish that died first fails the test instead of hanging it.
+    const ends: number[] = [];
+    const deadline = Date.now() + 60_000;
+    for (const p of fifos) {
+      for (;;) {
+        try { ends.push(fs.openSync(p, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK)); break; } catch (e) {
+          if ((e as NodeJS.ErrnoException).code !== 'ENXIO') throw e;
+        }
+        if (exited > 0 || Date.now() > deadline) {
+          for (const fd of ends) fs.closeSync(fd);
+          assert.fail(`a publish exited before reading its facts: ${(await Promise.race(running)).out}`);
+        }
+        await new Promise((r) => setTimeout(r, 20));
+      }
+    }
+    ends.forEach((fd, i) => { fs.writeSync(fd, `{"source":"ada","relation":"wrote","target":"note ${i}","perspective":"p","confidence":1}\n`); fs.closeSync(fd); });
     const runs = await Promise.all(running);
     for (const r of runs) assert.equal(r.code, 0, r.out);
     const health = JSON.parse((await cli(['health'], A.url)).out) as { identity: string; batches: number; forks: number; heads: Record<string, string> };
