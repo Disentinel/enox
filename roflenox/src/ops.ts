@@ -47,6 +47,10 @@ export interface Op {
   /** A local op that signs with, or makes, this machine's key: from the CLI it
    *  owns the data directory while it runs (r_single_writer, src/lock.ts). */
   signs?: true;
+  /** A signing op the holder of the directory does not do for it (a key
+   *  change, a checkpoint): while another process holds the directory, it
+   *  refuses instead of signing beside it (r_single_writer). */
+  alone?: true;
   /** CLI convenience: properties that may also be given positionally, in order. */
   positional?: string[];
   /** A wire alias. `:x` path segments and GET query parameters become args;
@@ -241,14 +245,14 @@ export const OPS: Op[] = [
       const me = localIdentity(ctx);
       return { identity: me.name, link: invitationLink(a.at as string, me) };
     } },
-  { name: 'rotate', signs: true, description: 'A new key, signed over by the current one.', input: obj({}),
+  { name: 'rotate', signs: true, alone: true, description: 'A new key, signed over by the current one.', input: obj({}),
     access: { local: 'it replaces the private key on this machine' }, say: (r) => `rotated ${r.identity}'s key`,
     run: async (ctx) => {
       const next = localIdentity(ctx).rotate(ctx.dataDir!, new Date(ctx.now()));
       await ctx.call('introduce', { chain: next.identityChain() });
       return { identity: next.name };
     } },
-  { name: 'recover', signs: true, description: 'Revoke every key with the backup code and start a new one.', input: obj({ code: str(), name: str() }, ['code']),
+  { name: 'recover', signs: true, alone: true, description: 'Revoke every key with the backup code and start a new one.', input: obj({ code: str(), name: str() }, ['code']),
     access: { local: 'it takes the backup code, which never crosses a network' }, positional: ['code'],
     say: (r) => `recovered ${r.identity}: every earlier key is revoked and a new one is in use`,
     run: async (ctx, a) => {
@@ -263,7 +267,7 @@ export const OPS: Op[] = [
   { name: 'backup', description: 'Copy the log up to its last receipt into <to>/latest, verified by a rebuild.', input: obj({ to: str() }, ['to']),
     access: { local: 'it reads this machine\'s data directory' }, say: (r) => `backed up ${r.receipts} receipts to ${r.dir}`,
     run: async (ctx, a) => (await import('./backup.ts')).backup(ctx.dataDir!, a.to as string, { now: ctx.now }) },
-  { name: 'checkpoint', signs: true, description: 'Write the public feed and a signed checkpoint into a static directory.', input: obj({ out: str() }, ['out']),
+  { name: 'checkpoint', signs: true, alone: true, description: 'Write the public feed and a signed checkpoint into a static directory.', input: obj({ out: str() }, ['out']),
     access: { local: 'it signs with the private key on this machine and writes to its disk' },
     say: (r) => `checkpointed ${r.identity}'s public feed into ${r.out}`,
     run: async (ctx, a) => {

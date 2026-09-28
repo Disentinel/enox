@@ -125,11 +125,15 @@ async function main(argv: string[]): Promise<number> {
   // A local operation that signs owns the data directory while it runs
   // (r_single_writer) — or, when a serve owns it and this op talks to that
   // serve's URL, goes through it: the op writes nothing in the directory, and
-  // its batch is admitted by the one process that keeps the log.
+  // the serve signs its batches (the `assert` op). The op itself then signs
+  // only its requests, to authenticate as this machine.
   let lock: DataLock | null = null;
   if (op.signs) {
     const h = holderOf(data);
     const through = h !== null && alive(h) && h.url !== undefined && new URL(h.url).origin === new URL(url).origin;
+    // Only the holder signs: what it does not sign for us (a key change, a
+    // checkpoint) waits until it has stopped.
+    if (through && op.alone) throw refusal(data, h!);
     if (!through) lock = DataLock.acquire(data, `roflenox ${op.name}`);
   }
   try {

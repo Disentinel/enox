@@ -3812,6 +3812,20 @@
    "red": [
     "eight concurrent local publishes through one serve are all admitted, in one chain, and the node records no fork of its own identity"
    ]
+  },
+  {
+   "id": "M282",
+   "title": "r_single_writer: a key change signs beside the serve that holds the directory",
+   "file": "src/cli.ts",
+   "edits": [
+    [
+     "    if (through && op.alone) throw refusal(data, h!);",
+     "    if (false) throw refusal(data, h!);"
+    ]
+   ],
+   "red": [
+    "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing"
+   ]
   }
  ]
 }

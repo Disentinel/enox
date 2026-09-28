@@ -152,8 +152,10 @@ so the local-only operations are offered as tools too.
 > A local operation that signs (`publish`, `seal`, `import_enox`, …) goes
 > through a running `serve` when `--url` is that serve's: it hands the serve its
 > facts, and the serve signs them, one batch at a time on its own head, so
-> concurrent publishes never fork the chain. Otherwise it takes the directory
-> itself for as long as it runs. A holder killed without letting go
+> concurrent publishes never fork the chain. `rotate`, `recover` and
+> `checkpoint` sign with the key themselves, so they refuse while a `serve`
+> holds the directory: stop it first. Otherwise a local operation takes the
+> directory itself for as long as it runs. A holder killed without letting go
 > leaves a stale lock (`<data>/lock`), which the next process takes over.
 
 This proves it works by speaking raw JSON-RPC to the server: `initialize`,

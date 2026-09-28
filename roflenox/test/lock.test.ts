@@ -26,10 +26,24 @@ function snapshot(dir: string): Record<string, string> {
 }
 
 /** A second process on the directory: it must exit 1, and say who holds it. */
-function refused(dir: string, argv: string[], holder: RegExp, why: string): void {
-  const r = spawnSync(NODE[0], [...NODE.slice(1), CLI, ...argv, '--data', dir], { input: '', encoding: 'utf8', timeout: 20_000 });
-  assert.equal(r.status, 1, `${why}: exit ${r.status} ${r.signal ?? ''}\n${r.stdout}\n${r.stderr}`);
-  assert.match(r.stderr, holder, `${why}: names the holder`);
+function refused(dir: string, argv: string[], holder: RegExp, why: string): Promise<void> {
+  return new Promise((done, fail) => {
+    const c = spawn(NODE[0], [...NODE.slice(1), CLI, ...argv, '--data', dir]);
+    let out = '', err = '';
+    c.stdout.on('data', (d) => { out += d; });
+    c.stderr.on('data', (d) => { err += d; });
+    c.stdin.end();
+    // One that did not refuse would run on: it is stopped, and fails the check.
+    const t = setTimeout(() => c.kill('SIGKILL'), 20_000);
+    c.once('exit', (code, signal) => {
+      clearTimeout(t);
+      try {
+        assert.equal(code, 1, `${why}: exit ${code} ${signal ?? ''}\n${out}\n${err}`);
+        assert.match(err, holder, `${why}: names the holder`);
+        done();
+      } catch (e) { fail(e); }
+    });
+  });
 }
 
 function serve(dir: string): Promise<{ child: ChildProcess; url: string }> {
@@ -49,9 +63,12 @@ test('a second serve or stdio on a data directory another process holds refuses 
   const empty = tmpDir('lock-empty');
   fs.writeFileSync(lockPath(empty), JSON.stringify({ pid: process.pid, host: os.hostname(), role: 'a test holder', since: '2026-01-01T00:00:00.000Z', token: 't0' }));
   const bare = snapshot(empty);
-  refused(empty, ['serve', '--port', '0'], new RegExp(`a test holder \\(pid ${process.pid} on `), 'serve on a held empty directory');
-  refused(empty, ['stdio'], new RegExp(`a test holder \\(pid ${process.pid} on `), 'stdio on a held empty directory');
-  refused(empty, ['init', '--name', 'node.example.org'], /a test holder/, 'init on a held empty directory');
+  // (All at once: each is a second process on the same held directory.)
+  await Promise.all([
+    refused(empty, ['serve', '--port', '0'], new RegExp(`a test holder \\(pid ${process.pid} on `), 'serve on a held empty directory'),
+    refused(empty, ['stdio'], new RegExp(`a test holder \\(pid ${process.pid} on `), 'stdio on a held empty directory'),
+    refused(empty, ['init', '--name', 'node.example.org'], /a test holder/, 'init on a held empty directory'),
+  ]);
   assert.deepEqual(snapshot(empty), bare, 'no key, no log: nothing was written');
 
   // 2. Held by a running serve, with a log.
@@ -70,9 +87,14 @@ test('a second serve or stdio on a data directory another process holds refuses 
     fs.writeFileSync(path.join(dir, 'log', sub, 'x.jsonl.tmp-1'), 'mid-write');
     const held = snapshot(dir);
     const byA = new RegExp(`serve \\(pid ${A.child.pid} on [^,]+, since [^,]+, at ${A.url.replace(/[.]/g, '\\.')}\\)`);
-    refused(dir, ['serve', '--port', '0'], byA, 'a second serve');
-    refused(dir, ['stdio'], byA, 'stdio beside serve (the forked-chain repro)');
-    refused(dir, ['publish', facts, '--url', 'http://127.0.0.1:9'], byA, 'publish signing for another node');
+    await Promise.all([
+      refused(dir, ['serve', '--port', '0'], byA, 'a second serve'),
+      refused(dir, ['stdio'], byA, 'stdio beside serve (the forked-chain repro)'),
+      refused(dir, ['publish', facts, '--url', 'http://127.0.0.1:9'], byA, 'publish signing for another node'),
+      // What the holder does not sign for us waits for it to stop: a key change, a checkpoint.
+      refused(dir, ['rotate', '--url', A.url], byA, 'rotate beside the serve'),
+      refused(dir, ['checkpoint', '--out', tmpDir('lock-out'), '--url', A.url], byA, 'checkpoint beside the serve'),
+    ]);
     assert.deepEqual(snapshot(dir), held, 'the refusals changed nothing in the directory');
 
     // 3. The holder dies without letting go: its lock is stale.
