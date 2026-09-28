@@ -1167,14 +1167,35 @@ export class RoflenoxNode {
   /** Publish `facts` as this node's own identity, through normal admission:
    *  a signed, salted, chained batch like any other (the MCP `assert` tool). */
   assertAsSelf(facts: Fact[]): Promise<Receipt> {
+    return this.signAsSelf(facts).then((r) => r.receipt);
+  }
+
+  /** Sign `facts` as this node's own identity and admit them — the ONE place
+   *  its batches are signed while it runs (r_single_writer): each is signed
+   *  on the head it is admitted on, one at a time, so two can never succeed
+   *  the same head. A local operation on this machine hands its facts here
+   *  (the `assert` op) instead of signing. `salt` derives the salt from the
+   *  batch (an import's, so a re-import is recognised); a batch already in
+   *  the chain is then not signed again. Returns the signed body too (seal). */
+  signAsSelf(facts: Fact[], o: { salt?: (jsonl: string) => string } = {}): Promise<{ receipt: Receipt; body: BatchBody & { manifest: Manifest; jsonl: string; salt: string }; held: boolean }> {
     return this.serial(async () => {
       const me = this.identity;
       if (!me) throw new Refusal(404, 'no_identity', 'this node has no identity to assert as');
       const jsonl = toJsonl(facts);
-      const salt = newSalt();
+      const salt = o.salt ? o.salt(jsonl) : newSalt();
+      if (o.salt) {
+        const digest = batchDigest(salt, jsonl);
+        const had = this.log.receipts.find((r) => r.identity === me.name && r.kind === undefined && r.digest === digest);
+        if (had) {
+          const s = this.log.read(had);
+          return { receipt: had, body: { manifest: s.manifest, jsonl, salt, identity: me.identityChain() }, held: true };
+        }
+      }
       // The later of the clock and the chain's last claim (r_rotation).
       const manifest = me.signBatch(jsonl, this.head(me.name), new Date(Math.max(this.now(), this.lastClaimed.get(me.name) ?? -Infinity)).toISOString(), salt);
-      return this.admitNow({ manifest, jsonl, salt, identity: me.identityChain() }, 'post', new Date(this.now()).toISOString(), [], me.name);
+      const body = { manifest, jsonl, salt, identity: me.identityChain() };
+      const receipt = await this.admitNow(body, 'post', new Date(this.now()).toISOString(), [], me.name);
+      return { receipt, body, held: false };
     });
   }
 

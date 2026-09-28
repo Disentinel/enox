@@ -3784,6 +3784,34 @@
    "red": [
     "update_assertion and delete_assertion answer within 100 ms and a read after a write within one second while writes keep arriving"
    ]
+  },
+  {
+   "id": "M280",
+   "title": "r_single_writer: a local publish signs itself instead of handing its facts to its node",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "      if (await ownNode(ctx, me)) {\n        await ctx.call('assert', { facts });",
+     "      if (false) {\n        await ctx.call('assert', { facts });"
+    ]
+   ],
+   "red": [
+    "eight concurrent local publishes through one serve are all admitted, in one chain, and the node records no fork of its own identity"
+   ]
+  },
+  {
+   "id": "M281",
+   "title": "r_single_writer: the node signs its batches concurrently, not one at a time",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    return this.serial(async () => {\n      const me = this.identity;\n      if (!me) throw new Refusal(404, 'no_identity', 'this node has no identity to assert as');\n      const jsonl = toJsonl(facts);",
+     "    return (async (f: () => Promise<any>) => f())(async () => {\n      const me = this.identity;\n      if (!me) throw new Refusal(404, 'no_identity', 'this node has no identity to assert as');\n      const jsonl = toJsonl(facts);"
+    ]
+   ],
+   "red": [
+    "eight concurrent local publishes through one serve are all admitted, in one chain, and the node records no fork of its own identity"
+   ]
   }
  ]
 }

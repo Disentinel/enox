@@ -68,6 +68,14 @@ function needNode(ctx: Ctx): RoflenoxNode {
   return ctx.node;
 }
 
+/** Whether the node an op reaches is this machine's own identity's. Then
+ *  that node signs (r_single_writer): the op hands it the facts through
+ *  `assert`, and its batches are signed one at a time on its own head. */
+async function ownNode(ctx: Ctx, me: LocalIdentity): Promise<boolean> {
+  const chain = await ctx.call('identity', {}).catch(() => null) as { doc: { identity: string } }[] | null;
+  return Array.isArray(chain) && chain.length > 0 && chain[chain.length - 1]!.doc.identity === me.name;
+}
+
 function localIdentity(ctx: Ctx): LocalIdentity {
   const me = ctx.dataDir ? LocalIdentity.load(ctx.dataDir) : null;
   if (!me) throw new Refusal(404, 'no_identity', `no identity in ${ctx.dataDir}; run: roflenox init`);
@@ -162,12 +170,26 @@ export const OPS: Op[] = [
       reattest: { type: 'object' }, withheld: { type: 'boolean' } }, ['manifest']),
     access: 'anyone', http: { method: 'POST', path: '/batches', status: 201 },
     run: async (ctx, a) => ({ admitted: true, receipt: await needNode(ctx).admit(a as never, ctx.caller) }) },
-  { name: 'assert', description: 'Publish facts as this node\'s own identity: a signed batch through normal admission.',
-    input: obj({ facts: { type: 'array', items: FACT_ITEMS } }, ['facts']), access: 'operator',
+  { name: 'assert', description: 'Publish facts as this node\'s own identity: a signed batch through normal admission. The node signs it: this is how local operations publish while a node runs (r_single_writer).',
+    input: obj({ facts: { type: 'array', items: FACT_ITEMS },
+      import: { type: 'boolean', description: 'an import batch: its salt derives from its content, and a batch already held is not signed again' },
+      seal_to: { type: 'array', items: { type: 'string' }, description: 'also seal the signed batch to these identities, and answer the envelope' } }, ['facts']), access: 'operator',
     run: async (ctx, a) => {
       const facts = (a.facts as unknown[]).map((f, i) => checkFact(f, i + 1));
-      const r = await needNode(ctx).assertAsSelf(facts);
-      return { admitted: true, identity: r.identity, facts: facts.length };
+      const n = needNode(ctx);
+      const { importSalt } = await import('./import.ts');
+      const r = await n.signAsSelf(facts, a.import === true ? { salt: (jsonl) => importSalt(n.identity!, jsonl) } : {});
+      const out: Record<string, unknown> = { admitted: !r.held, identity: r.receipt.identity, facts: facts.length, ...(r.held ? { held: true } : {}) };
+      if (a.seal_to !== undefined) {
+        const { seal } = await import('./seal.ts');
+        const keys = [];
+        for (const to of a.seal_to as string[]) {
+          const chain = to === n.identity!.name ? n.identity!.identityChain() : await n.readIdentityChain(to, ctx.caller);
+          keys.push({ identity: to, enc_public_key: chain[chain.length - 1]!.doc.enc.public_key });
+        }
+        out.envelope = seal(r.body, keys);
+      }
+      return out;
     } },
   { name: 'introduce', description: 'Introduce an identity by its document chain (pinned only on the operator\'s word or a delegation; rotations by rule).',
     input: obj({ chain: { description: 'a document chain, oldest first (or one document)' } }, ['chain']), access: 'anyone',
@@ -196,7 +218,13 @@ export const OPS: Op[] = [
     say: (r) => `published ${r.facts} facts as ${r.identity}`,
     run: async (ctx, a) => {
       const { publishVia, readFacts } = await import('./client.ts');
-      return publishVia(ctx.call, localIdentity(ctx), readFacts(fs.readFileSync(a.file as string, 'utf8')), ctx.now);
+      const me = localIdentity(ctx);
+      const facts = readFacts(fs.readFileSync(a.file as string, 'utf8'));
+      if (await ownNode(ctx, me)) {
+        await ctx.call('assert', { facts });
+        return { identity: me.name, facts: facts.length };
+      }
+      return publishVia(ctx.call, me, facts, ctx.now);
     } },
   { name: 'mirror', signs: true, description: 'Pull an identity\'s feed from a peer URL (or its invitation link, the first time over plain HTTP) and admit it here.', input: obj({ peer: str(), identity: str() }, ['peer', 'identity']),
     access: { local: 'it signs its requests to the peer with the private key on this machine' }, positional: ['peer', 'identity'],
@@ -251,7 +279,11 @@ export const OPS: Op[] = [
     run: async (ctx, a) => {
       const { publishSealedVia, readFacts } = await import('./client.ts');
       const me = localIdentity(ctx);
-      const e = await publishSealedVia(ctx.call, me, readFacts(fs.readFileSync(a.file as string, 'utf8')), (a.to as string).split(','), ctx.now);
+      const facts = readFacts(fs.readFileSync(a.file as string, 'utf8'));
+      const to = (a.to as string).split(',');
+      const e = await ownNode(ctx, me)
+        ? (await ctx.call('assert', { facts, seal_to: to }) as { envelope: unknown }).envelope
+        : await publishSealedVia(ctx.call, me, facts, to, ctx.now);
       fs.writeFileSync(a.out as string, JSON.stringify(e));
       return { identity: me.name, to: a.to, out: a.out };
     } },
@@ -268,8 +300,9 @@ export const OPS: Op[] = [
     say: (r) => `imported ${r.entities} entities and ${r.assertions} assertions as ${r.facts} facts in ${r.batches} batches (${r.admitted} admitted, ${r.skipped} already held)`,
     run: async (ctx, a) => {
       const { importEnox } = await import('./import.ts');
-      return importEnox(ctx.call, localIdentity(ctx), fs.readFileSync(a.file as string, 'utf8'),
-        { batchSize: a.batch_size as number | undefined, now: ctx.now });
+      const me = localIdentity(ctx);
+      return importEnox(ctx.call, me, fs.readFileSync(a.file as string, 'utf8'),
+        { batchSize: a.batch_size as number | undefined, now: ctx.now, handOff: await ownNode(ctx, me) });
     } },
   { name: 'follow', signs: true, description: 'Keep mirrors current: run this identity\'s follow executor (every roflenox:follow fact it holds) until stopped.',
     input: obj({ interval_ms: { type: 'number' }, rounds: { type: 'number' } }),

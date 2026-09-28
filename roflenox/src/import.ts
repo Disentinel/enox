@@ -81,17 +81,28 @@ export function snapshotFacts(text: string): { facts: Fact[]; entities: number; 
 }
 
 /** A batch's salt, derived from the importing key and the batch content. */
-function importSalt(me: LocalIdentity, jsonl: string): string {
+export function importSalt(me: LocalIdentity, jsonl: string): string {
   const sig = me.signBytes(Buffer.from(`roflenox-import-salt-v1\n${createHash('sha256').update(jsonl).digest('hex')}`));
   return createHash('sha256').update(sig).digest().toString('base64url');
 }
 
 /** Import a snapshot as `me` through the node's normal admission. */
 export async function importEnox(node: OpCaller, me: LocalIdentity, text: string,
-  o: { batchSize?: number; now?: () => number } = {}): Promise<ImportResult> {
+  o: { batchSize?: number; now?: () => number; handOff?: boolean } = {}): Promise<ImportResult> {
   const now = o.now ?? Date.now;
   const size = o.batchSize ?? DEFAULT_IMPORT_BATCH;
   const { facts, entities, assertions, collapsed } = snapshotFacts(text);
+  if (o.handOff) {
+    // The node is this identity's own and signs (r_single_writer): each batch
+    // is handed to it, and it derives the same salt, so a re-import is known.
+    let admitted = 0, skipped = 0, batches = 0;
+    for (let i = 0; i < facts.length; i += size) {
+      batches++;
+      const r = await node('assert', { facts: facts.slice(i, i + size), import: true }) as { held?: boolean };
+      if (r.held) skipped++; else admitted++;
+    }
+    return { entities, assertions, facts: facts.length, collapsed, batches, admitted, skipped };
+  }
   const held = new Set<string>(((await node('chain', { identity: me.name })) as { digests: string[] }).digests);
   let head = ((await node('health', {})) as { heads: Record<string, string> }).heads[me.name] ?? null;
   let admitted = 0, skipped = 0, batches = 0;

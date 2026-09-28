@@ -118,3 +118,45 @@ test('a second serve or stdio on a data directory another process holds refuses 
     }
   }
 });
+
+test('eight concurrent local publishes through one serve are all admitted, in one chain, and the node records no fork of its own identity', async () => {
+  const dir = tmpDir('lock-eight');
+  let A = await serve(dir);
+  const cli = (args: string[], url: string) => new Promise<{ code: number | null; out: string }>((ok) => {
+    const c = spawn(NODE[0], [...NODE.slice(1), CLI, ...args, '--data', dir, '--url', url]);
+    let out = '';
+    c.stdout.on('data', (d) => { out += d; });
+    c.stderr.on('data', (d) => { out += d; });
+    c.once('exit', (code) => ok({ code, out }));
+  });
+  try {
+    // Each publish reads its facts from a named pipe: all eight processes are
+    // started and blocked on their reads, then released at once — so their
+    // writes overlap, whatever each process's start-up time.
+    const fdir = tmpDir('lock-eight-f');
+    const fifos = Array.from({ length: 8 }, (_, i) => path.join(fdir, `f${i}.jsonl`));
+    for (const p of fifos) assert.equal(spawnSync('mkfifo', [p]).status, 0, 'mkfifo');
+    const running = fifos.map((f) => cli(['publish', f], A.url));
+    const ends = await Promise.all(fifos.map((p) => fs.promises.open(p, 'w')));   // each opens once its reader has
+    await Promise.all(ends.map((h, i) => h.writeFile(`{"source":"ada","relation":"wrote","target":"note ${i}","perspective":"p","confidence":1}\n`).then(() => h.close())));
+    const runs = await Promise.all(running);
+    for (const r of runs) assert.equal(r.code, 0, r.out);
+    const health = JSON.parse((await cli(['health'], A.url)).out) as { identity: string; batches: number; forks: number; heads: Record<string, string> };
+    assert.equal(health.forks, 0, 'no fork recorded');
+    assert.equal(health.batches, 8, 'eight batches');
+    const chain = JSON.parse((await cli(['chain', '--identity', health.identity], A.url)).out) as { digests: string[] };
+    assert.equal(chain.digests.length, 8, 'one chain of eight');
+    assert.equal(chain.digests[7], health.heads[health.identity]);
+    assert.match((await cli(['ask', 'edge(F, "ada", "wrote", T)'], A.url)).out, /^8 rows$/m);
+    // And the node starts again on it.
+    const gone = new Promise((r) => A.child.once('exit', r));
+    A.child.kill('SIGTERM');
+    await gone;
+    A = await serve(dir);
+    assert.match((await cli(['ask', 'edge(F, "ada", "wrote", T)'], A.url)).out, /^8 rows$/m);
+  } finally {
+    const gone = new Promise((r) => A.child.once('exit', r));
+    A.child.kill('SIGTERM');
+    await gone;
+  }
+});

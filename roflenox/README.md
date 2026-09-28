@@ -149,9 +149,11 @@ so the local-only operations are offered as tools too.
 > `stdio` on the same directory refuses to start and names the holder:
 > `roflenox: the data directory … is held by serve (pid …, at http://127.0.0.1:7380); …`.
 > Stop `serve` first, as step 4 does, or give each one its own data directory.
-> A local operation that signs (`publish`, `rotate`, `import_enox`, …) goes
-> through a running `serve` when `--url` is that serve's; otherwise it takes the
-> directory itself for as long as it runs. A holder killed without letting go
+> A local operation that signs (`publish`, `seal`, `import_enox`, …) goes
+> through a running `serve` when `--url` is that serve's: it hands the serve its
+> facts, and the serve signs them, one batch at a time on its own head, so
+> concurrent publishes never fork the chain. Otherwise it takes the directory
+> itself for as long as it runs. A holder killed without letting go
 > leaves a stale lock (`<data>/lock`), which the next process takes over.
 
 This proves it works by speaking raw JSON-RPC to the server: `initialize`,
