@@ -298,6 +298,7 @@ Declared as facts:
 - `r_compat_parity` is to be checked by "the embedder embeds a book of mixed text lengths in bounded memory and finishes although writes land during its read".
 - `r_compat_parity` is to be checked by "update_assertion and delete_assertion answer within 100 ms and a read after a write within one second while writes keep arriving".
 - `r_compat_parity` is to be checked by "why agrees with ask for every literal ask returns, including conf".
+- `r_compat_parity` says "a timing bound in a check is met by the median of repeated answers on a shared machine, and every single answer still stays under one second".
 - `r_typed` says "every requirement is of exactly one kind from the closed list".
 - `r_typed` is stated in "owner 2026-09-26".
 - `r_typed` is to be checked by "a requirement with an unknown kind fails typing".
@@ -765,6 +766,7 @@ The queue:
 - `r_freshness` is accepted at "90c44041770a0cd1c0c83595b88f17c9a5e4519c".
 - `r_no_orphan_tests` is accepted at "401323a64dfa1c3eea9ab4aea24143fc54818ed7".
 - `r_domain_vouch` is accepted at "85a2cfc1bfc3969bc9de6f5c9ab62422faa255dd".
+- `r_compat_parity` is accepted at "ee3115b19d3f4ba27322562e9cd579a672aef02e".
 - `r_domain_vouch` is rejected at "806c6af8065554dfda58a02fa06d1e7f591fdc32".
 - `r_domain_vouch` is rejected at "e63b41e1564229c02ffde8d8463f71ef03984823".
 - `r_no_orphan_tests` is rejected at "2db9e9f9d7518478a277e98369bccc38681654b1".
@@ -1112,6 +1114,18 @@ The checks that exist:
 - "a flood of first contacts naming many domains opens a bounded number of domain lookups at a time and repeats none within the cache time" lives in "roflenox/test/domain.test.ts".
 - "an internal IPv4 written in any IPv6 form, NAT64, 6to4, IPv4-compatible or mapped, is not a public address" guards `r_domain_vouch`.
 - "an internal IPv4 written in any IPv6 form, NAT64, 6to4, IPv4-compatible or mapped, is not a public address" lives in "roflenox/test/domain.test.ts".
+- "recall finds an entity from a natural-language question that shares no word with its name" guards `r_compat_parity`.
+- "recall finds an entity from a natural-language question that shares no word with its name" lives in "roflenox/test/compat.test.ts".
+- "semantic_search results carry age_days and stale like the base" guards `r_compat_parity`.
+- "semantic_search results carry age_days and stale like the base" lives in "roflenox/test/compat.test.ts".
+- "a fractional proof_depth is refused" guards `r_compat_parity`.
+- "a fractional proof_depth is refused" lives in "roflenox/test/compat.test.ts".
+- "the embedder embeds a book of mixed text lengths in bounded memory and finishes although writes land during its read" guards `r_compat_parity`.
+- "the embedder embeds a book of mixed text lengths in bounded memory and finishes although writes land during its read" lives in "roflenox/test/compat.test.ts".
+- "update_assertion and delete_assertion answer within 100 ms and a read after a write within one second while writes keep arriving" guards `r_compat_parity`.
+- "update_assertion and delete_assertion answer within 100 ms and a read after a write within one second while writes keep arriving" lives in "roflenox/test/perf/compat.test.ts".
+- "why agrees with ask for every literal ask returns, including conf" guards `r_compat_parity`.
+- "why agrees with ask for every literal ask returns, including conf" lives in "roflenox/test/compat.test.ts".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" guards `r_asserted_by`.
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" lives in "personal-node/src/mcp/main-graph.test.ts".
 
