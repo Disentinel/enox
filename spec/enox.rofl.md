@@ -767,6 +767,7 @@ The queue:
 - `r_no_orphan_tests` is accepted at "401323a64dfa1c3eea9ab4aea24143fc54818ed7".
 - `r_domain_vouch` is accepted at "85a2cfc1bfc3969bc9de6f5c9ab62422faa255dd".
 - `r_compat_parity` is accepted at "ee3115b19d3f4ba27322562e9cd579a672aef02e".
+- `r_single_writer` is accepted at "cec807b06026af3a07b156b664a6212dcbaba9bd".
 - `r_domain_vouch` is rejected at "806c6af8065554dfda58a02fa06d1e7f591fdc32".
 - `r_domain_vouch` is rejected at "e63b41e1564229c02ffde8d8463f71ef03984823".
 - `r_no_orphan_tests` is rejected at "2db9e9f9d7518478a277e98369bccc38681654b1".
@@ -1126,6 +1127,10 @@ The checks that exist:
 - "update_assertion and delete_assertion answer within 100 ms and a read after a write within one second while writes keep arriving" lives in "roflenox/test/perf/compat.test.ts".
 - "why agrees with ask for every literal ask returns, including conf" guards `r_compat_parity`.
 - "why agrees with ask for every literal ask returns, including conf" lives in "roflenox/test/compat.test.ts".
+- "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing" guards `r_single_writer`.
+- "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing" lives in "roflenox/test/lock.test.ts".
+- "eight concurrent local publishes through one serve are all admitted, in one chain, and the node records no fork of its own identity" guards `r_single_writer`.
+- "eight concurrent local publishes through one serve are all admitted, in one chain, and the node records no fork of its own identity" lives in "roflenox/test/lock.test.ts".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" guards `r_asserted_by`.
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" lives in "personal-node/src/mcp/main-graph.test.ts".
 
