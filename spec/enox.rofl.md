@@ -286,6 +286,8 @@ Declared as facts:
 - `r_single_writer` says "one process at a time owns a data directory: serve, stdio and every local operation that signs take an exclusive lock on it, and a second process refuses to start, naming the holder, before it reads or writes anything; so a node can never sign two successors of its own head by accident".
 - `r_single_writer` is stated in "found 2026-09-27 while verifying the quickstart: stdio and serve on one data dir forked the node's own chain, and the node then refused to start".
 - `r_single_writer` is to be checked by "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing".
+- `r_single_writer` says "only the process that holds the lock signs: when a serve holds the directory, local signing operations hand their facts to it and it signs them one at a time, so concurrent local writes never become two successors of the node's own head".
+- `r_single_writer` is to be checked by "eight concurrent local publishes through one serve are all admitted, in one chain, and the node records no fork of its own identity".
 - `r_compat_parity` is about `enox`.
 - `r_compat_parity` binds as `must`.
 - `r_compat_parity` says "the Enox tools answer like the Enox they replace on the same data: recall uses meaning as well as names, semantic_search carries age_days and stale, proof_depth is an integer, the embedder runs in bounded memory and survives writes during its read, updates and deletes stay fast, a read after a write meets the one-second bound under load, and why agrees with ask".
@@ -759,6 +761,7 @@ The queue:
 - `r_mutation_gate` is accepted at "3ca019fb84ae9d2aaeea0979e21e86715ec0b8b8".
 - `r_rotation` is accepted at "4f7c3617e44a355a89ed563c133438d5e58bd6fe".
 - `r_identity_names` is accepted at "2db9e9f9d7518478a277e98369bccc38681654b1".
+- `r_single_writer` is rejected at "3b85c6fa439a297cbabe1ac16852031c02a61370".
 - `r_freshness` is accepted at "90c44041770a0cd1c0c83595b88f17c9a5e4519c".
 - `r_no_orphan_tests` is accepted at "401323a64dfa1c3eea9ab4aea24143fc54818ed7".
 - `r_domain_vouch` is accepted at "85a2cfc1bfc3969bc9de6f5c9ab62422faa255dd".
