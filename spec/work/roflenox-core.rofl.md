@@ -117,3 +117,5 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_mcp_oauth` at "80c11531fe867af06dcac3149f4392d487ec6bd5".
 - `roflenox_core` takes `r_oauth_lockout`.
 - `roflenox_core` finished `r_oauth_lockout` at "011800fe60f77a80278aa11e95b6c2025700ca4e".
+- `roflenox_core` takes `r_oauth_lockout`.
+- `roflenox_core` finished `r_oauth_lockout` at "90919f04e155273b0abb638291406340b1d48bb2".
