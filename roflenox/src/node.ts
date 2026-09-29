@@ -487,7 +487,7 @@ export class RoflenoxNode {
   }
 
   /** Who signed this request (RFC 9421), or null for an unsigned one. */
-  authenticate(method: string, uri: string, headers: Record<string, string | string[] | undefined>, body: Buffer | null): string | null {
+  authenticate(method: string, uri: string | readonly string[], headers: Record<string, string | string[] | undefined>, body: Buffer | null): string | null {
     return verifyRequest(method, uri, headers, body, {
       lookup: (keyId) => {
         if (this.identity && keyId === this.identity.keyId) {

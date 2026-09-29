@@ -2,17 +2,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as http from 'node:http';
+import * as path from 'node:path';
 import { bookOf, verifyManifestSig, type IdentityDoc, type LocalIdentity } from '../src/identity.ts';
 import { listen } from '../src/http.ts';
 import { batchDigest, factId, sha256hex, toJsonl } from '../src/facts.ts';
 import { signRequest } from '../src/httpsig.ts';
-import { publish } from '../src/client.ts';
-import { isLocal, OPS } from '../src/ops.ts';
+import { httpCaller, publish } from '../src/client.ts';
+import { callOp, isLocal, OPS } from '../src/ops.ts';
 import { seal } from '../src/seal.ts';
 import type { Manifest } from '../src/identity.ts';
 import { batch, DAY, exportRule, fact, get, grant, identityAt, invitation, iso, post, start, T0, tmpDir, pull, vouch } from './helpers.ts';
 
 const BOOK_A = bookOf('node-a');
+const FIXTURE = path.join(import.meta.dirname, 'fixtures', 'enox-snapshot.jsonl');
 
 test('a request signed by an identity with no grant is refused and whynot names the missing grant', async () => {
   const a = await start(tmpDir('grant'), 'node-a');
@@ -194,6 +196,35 @@ test('a request signed for the public https URL verifies at a node listening on 
     assert.equal(await send(pa.url, 'enox.example.org', 'https://evil.example.org/ask', bob, body(a), a.clock.t), 401);
     assert.equal(await send(pa.url, 'enox.example.org', 'http://enox.example.org/ask', bob, body(a), a.clock.t), 401);
   } finally { await pa.close(); await pp.close(); await a.stop(); await plain.stop(); }
+});
+
+test('a node with a public URL admits an operator-signed local import sent to 127.0.0.1 and still refuses a signature made for another host', async () => {
+  const PUBLIC = 'https://enox.example.org';
+  const a = await start(tmpDir('local-a'), 'node-a', { publicUrl: PUBLIC });
+  const pa = await proxy(a.url);
+  const port = new URL(a.url).port;
+  try {
+    // What `roflenox import_enox` does on the host: the local op, its requests
+    // signed for the URL it was given — 127.0.0.1, not the public one.
+    const local = { node: null, caller: a.me.name, dataDir: a.dir, now: () => a.clock.t, call: httpCaller(a.url, a.me, () => a.clock.t) };
+    const r = await callOp('import_enox', { file: FIXTURE }, local, 'local') as { admitted: number; batches: number };
+    assert.ok(r.admitted > 0 && r.admitted === r.batches, JSON.stringify(r));
+    assert.ok(((await get(a.url, '/health')).body.heads as Record<string, string>)['node-a'], 'the import is in node-a\'s chain');
+    // `assert` straight, signed for localhost:<port> — the same socket, another of its names.
+    const body = JSON.stringify({ facts: [fact('ada', 'knows', 'grace')] });
+    assert.equal(await send(a.url, `localhost:${port}`, `http://localhost:${port}/op/assert`, a.me, body, a.clock.t), 200);
+    // The public URL still verifies through the proxy.
+    assert.equal(await send(pa.url, 'enox.example.org', `${PUBLIC}/op/assert`, a.me, body, a.clock.t), 200);
+
+    // Refused: a signature for another host, sent to 127.0.0.1 — named by the Host header or not.
+    assert.equal(await send(a.url, `127.0.0.1:${port}`, 'http://evil.example.org/op/assert', a.me, body, a.clock.t), 401);
+    assert.equal(await send(a.url, 'evil.example.org', 'http://evil.example.org/op/assert', a.me, body, a.clock.t), 401);
+    // …for another local port (another node on this machine)…
+    const other = String(Number(port) === 65535 ? 1 : Number(port) + 1);
+    assert.equal(await send(a.url, `127.0.0.1:${other}`, `http://127.0.0.1:${other}/op/assert`, a.me, body, a.clock.t), 401);
+    // …or a local address, arriving through the proxy: that is not this machine's tools.
+    assert.equal(await send(pa.url, `127.0.0.1:${port}`, `http://127.0.0.1:${port}/op/assert`, a.me, body, a.clock.t), 401);
+  } finally { await pa.close(); await a.stop(); }
 });
 
 test('a revoked grant answers 410 on the next read, while facts read before the revocation still verify against their batch digest', async () => {

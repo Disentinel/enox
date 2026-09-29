@@ -44,9 +44,12 @@ export interface VerifyContext {
 }
 
 /** The identity that signed this request, or null if it carries no signature.
- *  A signature that is present but wrong is a 401, never an anonymous read. */
+ *  A signature that is present but wrong is a 401, never an anonymous read.
+ *  `uri` is every @target-uri the request may have been signed for: the
+ *  node's own addresses it arrived at (r_public_url_local), never one the
+ *  request names by itself. */
 export function verifyRequest(
-  method: string, uri: string, headers: Record<string, string | string[] | undefined>, body: Buffer | null, ctx: VerifyContext,
+  method: string, uri: string | readonly string[], headers: Record<string, string | string[] | undefined>, body: Buffer | null, ctx: VerifyContext,
 ): string | null {
   const input = headers['signature-input'];
   const sig = headers.signature;
@@ -65,7 +68,7 @@ export function verifyRequest(
   if (!params.nonce || !params.created || !params.keyid) throw bad('created, nonce and keyid are required');
   const created = Number(params.created) * 1000;
   if (Math.abs(ctx.nowMs - created) > ctx.windowMs) throw bad('the signature is outside the freshness window');
-  const values: Record<string, string> = { '@method': method.toUpperCase(), '@target-uri': uri };
+  const values: Record<string, string> = { '@method': method.toUpperCase(), '@target-uri': '' };
   if (components.includes('content-digest')) {
     const cd = headers['content-digest'];
     if (typeof cd !== 'string' || cd !== contentDigest(body ?? Buffer.alloc(0))) throw bad('content-digest does not match the body');
@@ -74,13 +77,13 @@ export function verifyRequest(
   for (const c of components) if (values[c] === undefined) throw bad(`cannot cover component ${c}`);
   const who = ctx.lookup(params.keyid);
   if (!who) throw new Refusal(401, 'unknown_requester', 'the signing key is not known here; introduce the identity first (POST /identities)');
-  const ok = (() => {
+  const ok = (typeof uri === 'string' ? [uri] : uri).some((u) => {
     try {
-      return crypto.verify(null, Buffer.from(base(components, values, m[1]!)),
+      return crypto.verify(null, Buffer.from(base(components, { ...values, '@target-uri': u }, m[1]!)),
         crypto.createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x: who.key.public_key }, format: 'jwk' }),
         Buffer.from(s[1]!, 'base64'));
     } catch { return false; }
-  })();
+  });
   if (!ok) throw bad('the request signature does not verify');
   for (const [n, exp] of ctx.seen) if (exp < ctx.nowMs) ctx.seen.delete(n);
   if (ctx.seen.has(params.nonce)) throw bad('this request was already seen (nonce reused)');

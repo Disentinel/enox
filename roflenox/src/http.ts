@@ -40,8 +40,29 @@ function json(raw: Buffer): unknown {
   try { return JSON.parse(raw.toString('utf8')); } catch { throw new Refusal(400, 'malformed_body', 'the body is not JSON'); }
 }
 
+const LOOPBACK = ['127.0.0.1', '::1', '::ffff:127.0.0.1'];
+
+/** The URIs a request may have been signed for (RFC 9421 @target-uri): only
+ *  the node's own addresses. Without a public URL, the Host it was sent to.
+ *  With one (behind a proxy), that origin — never the scheme or Host a proxy
+ *  hands us — and, for a request from this machine that arrived on a
+ *  loopback socket, not through a proxy, and names that socket's own address,
+ *  the local origin too:
+ *  the host's own tools sign for 127.0.0.1:<port> (r_public_url_local). */
+export function targetsOf(node: RoflenoxNode, req: http.IncomingMessage): string[] {
+  const p = req.url ?? '/';
+  if (!node.publicUrl) return [`http://${req.headers.host}${p}`];
+  const out = [`${node.publicUrl}${p}`];
+  const s = req.socket;
+  const host = (req.headers.host ?? '').toLowerCase();
+  const proxied = Object.keys(req.headers).some((h) => h === 'forwarded' || h.startsWith('x-forwarded-'));
+  if (!proxied && LOOPBACK.includes(s.localAddress ?? '') && LOOPBACK.includes(s.remoteAddress ?? '')
+    && [`127.0.0.1:${s.localPort}`, `localhost:${s.localPort}`, `[::1]:${s.localPort}`].includes(host)) out.push(`http://${host}${p}`);
+  return out;
+}
+
 /** Who is calling. */
-export function callerOf(node: RoflenoxNode, method: string, target: string, headers: http.IncomingHttpHeaders, raw: Buffer | null): string | null {
+export function callerOf(node: RoflenoxNode, method: string, target: string | readonly string[], headers: http.IncomingHttpHeaders, raw: Buffer | null): string | null {
   const auth = headers.authorization;
   if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
     const given = Buffer.from(auth.slice('Bearer '.length).trim());
@@ -75,9 +96,7 @@ export function createServer(node: RoflenoxNode): http.Server {
       const url = new URL(req.url ?? '/', 'http://local');
       const p = url.pathname;
       const method = req.method ?? 'GET';
-      // The URI the client signed (RFC 9421 @target-uri): the configured public
-      // origin plus the path — never the scheme or Host a proxy hands us.
-      const target = `${node.publicUrl ?? `http://${req.headers.host}`}${req.url}`;
+      const target = targetsOf(node, req);
       const raw = method === 'POST' ? await readRaw(req) : null;
       const ctx = (caller: string | null): Ctx => ({
         node, caller, dataDir: null, now: () => Date.now(),
