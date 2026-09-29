@@ -314,6 +314,11 @@ Declared as facts:
 - `r_mcp_oauth` is to be checked by "a client registered dynamically completes authorize with the owner's secret, PKCE S256 and its redirect_uri, gets an access token, and lists tools over /mcp with it".
 - `r_mcp_oauth` is to be checked by "authorize without the owner's secret, with a wrong secret, with plain PKCE, with a redirect_uri other than the registered one, or a code redeemed twice or by another client, yields no token".
 - `r_mcp_oauth` is to be checked by "a reused refresh token revokes its family, a revoked or expired access token gets 401, and an access token minted for another resource is refused".
+- `r_oauth_lockout` is about `access`.
+- `r_oauth_lockout` binds as `must`.
+- `r_oauth_lockout` says "wrong operator secrets on the authorize page are counted per source address, not per node, so strangers cannot lock the owner out; the source address is the peer socket's, or the address a proxy on the node's own machine reports, and a reported address is trusted only when the peer is loopback; a node-wide ceiling far above one person's mistakes still bounds a distributed guess".
+- `r_oauth_lockout` is stated in "lead's verification of r_mcp_oauth, 2026-09-29: five wrong secrets from anyone locked every approval, the owner's included, for 15 minutes".
+- `r_oauth_lockout` is to be checked by "wrong secrets from one address lock that address only: the owner approves from another address meanwhile, and a forwarded address from a non-loopback peer is ignored".
 - `r_typed` says "every requirement is of exactly one kind from the closed list".
 - `r_typed` is stated in "owner 2026-09-26".
 - `r_typed` is to be checked by "a requirement with an unknown kind fails typing".
@@ -689,6 +694,8 @@ Kinds of the requirements:
 - `r_typed` is of `gate`.
 - `r_public_url_local` is of `reliability`.
 - `r_mcp_oauth` is of `security`.
+- `r_oauth_lockout` is of `security`.
+- `r_oauth_lockout` resists "a stranger who sends wrong secrets to the authorize page to keep the owner from approving, or forges a forwarded address to spend someone else's allowance".
 - `r_mcp_oauth` resists "anyone on the internet who registers a client and lures the owner to approve it, guesses the owner's secret on the authorize page, steals or replays a code or a refresh token, or presents a token minted for another server".
 - `r_compat_parity` is of `feature`.
 - `r_single_writer` is of `reliability`.
@@ -765,6 +772,7 @@ The queue:
 - `r_compat_parity` is queued at 84.
 - `r_public_url_local` is queued at 85.
 - `r_mcp_oauth` is queued at 86.
+- `r_oauth_lockout` is queued at 87.
 - `r_mutation_gate` is queued at 73.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 - `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
@@ -822,6 +830,8 @@ Accepted after verification:
 - `r_snapshot_is_cache` is accepted at "81647a8c36ae605b2ffc51a449fb870dcf399d29".
 - `r_rule_budget` is accepted at "roflenox tree verified 2026-09-27, rules.test.ts 3/3 under load 80".
 - `r_answer_limits` is accepted at "roflenox tree verified 2026-09-27, suite 68/68".
+- `r_public_url_local` is accepted at "cc469048fba19185bbf5dd4887aba590cd83e675".
+- `r_mcp_oauth` is accepted at "80c11531fe867af06dcac3149f4392d487ec6bd5".
 
 > Решение 2026-09-27 по замерам на 200000 фактах: rofl-serve пересчитывает
 > все выведенные факты при каждом evaluate (Eval::run → clear_derived), форк
@@ -1152,6 +1162,14 @@ The checks that exist:
 - "eight concurrent local publishes through one serve are all admitted, in one chain, and the node records no fork of its own identity" guards `r_single_writer`.
 - "eight concurrent local publishes through one serve are all admitted, in one chain, and the node records no fork of its own identity" lives in "roflenox/test/lock.test.ts".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" guards `r_asserted_by`.
+- "a node with a public URL admits an operator-signed local import sent to 127.0.0.1 and still refuses a signature made for another host" guards `r_public_url_local`.
+- "a node with a public URL admits an operator-signed local import sent to 127.0.0.1 and still refuses a signature made for another host" lives in "roflenox/test/access.test.ts".
+- "a client registered dynamically completes authorize with the owner's secret, PKCE S256 and its redirect_uri, gets an access token, and lists tools over /mcp with it" guards `r_mcp_oauth`.
+- "a client registered dynamically completes authorize with the owner's secret, PKCE S256 and its redirect_uri, gets an access token, and lists tools over /mcp with it" lives in "roflenox/test/oauth.test.ts".
+- "authorize without the owner's secret, with a wrong secret, with plain PKCE, with a redirect_uri other than the registered one, or a code redeemed twice or by another client, yields no token" guards `r_mcp_oauth`.
+- "authorize without the owner's secret, with a wrong secret, with plain PKCE, with a redirect_uri other than the registered one, or a code redeemed twice or by another client, yields no token" lives in "roflenox/test/oauth.test.ts".
+- "a reused refresh token revokes its family, a revoked or expired access token gets 401, and an access token minted for another resource is refused" guards `r_mcp_oauth`.
+- "a reused refresh token revokes its family, a revoked or expired access token gets 401, and an access token minted for another resource is refused" lives in "roflenox/test/oauth.test.ts".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" lives in "personal-node/src/mcp/main-graph.test.ts".
 
 ## Что выводится
