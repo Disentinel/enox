@@ -204,6 +204,18 @@
    "kind": "wire",
    "match": "'content-type': 'text/html; charset=utf-8'",
    "why": "the authorize page: the owner's browser types the operator secret there (r_mcp_oauth)"
+  },
+  {
+   "file": "src/oauth.ts",
+   "kind": "who",
+   "match": "headers['x-real-ip']",
+   "why": "r_oauth_lockout: the source address wrong secrets are counted against, as reported by a proxy on this machine; trusted only when the TCP peer is loopback, and never proof of who"
+  },
+  {
+   "file": "src/oauth.ts",
+   "kind": "who",
+   "match": "headers['x-forwarded-for']",
+   "why": "r_oauth_lockout: the source address wrong secrets are counted against, as reported by a proxy on this machine; trusted only when the TCP peer is loopback, and never proof of who"
   }
  ]
 }

@@ -7,6 +7,8 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { createServer, listen } from '../src/http.ts';
+import { sourceOf } from '../src/oauth.ts';
 import { post, start, tmpDir, type Running } from './helpers.ts';
 
 const PUBLIC = 'https://enox.example.org';
@@ -30,9 +32,9 @@ function authParams(client: string, v: string, o: Record<string, string> = {}): 
 }
 
 /** The owner's POST on the authorize page: the status, and where it sends the browser. */
-async function approve(a: Running, params: Record<string, string>, secret: string | null) {
+async function approve(a: Running | string, params: Record<string, string>, secret: string | null, headers: Record<string, string> = {}) {
   const f = new URLSearchParams({ ...params, decision: 'approve', ...(secret === null ? {} : { secret }) });
-  const r = await fetch(`${a.url}/authorize`, { method: 'POST', body: f, redirect: 'manual' });
+  const r = await fetch(`${typeof a === 'string' ? a : a.url}/authorize`, { method: 'POST', body: f, redirect: 'manual', headers });
   const location = r.headers.get('location');
   return { status: r.status, location: location ? new URL(location) : null, html: await r.text() };
 }
@@ -259,4 +261,53 @@ test('a reused refresh token revokes its family, a revoked or expired access tok
     assert.equal((await tokenCall(a, { grant_type: 'refresh_token', refresh_token: mine.refresh, client_id: mine.client, resource: RESOURCE })).body.error, 'invalid_target');
     assert.equal((await tokenCall(a, { grant_type: 'refresh_token', refresh_token: mine.refresh, client_id: mine.client })).body.error, 'invalid_grant', 'its grant was for the old address');
   } finally { await a.stop(); await b.stop(); }
+});
+
+test('wrong secrets from one address lock that address only: the owner approves from another address meanwhile, and a forwarded address from a non-loopback peer is ignored', async () => {
+  const a = await start(tmpDir('oauth-lockout'), 'node-a', { publicUrl: PUBLIC, oauth: { ...OAUTH, maxFailuresTotal: 12 } });
+  const lanIp = Object.values(os.networkInterfaces()).flat().find((i) => i && !i.internal && i.family === 'IPv4')?.address;
+  const lan = lanIp ? createServer(a.node) : null;
+  try {
+    const secret = a.node.operatorToken();
+    const client = (await register(a)).body.client_id as string;
+    const params = authParams(client, verifier());
+    // As nginx on this machine forwards them: the TCP peer is loopback, the address is in the headers.
+    const from = (ip: string) => ({ 'x-real-ip': ip, 'x-forwarded-for': ip });
+    const STRANGER = '198.51.100.7';
+    const OWNER = '203.0.113.9';
+
+    for (let i = 0; i < 3; i++) assert.equal((await approve(a, params, 'wrong', from(STRANGER))).status, 401);
+    assert.equal((await approve(a, params, secret, from(STRANGER))).status, 429, 'the stranger\'s address is locked, even with the right secret');
+    // Meanwhile the owner, at another address, approves.
+    assert.equal((await approve(a, params, secret, from(OWNER))).status, 302);
+    // A client-written X-Forwarded-For prefix does not move the stranger: the proxy's own last entry counts.
+    assert.equal((await approve(a, params, secret, { 'x-forwarded-for': `${OWNER}, ${STRANGER}` })).status, 429);
+    assert.equal((await approve(a, params, secret, { 'x-forwarded-for': `${STRANGER}, ${OWNER}` })).status, 302);
+
+    // A forwarded address from a peer that is not loopback is that peer's claim, and ignored.
+    assert.equal(sourceOf({ socket: { remoteAddress: '192.0.2.50' }, headers: from(OWNER) } as never), '192.0.2.50');
+    assert.equal(sourceOf({ socket: { remoteAddress: '::ffff:192.0.2.50' }, headers: { 'x-forwarded-for': OWNER } } as never), '192.0.2.50');
+    assert.equal(sourceOf({ socket: { remoteAddress: '127.0.0.1' }, headers: from(OWNER) } as never), OWNER, 'positive control: from loopback it is trusted');
+    assert.equal(sourceOf({ socket: { remoteAddress: '127.0.0.1' }, headers: {} } as never), '127.0.0.1');
+    if (lan && lanIp) {
+      // Live, over a real non-loopback socket: a peer at the LAN address that
+      // claims fresh addresses is still counted as itself.
+      const at = await listen(lan, 0, lanIp);
+      for (let i = 0; i < 3; i++) assert.equal((await approve(at, params, 'wrong', from(`192.0.2.${i + 1}`))).status, 401);
+      assert.equal((await approve(at, params, secret, from('192.0.2.99'))).status, 429, 'a forged forwarded address spends nobody else\'s allowance');
+      assert.equal((await approve(a, params, secret, from('192.0.2.99'))).status, 302, 'and that address, really forwarded, is untouched');
+    }
+
+    // The node-wide ceiling: wrong secrets spread over many addresses stop at it, for everyone.
+    let n = 0;
+    for (; n < 20; n++) if ((await approve(a, params, 'wrong', from(`10.0.0.${n + 1}`))).status === 429) break;
+    assert.ok(n < 20, 'the ceiling was reached');
+    assert.equal((await approve(a, params, secret, from('10.9.9.9'))).status, 429, 'a fresh address is refused at the ceiling');
+    a.clock.t += 101;
+    assert.equal((await approve(a, params, secret, from('10.9.9.9'))).status, 302, 'positive control: the window passed');
+    assert.equal((await approve(a, params, secret, from(STRANGER))).status, 302, 'and the stranger\'s lock with it');
+  } finally {
+    if (lan?.listening) await new Promise<void>((r) => lan.close(() => r()));
+    await a.stop();
+  }
 });
