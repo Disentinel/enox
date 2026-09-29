@@ -319,6 +319,8 @@ Declared as facts:
 - `r_oauth_lockout` says "wrong operator secrets on the authorize page are counted per source address, not per node, so strangers cannot lock the owner out; the source address is the peer socket's, or the address a proxy on the node's own machine reports, and a reported address is trusted only when the peer is loopback; a node-wide ceiling far above one person's mistakes still bounds a distributed guess".
 - `r_oauth_lockout` is stated in "lead's verification of r_mcp_oauth, 2026-09-29: five wrong secrets from anyone locked every approval, the owner's included, for 15 minutes".
 - `r_oauth_lockout` is to be checked by "wrong secrets from one address lock that address only: the owner approves from another address meanwhile, and a forwarded address from a non-loopback peer is ignored".
+- `r_oauth_lockout` says "an IPv6 source counts as its /64, since one party owns a whole /64; and the node-wide ceiling never refuses an address that has no failures of its own inside the window, so a crowd of fresh addresses slows guessing across the crowd but never locks out the owner; with a node-generated secret of 256 bits, per-source limits already bound a distributed guess".
+- `r_oauth_lockout` is to be checked by "a hundred and one wrong secrets from distinct IPv6 addresses in one /64 lock that /64 only, and the owner at a fresh address still approves after any number of wrong secrets from other addresses".
 - `r_typed` says "every requirement is of exactly one kind from the closed list".
 - `r_typed` is stated in "owner 2026-09-26".
 - `r_typed` is to be checked by "a requirement with an unknown kind fails typing".
@@ -773,6 +775,7 @@ The queue:
 - `r_public_url_local` is queued at 85.
 - `r_mcp_oauth` is queued at 86.
 - `r_oauth_lockout` is queued at 87.
+- `r_oauth_lockout` is rejected at "011800fe60f77a80278aa11e95b6c2025700ca4e".
 - `r_mutation_gate` is queued at 73.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 - `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
