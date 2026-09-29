@@ -835,6 +835,7 @@ Accepted after verification:
 - `r_answer_limits` is accepted at "roflenox tree verified 2026-09-27, suite 68/68".
 - `r_public_url_local` is accepted at "cc469048fba19185bbf5dd4887aba590cd83e675".
 - `r_mcp_oauth` is accepted at "80c11531fe867af06dcac3149f4392d487ec6bd5".
+- `r_oauth_lockout` is accepted at "90919f04e155273b0abb638291406340b1d48bb2".
 
 > Решение 2026-09-27 по замерам на 200000 фактах: rofl-serve пересчитывает
 > все выведенные факты при каждом evaluate (Eval::run → clear_derived), форк
@@ -1173,6 +1174,10 @@ The checks that exist:
 - "authorize without the owner's secret, with a wrong secret, with plain PKCE, with a redirect_uri other than the registered one, or a code redeemed twice or by another client, yields no token" lives in "roflenox/test/oauth.test.ts".
 - "a reused refresh token revokes its family, a revoked or expired access token gets 401, and an access token minted for another resource is refused" guards `r_mcp_oauth`.
 - "a reused refresh token revokes its family, a revoked or expired access token gets 401, and an access token minted for another resource is refused" lives in "roflenox/test/oauth.test.ts".
+- "wrong secrets from one address lock that address only: the owner approves from another address meanwhile, and a forwarded address from a non-loopback peer is ignored" guards `r_oauth_lockout`.
+- "wrong secrets from one address lock that address only: the owner approves from another address meanwhile, and a forwarded address from a non-loopback peer is ignored" lives in "roflenox/test/oauth.test.ts".
+- "a hundred and one wrong secrets from distinct IPv6 addresses in one /64 lock that /64 only, and the owner at a fresh address still approves after any number of wrong secrets from other addresses" guards `r_oauth_lockout`.
+- "a hundred and one wrong secrets from distinct IPv6 addresses in one /64 lock that /64 only, and the owner at a fresh address still approves after any number of wrong secrets from other addresses" lives in "roflenox/test/oauth.test.ts".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" lives in "personal-node/src/mcp/main-graph.test.ts".
 
 ## Что выводится
