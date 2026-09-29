@@ -111,3 +111,6 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_single_writer` at "cec807b06026af3a07b156b664a6212dcbaba9bd".
 - `roflenox_core` takes `r_single_writer`.
 - `roflenox_core` finished `r_single_writer` at "2346494fd5299a279f17dec760cef6428f91494c".
+- `roflenox_core` takes `r_public_url_local`.
+- `roflenox_core` finished `r_public_url_local` at "cc469048fba19185bbf5dd4887aba590cd83e675".
+- `roflenox_core` takes `r_mcp_oauth`.
