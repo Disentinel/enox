@@ -15,6 +15,7 @@
 // minute, so a restart simply voids the outstanding ones.
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
+import * as net from 'node:net';
 import type * as http from 'node:http';
 import * as path from 'node:path';
 
@@ -28,9 +29,12 @@ export interface OAuthOptions {
   /** Wrong secrets one source address may send per window before the page
    *  refuses its every try (default 5 per 15 min; r_oauth_lockout). */
   maxFailures?: number;
-  /** Wrong secrets from all addresses together per window: the backstop
-   *  against a guess spread over many addresses (default 100). */
+  /** Wrong secrets from all sources together per window (default 100). Past
+   *  it, a source that has failed in the window may not try again; a source
+   *  with no failure of its own is never refused, so no crowd locks out the owner. */
   maxFailuresTotal?: number;
+  /** Sources remembered at most (default 10000); the oldest is forgotten first. */
+  maxSources?: number;
   failWindowMs?: number;
   /** Registered clients kept (default 100); the oldest with no grant makes room. */
   maxClients?: number;
@@ -72,13 +76,13 @@ export class OAuth {
   private readonly refreshTtl: number;
   private readonly maxFailures: number;
   private readonly maxFailuresTotal: number;
+  private readonly maxSources: number;
   private readonly failWindow: number;
   private readonly maxClients: number;
   private state: State;
   /** code hash → its binding. Redeemed codes stay (grant set) until they expire, to catch a replay. */
   private readonly codes = new Map<string, Code>();
-  /** Wrong secrets in the window: source address → times. At most
-   *  maxFailuresTotal times live in it, so it is bounded however many addresses try. */
+  /** Wrong secrets in the window: source (sourceKey) → times; at most maxSources of them. */
   private readonly failures = new Map<string, number[]>();
   readonly warnings: string[] = [];
 
@@ -93,6 +97,7 @@ export class OAuth {
     this.refreshTtl = o.refreshTtlMs ?? 30 * 24 * 60 * MINUTE;
     this.maxFailures = o.maxFailures ?? 5;
     this.maxFailuresTotal = o.maxFailuresTotal ?? 100;
+    this.maxSources = o.maxSources ?? 10_000;
     this.failWindow = o.failWindowMs ?? 15 * MINUTE;
     this.maxClients = o.maxClients ?? 100;
     this.state = empty();
@@ -214,9 +219,10 @@ export class OAuth {
     return { status: 200, html: this.page(client, redirect, q, null) };
   }
 
-  /** POST /authorize: the owner's answer, from `source` (see sourceOf). A
-   *  code only for the right secret. */
-  approve(form: URLSearchParams, source: string): { status: number; html?: string; location?: string } {
+  /** POST /authorize: the owner's answer, from the address `from` (see
+   *  sourceOf). A code only for the right secret. */
+  approve(form: URLSearchParams, from: string): { status: number; html?: string; location?: string } {
+    const source = sourceKey(from);
     const { client, redirect } = this.checkClient(form);
     const bad = this.checkRequest(form);
     if (bad) return { status: 302, location: this.back(redirect, form, { error: bad }) };
@@ -226,9 +232,11 @@ export class OAuth {
       const live = times.filter((f) => f > t - this.failWindow);
       if (live.length) { this.failures.set(src, live); total += live.length; } else this.failures.delete(src);
     }
-    // Wrong secrets lock out the address that sent them, not the owner at
-    // another one; only a flood from many addresses reaches the ceiling.
-    if ((this.failures.get(source)?.length ?? 0) >= this.maxFailures || total >= this.maxFailuresTotal) {
+    // Wrong secrets lock out the source that sent them, not the owner at
+    // another one. Past the node-wide ceiling a source that has failed may
+    // not try again, but a clean one always may (r_oauth_lockout).
+    const mine = this.failures.get(source)?.length ?? 0;
+    if (mine >= this.maxFailures || (mine > 0 && total >= this.maxFailuresTotal)) {
       return { status: 429, html: this.page(client, redirect, form, 'Too many wrong secrets. Try again later.') };
     }
     if (form.get('decision') === 'deny') return { status: 302, location: this.back(redirect, form, { error: 'access_denied' }) };
@@ -236,6 +244,7 @@ export class OAuth {
     const given = crypto.createHash('sha256').update(form.get('secret') ?? '').digest();
     const want = crypto.createHash('sha256').update(this.secret()).digest();
     if (!crypto.timingSafeEqual(given, want)) {
+      if (!this.failures.has(source) && this.failures.size >= this.maxSources) this.failures.delete(this.failures.keys().next().value!);
       this.failures.set(source, [...(this.failures.get(source) ?? []), t]);
       return { status: 401, html: this.page(client, redirect, form, 'Not approved: that is not the operator secret.') };
     }
@@ -392,13 +401,34 @@ const LOOPBACK = ['127.0.0.1', '::1', '::ffff:127.0.0.1'];
  *  appended; earlier ones are the client's to write). A forwarded address from
  *  any other peer is the client's own claim, and ignored. */
 export function sourceOf(req: Pick<http.IncomingMessage, 'headers' | 'socket'>): string {
-  const peer = (req.socket.remoteAddress ?? '').replace(/^::ffff:/, '');
+  const peer = req.socket.remoteAddress ?? '';
   if (!LOOPBACK.includes(peer)) return peer;
   const real = req.headers['x-real-ip'];
   const fwd = req.headers['x-forwarded-for'];
   const reported = typeof real === 'string' && real.trim() ? real.trim()
     : typeof fwd === 'string' && fwd.trim() ? fwd.split(',').pop()!.trim() : '';
-  return reported ? reported.replace(/^::ffff:/, '').slice(0, 64) : peer;
+  return reported ? reported.slice(0, 64) : peer;
+}
+
+/** What wrong secrets are counted against: an IPv4 address as itself (an
+ *  IPv4-mapped IPv6 address too), an IPv6 address as its /64 — one party
+ *  holds a whole /64 (r_oauth_lockout). Anything else, as written. */
+export function sourceKey(address: string): string {
+  const a = address.trim().toLowerCase().replace(/%.*$/, '');
+  if (net.isIPv4(a)) return a;
+  if (!net.isIPv6(a)) return a;
+  let s = a;
+  const v4 = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(s);
+  if (v4) {
+    const o = v4.slice(1).map(Number);
+    s = `${s.slice(0, -v4[0].length)}${((o[0]! << 8) | o[1]!).toString(16)}:${((o[2]! << 8) | o[3]!).toString(16)}`;
+  }
+  const [head, tail] = s.split('::') as [string, string | undefined];
+  const h = head ? head.split(':') : [];
+  const t = tail ? tail.split(':') : [];
+  const x = [...h, ...Array(tail === undefined ? 0 : 8 - h.length - t.length).fill('0'), ...t].map((p) => parseInt(p, 16));
+  if (x.slice(0, 5).every((v) => v === 0) && x[5] === 0xffff) return [x[6]! >> 8, x[6]! & 255, x[7]! >> 8, x[7]! & 255].join('.');
+  return `${x.slice(0, 4).map((v) => v.toString(16)).join(':')}::/64`;
 }
 
 /** Serve an OAuth route; false if `p` is not one. */

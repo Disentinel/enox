@@ -8,7 +8,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { createServer, listen } from '../src/http.ts';
-import { sourceOf } from '../src/oauth.ts';
+import { sourceKey, sourceOf } from '../src/oauth.ts';
 import { post, start, tmpDir, type Running } from './helpers.ts';
 
 const PUBLIC = 'https://enox.example.org';
@@ -286,7 +286,7 @@ test('wrong secrets from one address lock that address only: the owner approves 
 
     // A forwarded address from a peer that is not loopback is that peer's claim, and ignored.
     assert.equal(sourceOf({ socket: { remoteAddress: '192.0.2.50' }, headers: from(OWNER) } as never), '192.0.2.50');
-    assert.equal(sourceOf({ socket: { remoteAddress: '::ffff:192.0.2.50' }, headers: { 'x-forwarded-for': OWNER } } as never), '192.0.2.50');
+    assert.equal(sourceKey(sourceOf({ socket: { remoteAddress: '::ffff:192.0.2.50' }, headers: { 'x-forwarded-for': OWNER } } as never)), '192.0.2.50');
     assert.equal(sourceOf({ socket: { remoteAddress: '127.0.0.1' }, headers: from(OWNER) } as never), OWNER, 'positive control: from loopback it is trusted');
     assert.equal(sourceOf({ socket: { remoteAddress: '127.0.0.1' }, headers: {} } as never), '127.0.0.1');
     if (lan && lanIp) {
@@ -298,16 +298,52 @@ test('wrong secrets from one address lock that address only: the owner approves 
       assert.equal((await approve(a, params, secret, from('192.0.2.99'))).status, 302, 'and that address, really forwarded, is untouched');
     }
 
-    // The node-wide ceiling: wrong secrets spread over many addresses stop at it, for everyone.
-    let n = 0;
-    for (; n < 20; n++) if ((await approve(a, params, 'wrong', from(`10.0.0.${n + 1}`))).status === 429) break;
-    assert.ok(n < 20, 'the ceiling was reached');
-    assert.equal((await approve(a, params, secret, from('10.9.9.9'))).status, 429, 'a fresh address is refused at the ceiling');
+    // The node-wide ceiling: past it, an address that has failed may not try
+    // again; a fresh one — the owner's — still may.
+    for (let n = 0; n < 12; n++) assert.equal((await approve(a, params, 'wrong', from(`10.0.0.${n + 1}`))).status, 401);
+    assert.equal((await approve(a, params, secret, from('10.0.0.1'))).status, 429, 'an address that failed is stopped at the ceiling');
+    assert.equal((await approve(a, params, secret, from('10.9.9.9'))).status, 302, 'a fresh address is not');
     a.clock.t += 101;
-    assert.equal((await approve(a, params, secret, from('10.9.9.9'))).status, 302, 'positive control: the window passed');
+    assert.equal((await approve(a, params, secret, from('10.0.0.1'))).status, 302, 'positive control: the window passed');
     assert.equal((await approve(a, params, secret, from(STRANGER))).status, 302, 'and the stranger\'s lock with it');
   } finally {
     if (lan?.listening) await new Promise<void>((r) => lan.close(() => r()));
     await a.stop();
   }
+});
+
+test('a hundred and one wrong secrets from distinct IPv6 addresses in one /64 lock that /64 only, and the owner at a fresh address still approves after any number of wrong secrets from other addresses', async () => {
+  const a = await start(tmpDir('oauth-v6'), 'node-a', { publicUrl: PUBLIC, oauth: { ...OAUTH, maxFailuresTotal: 12 } });
+  try {
+    const secret = a.node.operatorToken();
+    const client = (await register(a)).body.client_id as string;
+    const params = authParams(client, verifier());
+    const from = (ip: string) => ({ 'x-real-ip': ip });
+
+    // 101 addresses of one /64, one wrong secret each: three are heard, then the /64 is locked.
+    const got: number[] = [];
+    for (let i = 1; i <= 101; i++) got.push((await approve(a, params, 'wrong', from(`2001:db8:1:1::${i.toString(16)}`))).status);
+    assert.deepEqual([got.filter((x) => x === 401).length, got.filter((x) => x === 429).length], [3, 98]);
+    assert.equal((await approve(a, params, secret, from('2001:db8:1:1:ffff:ffff:ffff:fffe'))).status, 429, 'the whole /64, even with the right secret');
+    // …that /64 only: the neighbouring /64 and the owner's IPv4 are clean.
+    assert.equal((await approve(a, params, secret, from('2001:db8:1:2::1'))).status, 302);
+    assert.equal((await approve(a, params, secret, from('203.0.113.9'))).status, 302);
+    // IPv4-mapped addresses stay IPv4 addresses, each its own.
+    assert.equal(sourceKey('::ffff:198.51.100.7'), '198.51.100.7');
+    assert.equal(sourceKey('::ffff:c633:6407'), '198.51.100.7');
+    assert.notEqual(sourceKey('::ffff:198.51.100.7'), sourceKey('::ffff:198.51.100.8'));
+    assert.equal(sourceKey('2001:DB8:1:1:ffff::65'), sourceKey('2001:db8:1:1::1'));
+
+    // Any number of wrong secrets from other addresses — far past the node-wide
+    // ceiling, spread over 100 /64s and 100 IPv4 addresses — and the owner, at
+    // an address of their own, still approves.
+    for (let i = 0; i < 100; i++) {
+      assert.notEqual((await approve(a, params, 'wrong', from(`2001:db8:${(i + 16).toString(16)}:1::1`))).status, 302);
+      assert.notEqual((await approve(a, params, 'wrong', from(`10.1.${i >> 8}.${i & 255}`))).status, 302);
+    }
+    // The crowd is slowed: past the ceiling, an address that failed once is not heard again.
+    assert.equal((await approve(a, params, secret, from('10.1.0.99'))).status, 429);
+    assert.equal((await approve(a, params, secret, from('2001:db8:1000:1::1'))).status, 302, 'the owner, at a fresh IPv6 address');
+    assert.equal((await approve(a, params, secret, from('192.0.2.200'))).status, 302, 'the owner, at a fresh IPv4 address');
+  } finally { await a.stop(); }
 });
