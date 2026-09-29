@@ -296,6 +296,7 @@ test('an anonymous caller of every open endpoint learns the node\'s own name and
         assert: { facts: [fact(H, 'x', 'y')] }, add_assertion: { source: H, target: 'y', relation: 'x' }, batch_assertions: { assertions: [] },
         remember: { subject: H, fact: 'x' }, update_assertion: { fact_id: H }, delete_assertion: { fact_id: H }, update_node: { node_id: H },
         create_artifact: { title: H, domain: 'd', content_type: 'text/plain', body: 'x' }, create_share: { name: H, domains: [] }, revoke_share: { id: H },
+        oauth_grants: {}, oauth_revoke: { grant: H },
       };
     };
     const network = OPS.filter((o) => !isLocal(o));

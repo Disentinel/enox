@@ -168,6 +168,42 @@
    "kind": "store",
    "match": ".renameSync(",
    "why": "the data directory's lock: a serve adds the URL it listens at, replacing its own lock file whole (r_single_writer)"
+  },
+  {
+   "file": "src/oauth.ts",
+   "kind": "store",
+   "match": ".writeSync(",
+   "why": "r_mcp_oauth, put by the owner: the OAuth clients and grants, with token HASHES only, in <data>/oauth/state.json (0600); losing it revokes every grant and grants nothing"
+  },
+  {
+   "file": "src/oauth.ts",
+   "kind": "store",
+   "match": ".renameSync(",
+   "why": "writes that OAuth state atomically (temp file, fsync, rename, fsync of the directory), as the operator token is written"
+  },
+  {
+   "file": "src/oauth.ts",
+   "kind": "who",
+   "match": "Bearer",
+   "why": "r_mcp_oauth: an OAuth access token acts as the node's OWN identity at /mcp only, through a grant the owner approved with the operator secret and can revoke"
+  },
+  {
+   "file": "src/oauth.ts",
+   "kind": "who",
+   "match": "timingSafeEqual",
+   "why": "compares the operator secret typed on the authorize page, both sides hashed first, in constant time"
+  },
+  {
+   "file": "src/oauth.ts",
+   "kind": "wire",
+   "match": "'content-type': 'application/json'",
+   "why": "OAuth metadata, registration and token responses: JSON, as RFC 8414/7591/6749 require"
+  },
+  {
+   "file": "src/oauth.ts",
+   "kind": "wire",
+   "match": "'content-type': 'text/html; charset=utf-8'",
+   "why": "the authorize page: the owner's browser types the operator secret there (r_mcp_oauth)"
   }
  ]
 }

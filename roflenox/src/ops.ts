@@ -326,6 +326,16 @@ export const OPS: Op[] = [
       await followLoop(tick, me, (a.interval_ms as number | undefined) ?? 30_000, ac.signal, (s) => process.stderr.write(`${s}\n`));
       return { rounds: limit ?? rounds };
     } },
+  { name: 'oauth_grants', description: 'The OAuth grants hosted MCP clients hold on this node: client, redirect host, when, live tokens, revoked.',
+    input: obj({}), access: 'operator',
+    say: (r) => r.grants.length ? r.grants.map((g: Record<string, unknown>) => `${g.grant}\t${g.client}\t${g.redirect_host}\t${g.created_at}\t${g.revoked_at ? `revoked ${g.revoked_at}` : `${g.live_access_tokens} live`}`).join('\n') : 'no OAuth grants',
+    run: async (ctx) => ({ grants: needNode(ctx).oauth.grants() }) },
+  { name: 'oauth_revoke', description: 'Revoke an OAuth grant: every token it issued stops at once.', input: obj({ grant: str() }, ['grant']),
+    access: 'operator', positional: ['grant'], say: (r) => `revoked ${r.grant}`,
+    run: async (ctx, a) => {
+      if (!needNode(ctx).oauth.revoke(a.grant as string)) throw new Refusal(404, 'no_grant', `no OAuth grant ${a.grant}`);
+      return { grant: a.grant, revoked: true };
+    } },
   { name: 'operator_token', description: 'The bearer token that stands for this node\'s own identity over MCP.', input: obj({}),
     access: { local: 'it is a credential; it is shown only on the machine that holds it' },
     say: (r) => r.token,

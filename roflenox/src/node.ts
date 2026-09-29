@@ -37,6 +37,7 @@ import { RESULT } from './executor.ts';
 import { Assertions, match, type Current } from './assertions.ts';
 import { whyNotDelegated, whyNotReadable } from './expiry.ts';
 import { open as openSealed, type Envelope } from './seal.ts';
+import { OAuth, type OAuthOptions } from './oauth.ts';
 
 export const DEFAULT_FRESHNESS_SEC = 300;
 
@@ -93,6 +94,8 @@ export interface NodeOptions {
   /** Let the domain of a user@domain identity vouch for its first key
    *  (r_domain_vouch). Off by default; `true` uses the platform's DNS and CAs. */
   domainVouch?: boolean | DomainTransport;
+  /** Lifetimes and limits of the OAuth flow (r_mcp_oauth); on with a public URL. */
+  oauth?: OAuthOptions;
 }
 
 export const DEFAULT_SILENCE_SEC = 3600;
@@ -167,6 +170,8 @@ export class RoflenoxNode {
   private engineRestarts = 0;
   private readonly freshnessMs: number;
   readonly publicUrl: string | null;
+  /** OAuth for hosted MCP clients; its endpoints answer only with a public URL. */
+  readonly oauth: OAuth;
   /** The key challenges are authenticated with: random per process, so a
    *  restart simply expires every outstanding challenge. */
   private readonly challengeKey = crypto.randomBytes(32);
@@ -213,6 +218,8 @@ export class RoflenoxNode {
     this.now = o.now ?? Date.now;
     this.freshnessMs = (o.freshnessSec ?? DEFAULT_FRESHNESS_SEC) * 1000;
     this.publicUrl = o.publicUrl ? new URL(o.publicUrl).origin : null;
+    this.oauth = new OAuth(o.dataDir, this.publicUrl, () => operatorTokenOf(o.dataDir), this.now, o.oauth);
+    this.warnings.push(...this.oauth.warnings);
     this.ruleBudget = o.ruleBudget ?? DEFAULT_RULE_BUDGET;
     this.silenceSec = o.silenceSec ?? DEFAULT_SILENCE_SEC;
     this.domainVouch = o.domainVouch ? new DomainVouch(o.domainVouch === true ? {} : o.domainVouch, () => this.now()) : null;

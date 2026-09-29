@@ -1,23 +1,26 @@
 // HTTP, GENERATED from the operation table (src/ops.ts): POST /op/<name> for
 // every operation that is not local-only, each op's wire alias, and the MCP
-// transport at /mcp. There is no other route. JSON in, JSON out; a refusal is
+// transport at /mcp — and, behind a public URL, the OAuth routes of
+// src/oauth.ts. There is no other route. JSON in, JSON out; a refusal is
 // {error: <reason>, message, ...detail} with the refusal's status.
 //
 // Who is calling: an RFC 9421 signature (any identity), or the operator's
-// bearer token (the node's own identity), or nobody. A credential that is
+// bearer token (the node's own identity), or at /mcp an OAuth access token
+// (the node's own identity, through a grant), or nobody. A credential that is
 // present but wrong is a 401, never an anonymous call.
 import * as crypto from 'node:crypto';
 import * as http from 'node:http';
 import { Refusal } from './facts.ts';
 import { handleRpc } from './mcp.ts';
+import { serveOAuth } from './oauth.ts';
 import { callOp, isLocal, OPS, type Ctx, type Op } from './ops.ts';
 import type { RoflenoxNode } from './node.ts';
 
 const MAX_BODY = 16 * 1024 * 1024;
 
-function send(res: http.ServerResponse, status: number, body: unknown): void {
+function send(res: http.ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
   const text = JSON.stringify(body);
-  res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(text) });
+  res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(text), ...headers });
   res.end(text);
 }
 
@@ -61,14 +64,18 @@ export function targetsOf(node: RoflenoxNode, req: http.IncomingMessage): string
   return out;
 }
 
-/** Who is calling. */
-export function callerOf(node: RoflenoxNode, method: string, target: string | readonly string[], headers: http.IncomingHttpHeaders, raw: Buffer | null): string | null {
+/** Who is calling. At /mcp (`mcp`), a bearer token may also be an OAuth
+ *  access token minted for this node's /mcp: it acts as the node's own
+ *  identity through its grant (r_mcp_oauth). Nowhere else. */
+export function callerOf(node: RoflenoxNode, method: string, target: string | readonly string[], headers: http.IncomingHttpHeaders, raw: Buffer | null, mcp = false): string | null {
   const auth = headers.authorization;
   if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
-    const given = Buffer.from(auth.slice('Bearer '.length).trim());
+    const presented = auth.slice('Bearer '.length).trim();
+    const given = Buffer.from(presented);
     const want = Buffer.from(node.operatorToken());
-    if (!node.identity || given.length !== want.length || !crypto.timingSafeEqual(given, want)) {
-      throw new Refusal(401, 'bad_token', 'the bearer token is not this node\'s operator token');
+    const operator = given.length === want.length && crypto.timingSafeEqual(given, want);
+    if (!node.identity || !(operator || (mcp && node.oauth.admits(presented)))) {
+      throw new Refusal(401, 'bad_token', 'the bearer token is not this node\'s operator token or a live token for its MCP endpoint');
     }
     return node.identity.name;
   }
@@ -103,9 +110,22 @@ export function createServer(node: RoflenoxNode): http.Server {
         call: (op, args) => callOp(op, args, ctx(caller), 'network'),
       });
 
+      if (node.publicUrl && serveOAuth(node.oauth, req, res, url, raw)) return;
+
       if (p === '/mcp') {
         if (method !== 'POST') return send(res, 405, { error: 'method_not_allowed', message: 'POST JSON-RPC; no SSE stream is offered' });
-        const caller = callerOf(node, method, target, req.headers, raw);
+        // Behind a public URL, /mcp answers only a proven caller; the 401 says
+        // where to get a token (RFC 9728), so a hosted client can start OAuth.
+        let caller: string | null;
+        try { caller = callerOf(node, method, target, req.headers, raw, true); } catch (e) {
+          if (e instanceof Refusal && e.status === 401 && node.publicUrl) {
+            return send(res, 401, { error: e.reason, message: e.message }, { 'www-authenticate': node.oauth.challenge(true) });
+          }
+          throw e;
+        }
+        if (caller === null && node.publicUrl) {
+          return send(res, 401, { error: 'unauthenticated', message: 'this endpoint needs a bearer token or a signed request' }, { 'www-authenticate': node.oauth.challenge(false) });
+        }
         let msg: unknown;
         try { msg = JSON.parse(raw!.toString('utf8')); } catch {
           return send(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } });
