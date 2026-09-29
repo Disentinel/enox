@@ -304,6 +304,16 @@ Declared as facts:
 - `r_public_url_local` says "a node served behind a public URL still accepts signed requests from its own machine's local tools addressed to its local address; a request signature binds to whichever of the node's own addresses it was sent to, never to a foreign one".
 - `r_public_url_local` is stated in "deploying rofl.enox.dev, 2026-09-28: with --public-url set, import_enox and assert run on the host could not reach their own serve".
 - `r_public_url_local` is to be checked by "a node with a public URL admits an operator-signed local import sent to 127.0.0.1 and still refuses a signature made for another host".
+- `r_mcp_oauth` is about `access`.
+- `r_mcp_oauth` binds as `must`.
+- `r_mcp_oauth` says "a node behind a public URL lets a hosted MCP client (claude.ai connectors and the like) connect through the MCP authorization flow: OAuth 2.1 authorization code with PKCE S256 only, dynamic client registration, protected-resource and authorization-server metadata under /.well-known, and a 401 carrying WWW-Authenticate with resource_metadata; the existing bearer header keeps working".
+- `r_mcp_oauth` says "only the owner can approve: the authorize page grants nothing until the owner proves the operator secret on that page, it names the client and the exact redirect host being approved, and wrong secrets are rate-limited and never distinguishable by timing".
+- `r_mcp_oauth` says "a code is single-use, lives at most a minute, and is redeemed only by the client it was issued to, with the same redirect_uri and the matching PKCE verifier; access tokens are short-lived, refresh tokens rotate on use and a reused refresh token revokes its whole family; tokens are stored only as hashes and the owner can list and revoke them".
+- `r_mcp_oauth` says "a token issued through OAuth acts as the owner through a grant the owner can revoke, and is limited to the MCP endpoint of this node (audience-bound); the public pages, including the authorize page, reveal no host paths, user names or key locations".
+- `r_mcp_oauth` is stated in "owner 2026-09-29: the claude.ai connector cannot reach ROFLENOX with header-only auth; implement OAuth, and only the owner connects to the personal graph".
+- `r_mcp_oauth` is to be checked by "a client registered dynamically completes authorize with the owner's secret, PKCE S256 and its redirect_uri, gets an access token, and lists tools over /mcp with it".
+- `r_mcp_oauth` is to be checked by "authorize without the owner's secret, with a wrong secret, with plain PKCE, with a redirect_uri other than the registered one, or a code redeemed twice or by another client, yields no token".
+- `r_mcp_oauth` is to be checked by "a reused refresh token revokes its family, a revoked or expired access token gets 401, and an access token minted for another resource is refused".
 - `r_typed` says "every requirement is of exactly one kind from the closed list".
 - `r_typed` is stated in "owner 2026-09-26".
 - `r_typed` is to be checked by "a requirement with an unknown kind fails typing".
@@ -678,6 +688,8 @@ Kinds of the requirements:
 - `r_mutation_gate` is of `gate`.
 - `r_typed` is of `gate`.
 - `r_public_url_local` is of `reliability`.
+- `r_mcp_oauth` is of `security`.
+- `r_mcp_oauth` resists "anyone on the internet who registers a client and lures the owner to approve it, guesses the owner's secret on the authorize page, steals or replays a code or a refresh token, or presents a token minted for another server".
 - `r_compat_parity` is of `feature`.
 - `r_single_writer` is of `reliability`.
 - `r_no_orphan_tests` is of `gate`.
@@ -752,6 +764,7 @@ The queue:
 - `r_single_writer` is queued at 83.
 - `r_compat_parity` is queued at 84.
 - `r_public_url_local` is queued at 85.
+- `r_mcp_oauth` is queued at 86.
 - `r_mutation_gate` is queued at 73.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 - `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
