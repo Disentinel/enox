@@ -114,3 +114,4 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_public_url_local`.
 - `roflenox_core` finished `r_public_url_local` at "cc469048fba19185bbf5dd4887aba590cd83e675".
 - `roflenox_core` takes `r_mcp_oauth`.
+- `roflenox_core` finished `r_mcp_oauth` at "80c11531fe867af06dcac3149f4392d487ec6bd5".
