@@ -320,7 +320,7 @@ export function addFacts(g: Graph, a: AddArgs, agent: string, created: Map<strin
   const existing = g.edgeByFactId(fid);
   const F = factId({ source: sid, relation: a.relation, target: tid });
   const confidence = a.confidence ?? 1;
-  const by = a.asserted_by ?? agent;
+  const by = (typeof a.asserted_by === 'string' && a.asserted_by.trim()) || agent;     // never empty (r_claimed_author)
   facts.push({ source: sid, relation: a.relation, target: tid, perspective: ENOX_PERSPECTIVE, confidence },
     meta(F, 'asserted_by', by), meta(F, 'fact_id', fid), meta(F, 'updated_at', t));
   if (a.context) facts.push(meta(F, 'context', a.context));

@@ -38,6 +38,10 @@ export interface Ctx {
   /** Reach another op: in-node directly, or over HTTP signed as the local identity. */
   call: (op: string, args: Record<string, unknown>) => Promise<unknown>;
   now: () => number;
+  /** The name the calling client goes by when the transport knows one: the
+   *  OAuth client the owner approved. An Enox write that names no author
+   *  claims it (r_claimed_author). */
+  agent?: string | null;
 }
 
 export interface Op {

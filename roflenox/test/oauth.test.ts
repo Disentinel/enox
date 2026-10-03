@@ -9,7 +9,10 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { createServer, listen } from '../src/http.ts';
 import { sourceKey, sourceOf } from '../src/oauth.ts';
-import { post, start, tmpDir, type Running } from './helpers.ts';
+import { publish } from '../src/client.ts';
+import { answerSearches } from '../executors/embedder/embedder.ts';
+import { HASH } from '../executors/embedder/embed.ts';
+import { DAY, grant, identityAt, iso, post, start, tmpDir, type Clock, type Running } from './helpers.ts';
 
 const PUBLIC = 'https://enox.example.org';
 const RESOURCE = `${PUBLIC}/mcp`;
@@ -345,5 +348,57 @@ test('a hundred and one wrong secrets from distinct IPv6 addresses in one /64 lo
     assert.equal((await approve(a, params, secret, from('10.1.0.99'))).status, 429);
     assert.equal((await approve(a, params, secret, from('2001:db8:1000:1::1'))).status, 302, 'the owner, at a fresh IPv6 address');
     assert.equal((await approve(a, params, secret, from('192.0.2.200'))).status, 302, 'the owner, at a fresh IPv4 address');
+  } finally { await a.stop(); }
+});
+
+test('a write over OAuth without asserted_by is claimed by the approved client\'s name, and every read tool shows asserted_by and claimed_by on that edge', async () => {
+  // The wall clock: the embedder (below) signs with it. Lifetimes long enough not to matter.
+  const wall = { get t() { return Date.now(); }, set t(_v: number) { /* the wall clock */ } } as Clock;
+  const a = await start(tmpDir('oauth-claims'), 'node-a', { publicUrl: PUBLIC, oauth: { ...OAUTH, accessTtlMs: 600_000, refreshTtlMs: 600_000 }, clock: wall });
+  try {
+    const { access } = await connect(a, 'Claude');
+    let id = 0;
+    const call = async (bearer: string, name: string, args: Record<string, unknown>) => {
+      const r = await fetch(`${a.url}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` },
+        body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method: 'tools/call', params: { name, arguments: args } }) });
+      const j = await r.json() as { result: { content: { text: string }[]; isError?: boolean } };
+      assert.notEqual(j.result.isError, true, j.result.content[0]!.text);
+      const text = j.result.content[0]!.text;
+      try { return JSON.parse(text); } catch { return text; }
+    };
+    const w = await call(access, 'add_assertion', { source: 'Roflenox', target: 'Enox', relation: 'supersedes', context: 'a signed log replaces the database' });
+    assert.deepEqual([w.asserted_by, w.claimed_by], ['node-a', 'Claude'], 'the write claims the approved client');
+    // An author the caller names is its claim; the operator's own token claims "operator".
+    const named = await call(access, 'add_assertion', { source: 'Roflenox', target: 'ROFL', relation: 'depends_on', asserted_by: 'agent:planner' });
+    assert.equal(named.claimed_by, 'agent:planner');
+    const op = await call(a.node.operatorToken(), 'remember', { subject: 'Roflenox', fact: 'Roflenox keeps every write as a signed batch' });
+    assert.equal(op.claimed_by, 'operator');
+    const blank = await call(access, 'add_assertion', { source: 'Enox', target: 'ROFL', relation: 'about', asserted_by: '  ' });
+    assert.equal(blank.claimed_by, 'Claude', 'a blank author is no author');
+    const both = (e: { asserted_by?: unknown; claimed_by?: unknown } | undefined, tool: string) =>
+      assert.deepEqual([e?.asserted_by, e?.claimed_by], ['node-a', 'Claude'], `${tool}: ${JSON.stringify(e)}`);
+    const isIt = (e: { relation: string; target_name?: string; target?: string }) => e.relation === 'supersedes';
+
+    const q = await call(access, 'query_graph', { node_id: w.source });
+    both(q.outgoing.find(isIt), 'query_graph');
+    const recent = await call(access, 'recent_activity', {}) as { relation: string }[];
+    both(recent.find(isIt), 'recent_activity');
+    const rec = await call(access, 'recall', { query: 'Roflenox' });
+    both(rec.edges.find(isIt), 'recall');
+    for (const [tool, args] of [['explore', { entity: 'Roflenox' }], ['traverse', { entity: 'Roflenox', max_depth: 1 }]] as const) {
+      const text = await call(access, tool, args) as string;
+      const line = text.split('\n').find((l) => l.includes('--[supersedes]--> Enox'));
+      assert.ok(line?.includes('[by node-a, claims "Claude"]'), `${tool}: ${line}`);
+    }
+    // semantic_search, once an embedder has answered.
+    const exDir = tmpDir('oauth-claims-e');
+    const ex = identityAt(exDir, 'embedder');
+    assert.equal((await post(a.url, '/identities', ex.identityChain(), { as: a.me, now: wall.t })).status, 200);
+    await publish(a.url, a.me, [{ source: 'embedder', relation: 'roflenox:embedder', target: 'search', perspective: 'enox', confidence: 1 },
+      grant('embedder', iso(Date.now() + DAY))]);
+    assert.equal((await call(a.node.operatorToken(), 'semantic_search', { query: 'Roflenox supersedes Enox', include_edges: true })).index, 'pending');
+    assert.equal(await answerSearches(a.url, ex, HASH), 1);
+    const sem = await call(access, 'semantic_search', { query: 'Roflenox supersedes Enox', include_edges: true });
+    both(sem.edges.find(isIt), 'semantic_search');
   } finally { await a.stop(); }
 });

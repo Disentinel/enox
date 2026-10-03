@@ -3882,6 +3882,76 @@
    "red": [
     "ask with an unquoted relation, a misspelt relation, an unknown predicate or an unknown perspective answers no rows with a note naming the cause and the nearest existing names"
    ]
+  },
+  {
+   "id": "M287",
+   "title": "r_claimed_author: an Enox write with no author claims agent:unknown",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "const agent = (ctx: Ctx) => ctx.agent?.trim() || 'operator';",
+     "const agent = (_ctx: Ctx) => 'agent:unknown';"
+    ]
+   ],
+   "red": [
+    "a write over OAuth without asserted_by is claimed by the approved client's name, and every read tool shows asserted_by and claimed_by on that edge"
+   ]
+  },
+  {
+   "id": "M288",
+   "title": "r_claimed_author: recent_activity shows neither signer nor claim",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "target_id: e.target, asserted_by: e.asserted_by, claimed_by: e.claimed_by, confidence",
+     "target_id: e.target, confidence"
+    ]
+   ],
+   "red": [
+    "a write over OAuth without asserted_by is claimed by the approved client's name, and every read tool shows asserted_by and claimed_by on that edge"
+   ]
+  },
+  {
+   "id": "M289",
+   "title": "r_claimed_author: /mcp does not hand the approved client to the tools",
+   "file": "src/http.ts",
+   "edits": [
+    [
+     "handleRpc(ctx(caller, agent), m, 'network')",
+     "handleRpc(ctx(caller), m, 'network')"
+    ]
+   ],
+   "red": [
+    "a write over OAuth without asserted_by is claimed by the approved client's name, and every read tool shows asserted_by and claimed_by on that edge"
+   ]
+  },
+  {
+   "id": "M290",
+   "title": "r_claimed_author: a blank asserted_by is kept as the claim",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "(typeof a.asserted_by === 'string' && a.asserted_by.trim()) || agent",
+     "a.asserted_by ?? agent"
+    ]
+   ],
+   "red": [
+    "a write over OAuth without asserted_by is claimed by the approved client's name, and every read tool shows asserted_by and claimed_by on that edge"
+   ]
+  },
+  {
+   "id": "M291",
+   "title": "r_claimed_author: recall drops the signer",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "...(e.asserted_by ? { asserted_by: e.asserted_by } : {}), ...(e.claimed_by ? { claimed_by: e.claimed_by } : {}), confidence: e.confidence, context: e.context });",
+     "...(e.claimed_by ? { claimed_by: e.claimed_by } : {}), confidence: e.confidence, context: e.context });"
+    ]
+   ],
+   "red": [
+    "a write over OAuth without asserted_by is claimed by the approved client's name, and every read tool shows asserted_by and claimed_by on that edge"
+   ]
   }
  ]
 }

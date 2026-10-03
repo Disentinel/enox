@@ -82,6 +82,13 @@ export function callerOf(node: RoflenoxNode, method: string, target: string | re
   return node.authenticate(method, target, headers, raw);
 }
 
+/** The OAuth client an /mcp bearer token was issued to (its approved name),
+ *  or null: the operator token, a signature, or nobody (r_claimed_author). */
+function clientOf(node: RoflenoxNode, headers: http.IncomingHttpHeaders): string | null {
+  const auth = headers.authorization;
+  return typeof auth === 'string' && auth.startsWith('Bearer ') ? node.oauth.clientOf(auth.slice('Bearer '.length).trim()) : null;
+}
+
 /** Match an op's alias path; `:x` segments become args. */
 function matchAlias(op: Op, method: string, path: string): Record<string, string> | null {
   if (!op.http || op.http.method !== method) return null;
@@ -105,9 +112,9 @@ export function createServer(node: RoflenoxNode): http.Server {
       const method = req.method ?? 'GET';
       const target = targetsOf(node, req);
       const raw = method === 'POST' ? await readRaw(req) : null;
-      const ctx = (caller: string | null): Ctx => ({
-        node, caller, dataDir: null, now: () => Date.now(),
-        call: (op, args) => callOp(op, args, ctx(caller), 'network'),
+      const ctx = (caller: string | null, agent: string | null = null): Ctx => ({
+        node, caller, dataDir: null, now: () => Date.now(), agent,
+        call: (op, args) => callOp(op, args, ctx(caller, agent), 'network'),
       });
 
       if (node.publicUrl && serveOAuth(node.oauth, req, res, url, raw)) return;
@@ -130,7 +137,8 @@ export function createServer(node: RoflenoxNode): http.Server {
         try { msg = JSON.parse(raw!.toString('utf8')); } catch {
           return send(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } });
         }
-        const replies = (await Promise.all((Array.isArray(msg) ? msg : [msg]).map((m) => handleRpc(ctx(caller), m, 'network')))).filter((r) => r !== null);
+        const agent = clientOf(node, req.headers);
+        const replies = (await Promise.all((Array.isArray(msg) ? msg : [msg]).map((m) => handleRpc(ctx(caller, agent), m, 'network')))).filter((r) => r !== null);
         if (replies.length === 0) { res.writeHead(202).end(); return; }
         return send(res, 200, Array.isArray(msg) ? replies : replies[0]);
       }

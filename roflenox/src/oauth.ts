@@ -346,6 +346,14 @@ ${keep}
     return !!g && !g.revoked_at;
   }
 
+  /** The name of the client an admitted access token was issued to — the
+   *  client the owner approved — or null for any other token (r_claimed_author). */
+  clientOf(presented: string): string | null {
+    if (!this.admits(presented)) return null;
+    const g = this.state.grants[this.state.access[sha(presented)]!.grant]!;
+    return this.state.clients[g.client_id]?.name ?? null;
+  }
+
   // ---- the owner's view ------------------------------------------------------
 
   grants() {
