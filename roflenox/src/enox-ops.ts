@@ -73,6 +73,8 @@ function staleness<T extends { domain: string; updated_at: string | null }>(row:
   return { ...row, age_days, stale: age_days > (STALE_TTL[row.domain || 'default'] ?? STALE_TTL_DEFAULT) };
 }
 const STALE_TTL_DEFAULT = 365;
+/** How many domain/type buckets graph_stats names by default (r_stats_bounded). */
+export const STATS_TOP = 20;
 
 const cmpDesc = (x: string, y: string) => (x < y ? 1 : x > y ? -1 : 0);
 const confStr = (e: Edge) => (e.confidence < 1 ? ` (${e.confidence})` : '');
@@ -100,8 +102,14 @@ export const ENOX_OPS: Op[] = [
       return [...g.nodes.values()].filter((x) => (q === undefined || x.name.toLowerCase().includes(q)) && (a.type === undefined || x.type === a.type))
         .map((x) => g.record(x));
     } },
-  { name: 'graph_stats', description: 'Node/edge counts broken down by domain, type, and relation.', input: obj({}), access: 'anyone', text: pretty,
-    run: async (ctx) => {
+  // Bounded by default (r_stats_bounded) — a deliberate departure from Enox,
+  // whose answer ran to ~39 KB on the owner's book: totals, every relation,
+  // and the STATS_TOP largest domain/type buckets with a count of the rest.
+  // `full: true` is Enox's whole breakdown, in Enox's shape.
+  { name: 'graph_stats', description: `Node/edge counts: totals, every relation, and the ${STATS_TOP} largest domain/type buckets with a count of the rest. full: true gives every domain/type bucket (Enox's whole breakdown).`,
+    input: obj({ full: b('every domain/type bucket, as Enox gave them') }), access: 'anyone',
+    text: (r) => ((r as { full?: unknown }).full === undefined ? pretty(r) : JSON.stringify(r)),
+    run: async (ctx, a) => {
       const g = await graph(ctx);
       const dt = new Map<string, { domain: string; type: string; cnt: number }>();
       for (const x of g.nodes.values()) {
@@ -110,8 +118,17 @@ export const ENOX_OPS: Op[] = [
       }
       const rel = new Map<string, number>();
       for (const e of g.edges) rel.set(e.relation, (rel.get(e.relation) ?? 0) + 1);
-      return { total_nodes: g.nodes.size, total_edges: g.edges.length, by_domain: [...dt.values()],
-        by_relation: [...rel].map(([relation, cnt]) => ({ relation, cnt })) };
+      if (a.full === true) {
+        return { total_nodes: g.nodes.size, total_edges: g.edges.length, by_domain: [...dt.values()],
+          by_relation: [...rel].map(([relation, cnt]) => ({ relation, cnt })) };
+      }
+      const bySize = <T>(xs: T[], n: (x: T) => number, k: (x: T) => string) => xs.sort((x, y) => n(y) - n(x) || (k(x) < k(y) ? -1 : k(x) > k(y) ? 1 : 0));
+      const buckets = bySize([...dt.values()], (x) => x.cnt, (x) => `${x.domain}\u0000${x.type}`);
+      const rest = buckets.slice(STATS_TOP);
+      return { total_nodes: g.nodes.size, total_edges: g.edges.length,
+        by_relation: Object.fromEntries(bySize([...rel], ([, c]) => c, ([r]) => r)),
+        by_domain: buckets.slice(0, STATS_TOP), by_domain_rest: { buckets: rest.length, nodes: rest.reduce((t, x) => t + x.cnt, 0) },
+        full: rest.length ? `the ${STATS_TOP} largest of ${buckets.length} domain/type buckets; full: true gives them all` : `all ${buckets.length} domain/type buckets` };
     } },
   { name: 'explore', description: 'Show one entity and all its incoming/outgoing relationships as readable text.', input: obj({ entity: s() }, ['entity']),
     access: 'anyone', text: plain,

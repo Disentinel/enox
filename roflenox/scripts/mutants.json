@@ -4054,6 +4054,62 @@
    "red": [
     "an embedder whose embedding takes longer than the freshness window still has every request admitted"
    ]
+  },
+  {
+   "id": "M299",
+   "title": "r_stats_bounded: graph_stats answers the whole breakdown by default",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "      if (a.full === true) {",
+     "      if (true) {"
+    ]
+   ],
+   "red": [
+    "graph_stats by default stays under 4 KB on the owner's book and its full form still matches the Enox breakdown"
+   ]
+  },
+  {
+   "id": "M300",
+   "title": "r_stats_bounded: the named buckets are not the largest",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "      const buckets = bySize([...dt.values()], (x) => x.cnt, (x) => `${x.domain}\\u0000${x.type}`);",
+     "      const buckets = [...dt.values()];"
+    ]
+   ],
+   "red": [
+    "graph_stats by default stays under 4 KB on the owner's book and its full form still matches the Enox breakdown"
+   ]
+  },
+  {
+   "id": "M301",
+   "title": "r_stats_bounded: only the largest relations are named",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "        by_relation: Object.fromEntries(bySize([...rel], ([, c]) => c, ([r]) => r)),",
+     "        by_relation: Object.fromEntries(bySize([...rel], ([, c]) => c, ([r]) => r).slice(0, 20)),"
+    ]
+   ],
+   "red": [
+    "graph_stats by default stays under 4 KB on the owner's book and its full form still matches the Enox breakdown"
+   ]
+  },
+  {
+   "id": "M302",
+   "title": "r_stats_bounded: the rest counts buckets, not nodes",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "by_domain_rest: { buckets: rest.length, nodes: rest.reduce((t, x) => t + x.cnt, 0) }",
+     "by_domain_rest: { buckets: rest.length, nodes: rest.length }"
+    ]
+   ],
+   "red": [
+    "graph_stats by default stays under 4 KB on the owner's book and its full form still matches the Enox breakdown"
+   ]
   }
  ]
 }

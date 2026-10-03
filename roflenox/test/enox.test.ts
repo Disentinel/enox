@@ -21,8 +21,12 @@ function shape(v: unknown): unknown {
 
 // The call shapes (argument names) Enox clients used — 2026-09-26 first, then
 // the rest of the recorded history — with synthetic values.
-const CALLS: { name: string; args: Record<string, unknown>; json?: unknown; text?: RegExp }[] = [
-  { name: 'graph_stats', args: {}, json: { by_domain: [{ cnt: 'number', domain: 'string', type: 'string' }], by_relation: [{ cnt: 'number', relation: 'string' }], total_edges: 'number', total_nodes: 'number' } },
+const CALLS: { name: string; args: Record<string, unknown>; json?: unknown; text?: RegExp; compact?: true }[] = [
+  // graph_stats is bounded by default, in compact JSON — a deliberate
+  // departure (r_stats_bounded); full: true is Enox's whole breakdown.
+  { name: 'graph_stats', args: {}, compact: true, json: { by_domain: [{ cnt: 'number', domain: 'string', type: 'string' }], by_domain_rest: { buckets: 'number', nodes: 'number' },
+    by_relation: { designed: 'number', knows: 'number', wrote_about: 'number' }, full: 'string', total_edges: 'number', total_nodes: 'number' } },
+  { name: 'graph_stats', args: { full: true }, json: { by_domain: [{ cnt: 'number', domain: 'string', type: 'string' }], by_relation: [{ cnt: 'number', relation: 'string' }], total_edges: 'number', total_nodes: 'number' } },
   { name: 'list_shares', args: {}, json: { count: 'number', shares: [] } },
   { name: 'recall', args: { budget: 800, query: 'Ada' }, json: { budget_total: 'number', budget_used: 'number', edges: [{ asserted_by: 'string', claimed_by: 'string', confidence: 'number', context: 'string', relation: 'string', source: 'string', target: 'string' }],
     nodes: [{ description: 'string', name: 'string', score: 'number', source_ref: 'string', type: 'string' }], seeds: ['string'] } },
@@ -59,7 +63,7 @@ test('the tool calls an Enox client made on 2026-09-26 run unchanged against a n
       assert.equal(r.isError, false, `${c.name}: ${r.text}`);
       if (c.text) assert.match(r.text, c.text, c.name);
       else {
-        assert.match(r.text, /^\{\n {2}"/, `${c.name}: Enox answers pretty JSON`);
+        assert.match(r.text, c.compact ? /^\{"/ : /^\{\n {2}"/, `${c.name}: Enox answers pretty JSON`);
         assert.deepEqual(shape(JSON.parse(r.text)), c.json, c.name);
       }
     }
