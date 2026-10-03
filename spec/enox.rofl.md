@@ -321,6 +321,36 @@ Declared as facts:
 - `r_oauth_lockout` is to be checked by "wrong secrets from one address lock that address only: the owner approves from another address meanwhile, and a forwarded address from a non-loopback peer is ignored".
 - `r_oauth_lockout` says "an IPv6 source counts as its /64, since one party owns a whole /64; and the node-wide ceiling never refuses an address that has no failures of its own inside the window, so a crowd of fresh addresses slows guessing across the crowd but never locks out the owner; with a node-generated secret of 256 bits, per-source limits already bound a distributed guess".
 - `r_oauth_lockout` is to be checked by "a hundred and one wrong secrets from distinct IPv6 addresses in one /64 lock that /64 only, and the owner at a fresh address still approves after any number of wrong secrets from other addresses".
+- `r_empty_explains` is about `hybrid`.
+- `r_empty_explains` binds as `must`.
+- `r_empty_explains` says "an answer with no rows says why whenever the cause is in the question: a bare lowercase word where the stored values are strings (edge(F, S, supersedes, T) while 'supersedes' as a string holds rows) names the quoted form; a relation, predicate or constant that occurs nowhere is named with the nearest names that do occur; an unknown perspective lists the perspectives that exist, or says that none do".
+- `r_empty_explains` says "a question that has no rows for a reason outside it (the data simply holds none) still answers empty with no note, so the note is never noise".
+- `r_empty_explains` is stated in "owner's claude.ai session on rofl.enox.dev, 2026-10-03".
+- `r_empty_explains` is to be checked by "ask with an unquoted relation, a misspelt relation, an unknown predicate or an unknown perspective answers no rows with a note naming the cause and the nearest existing names".
+- `r_empty_explains` is to be checked by "ask whose question is well formed but matches nothing answers no rows and no note".
+- `r_claimed_author` is about `hybrid`.
+- `r_claimed_author` binds as `must`.
+- `r_claimed_author` says "every read tool that returns an edge (query_graph, explore, traverse, recent_activity, recall, semantic_search) shows both who signed it and who claims it".
+- `r_claimed_author` says "a write through the MCP tools claims its caller: the asserted_by the caller passes, else the name of the OAuth client the owner approved, else operator; never agent:unknown and never empty".
+- `r_claimed_author` is stated in "owner's claude.ai session on rofl.enox.dev, 2026-10-03".
+- `r_claimed_author` is to be checked by "a write over OAuth without asserted_by is claimed by the approved client's name, and every read tool shows asserted_by and claimed_by on that edge".
+- `r_recent_order` is about `hybrid`.
+- `r_recent_order` binds as `must`.
+- `r_recent_order` says "recent_activity lists the newest writes first, in the same order with or without a limit, newest by the time they were written".
+- `r_recent_order` is stated in "owner's claude.ai session on rofl.enox.dev, 2026-10-03".
+- `r_recent_order` is to be checked by "recent_activity with and without a limit agrees on its first rows, and a write made now comes first in both".
+- `r_search_latency` is about `hybrid`.
+- `r_search_latency` binds as `must`.
+- `r_search_latency` says "a semantic search on the owner's book is answered within ten seconds of being asked when at most a hundred items are new to embed; the embedder keeps its index in memory between searches instead of rebuilding it from the log for each one".
+- `r_search_latency` says "the embedder stays inside its memory limit on the owner's book (it was killed by the OOM killer at 2.6 GB on 2026-10-02) and signs each request just before sending it, so long work never makes a request stale".
+- `r_search_latency` is stated in "owner's claude.ai session on rofl.enox.dev, 2026-10-03".
+- `r_search_latency` is to be checked by "a second search on an unchanged book is answered within ten seconds, and a search after five new facts within ten seconds too".
+- `r_search_latency` is to be checked by "an embedder whose embedding takes longer than the freshness window still has every request admitted".
+- `r_stats_bounded` is about `hybrid`.
+- `r_stats_bounded` binds as `should`.
+- `r_stats_bounded` says "graph_stats answers totals, every relation and the twenty largest domain and type buckets with a count of the rest by default, and the whole breakdown only when asked for it; this is a deliberate departure from the Enox it replaces".
+- `r_stats_bounded` is stated in "owner's claude.ai session on rofl.enox.dev, 2026-10-03".
+- `r_stats_bounded` is to be checked by "graph_stats by default stays under 4 KB on the owner's book and its full form still matches the Enox breakdown".
 - `r_typed` says "every requirement is of exactly one kind from the closed list".
 - `r_typed` is stated in "owner 2026-09-26".
 - `r_typed` is to be checked by "a requirement with an unknown kind fails typing".
@@ -697,6 +727,11 @@ Kinds of the requirements:
 - `r_public_url_local` is of `reliability`.
 - `r_mcp_oauth` is of `security`.
 - `r_oauth_lockout` is of `security`.
+- `r_empty_explains` is of `feature`.
+- `r_claimed_author` is of `feature`.
+- `r_recent_order` is of `feature`.
+- `r_search_latency` is of `reliability`.
+- `r_stats_bounded` is of `feature`.
 - `r_oauth_lockout` resists "a stranger who sends wrong secrets to the authorize page to keep the owner from approving, or forges a forwarded address to spend someone else's allowance".
 - `r_mcp_oauth` resists "anyone on the internet who registers a client and lures the owner to approve it, guesses the owner's secret on the authorize page, steals or replays a code or a refresh token, or presents a token minted for another server".
 - `r_compat_parity` is of `feature`.
@@ -776,6 +811,11 @@ The queue:
 - `r_mcp_oauth` is queued at 86.
 - `r_oauth_lockout` is queued at 87.
 - `r_oauth_lockout` is rejected at "011800fe60f77a80278aa11e95b6c2025700ca4e".
+- `r_empty_explains` is queued at 88.
+- `r_claimed_author` is queued at 89.
+- `r_recent_order` is queued at 90.
+- `r_search_latency` is queued at 91.
+- `r_stats_bounded` is queued at 92.
 - `r_mutation_gate` is queued at 73.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 - `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
