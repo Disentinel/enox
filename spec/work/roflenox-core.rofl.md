@@ -125,3 +125,5 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_claimed_author` at "7492bfda798144fda7282e4bbafa5aeb36c711d9".
 - `roflenox_core` takes `r_recent_order`.
 - `roflenox_core` finished `r_recent_order` at "1dcc12009d821a4aaffe32d272f5128a71e03fec".
+- `roflenox_core` takes `r_search_latency`.
+- `roflenox_core` finished `r_search_latency` at "b94815c03e05ce373341269681e3a5672bb6778f".
