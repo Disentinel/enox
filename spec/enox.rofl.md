@@ -883,6 +883,7 @@ Accepted after verification:
 - `r_search_latency` is accepted at "b94815c03e05ce373341269681e3a5672bb6778f".
 - `r_stats_bounded` is accepted at "33c9cc5018f71e79599f6cf86188ac80886d62a7".
 - `r_empty_explains` is rejected at "8d4df0e50f16fa1e49e689bf532aa3e1276489d4".
+- `r_empty_explains` is accepted at "85914c7991c44b87b6ba087d49683bcd9ce9a2ed".
 
 > Решение 2026-09-27 по замерам на 200000 фактах: rofl-serve пересчитывает
 > все выведенные факты при каждом evaluate (Eval::run → clear_derived), форк
@@ -1235,6 +1236,12 @@ The checks that exist:
 - "an embedder whose embedding takes longer than the freshness window still has every request admitted" lives in "roflenox/test/search.test.ts".
 - "graph_stats by default stays under 4 KB on the owner's book and its full form still matches the Enox breakdown" guards `r_stats_bounded`.
 - "graph_stats by default stays under 4 KB on the owner's book and its full form still matches the Enox breakdown" lives in "roflenox/test/stats.test.ts".
+- "ask with an unquoted relation, a misspelt relation, an unknown predicate or an unknown perspective answers no rows with a note naming the cause and the nearest existing names" guards `r_empty_explains`.
+- "ask with an unquoted relation, a misspelt relation, an unknown predicate or an unknown perspective answers no rows with a note naming the cause and the nearest existing names" lives in "roflenox/test/empty.test.ts".
+- "ask whose question is well formed but matches nothing answers no rows and no note" guards `r_empty_explains`.
+- "ask whose question is well formed but matches nothing answers no rows and no note" lives in "roflenox/test/empty.test.ts".
+- "on an owner-sized book a misspelt relation and an unknown constant are answered with their note within one second" guards `r_empty_explains`.
+- "on an owner-sized book a misspelt relation and an unknown constant are answered with their note within one second" lives in "roflenox/test/perf/empty.test.ts".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" lives in "personal-node/src/mcp/main-graph.test.ts".
 
 ## Что выводится
