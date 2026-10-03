@@ -41,6 +41,15 @@ import { OAuth, type OAuthOptions } from './oauth.ts';
 
 export const DEFAULT_FRESHNESS_SEC = 300;
 
+/** The predicates every book answers, with their arities where fixed: the
+ *  engine's (src/facts.ts toRofl, src/assertions.ts control rows, the system
+ *  rules of src/engine.ts) and the node's own (conf, persp, asserted,
+ *  answered). An author's rules add their heads. */
+export const ARITY: Record<string, number> = {
+  edge: 4, edge_num: 4, asserted: 4, conf: 2, persp: 2, answered: 3, intent: 4, grant: 2, delegate: 2, export: 2, follows: 2, trusts: 1,
+};
+const BASE_PREDICATES = Object.keys(ARITY);
+
 /** The operator's bearer token: 32 random bytes in key/operator-token (0600),
  *  created on first use. It stands for the node's OWN identity and nothing else. */
 export function operatorTokenOf(dataDir: string): string {
@@ -1046,6 +1055,20 @@ export class RoflenoxNode {
         : F !== null ? `${sc.identity} holds no assertion of that fact` : `no current assertion of ${sc.identity}'s matches`;
       return { identity: sc.identity, holds: false, text: op === 'why' ? `${lit} does not hold; ${reason}` : `whynot ${lit}:\n  ${reason}` };
     });
+  }
+
+  /** The predicates a question may name and the perspectives facts are
+   *  asserted under, within what `requester` may see (r_empty_explains). */
+  vocabulary(requester: string | null): Promise<{ predicates: Set<string>; perspectives: Set<string> }> {
+    return this.serial(async () => {
+      const predicates = new Set(BASE_PREDICATES);
+      const perspectives = new Set<string>();
+      for (const [, sc] of await this.scopeFor(requester)) {
+        if (sc.only === null) for (const h of this.headsOf(sc.identity)) if (h) predicates.add(h);
+        for (const [F, c] of this.assertions.of(sc.identity)) if (sc.only === null || sc.only.has(F)) perspectives.add(c.P);
+      }
+      return { predicates, perspectives };
+    }, true);
   }
 
   private headsOf(author: string): Set<string> {

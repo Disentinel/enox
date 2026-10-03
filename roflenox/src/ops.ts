@@ -22,6 +22,7 @@ import { checkFact, Refusal, type Fact } from './facts.ts';
 import { LocalIdentity } from './identity.ts';
 import type { RoflenoxNode } from './node.ts';
 import { ENOX_OPS } from './enox-ops.ts';
+import { explainEmpty } from './empty.ts';
 
 /** A property; no `type` means any JSON value. */
 export type Prop = { type?: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object'; description?: string; items?: unknown };
@@ -93,9 +94,10 @@ export function createIdentity(dataDir: string, name?: string): LocalIdentity {
   return me;
 }
 
-const rowsSay = (r: { rows: { identity: string; cells: unknown[] }[]; cut?: boolean; cursor?: string; total?: number }) =>
+const rowsSay = (r: { rows: { identity: string; cells: unknown[] }[]; cut?: boolean; cursor?: string; total?: number; note?: string }) =>
   [...r.rows.map((row) => `${row.identity}\t${row.cells.map((c) => JSON.stringify(c)).join('\t')}`),
-    r.cut ? `${r.rows.length} of ${r.total} rows — cut; next page: --cursor ${r.cursor}` : `${r.rows.length} rows`].join('\n');
+    r.cut ? `${r.rows.length} of ${r.total} rows — cut; next page: --cursor ${r.cursor}` : `${r.rows.length} rows`,
+    ...(r.note ? [`note: ${r.note}`] : [])].join('\n');
 const explainSay = (r: { identity: string; text: string }[]) => r.map((e) => `[${e.identity}] ${e.text}`).join('\n');
 
  /** Answer limits (r_answer_limits): no answer is silently truncated. A longer
@@ -151,11 +153,19 @@ export const OPS: Op[] = [
   { name: 'identity_chain', description: 'An identity\'s document chain as this node holds it.', input: obj({ identity: str() }, ['identity']),
     access: 'anyone', positional: ['identity'], http: { method: 'GET', path: '/identities/:identity' },
     run: async (ctx, a) => needNode(ctx).readIdentityChain(a.identity as string, ctx.caller) },
-  { name: 'ask', description: `Ask one ROFL literal, e.g. edge(F, S, R, T); optional perspective restricts edge questions. At most \`limit\` rows (default ${DEFAULT_LIMIT}); a longer answer is marked cut, with a cursor for the next page.`,
-    input: obj({ query: str('one ROFL literal'), perspective: str(), limit: { type: 'number' }, cursor: str('from the previous page'),
+  { name: 'ask', description: `Ask one ROFL literal, e.g. edge(F, S, R, T) or edge(F, S, "supersedes", T): stored values are strings, so a constant is quoted (a bare lowercase word is an atom and matches nothing). Optional perspective restricts edge questions to the facts asserted under it. At most \`limit\` rows (default ${DEFAULT_LIMIT}); a longer answer is marked cut, with a cursor for the next page. An answer with no rows carries a \`note\` when the cause is in the question (r_empty_explains).`,
+    input: obj({ query: str('one ROFL literal; quote constants: edge(F, S, "supersedes", T)'),
+      perspective: str('the perspective the facts were asserted under (facts written through the Enox tools and imports are under "enox"); only for edge(F, S, R, T)'),
+      limit: { type: 'number' }, cursor: str('from the previous page'),
       resume: { type: 'boolean', description: 'with a cursor of a log that has changed since: continue after its last row instead of refusing' } }, ['query']),
     access: 'anyone', positional: ['query'], http: { method: 'POST', path: '/ask' }, say: rowsSay,
-    run: async (ctx, a) => page(ctx, a, await needNode(ctx).ask(a.query as string, ctx.caller, (a.perspective as string | undefined) ?? null)) },
+    run: async (ctx, a) => {
+      const n = needNode(ctx);
+      const perspective = (a.perspective as string | undefined) ?? null;
+      const ans = await n.ask(a.query as string, ctx.caller, perspective);
+      const note = ans.rows.length === 0 && !ans.unknown ? await explainEmpty(n, a.query as string, ctx.caller, perspective) : undefined;
+      return page(ctx, a, note !== undefined ? { ...ans, note } : ans);
+    } },
   { name: 'why', description: 'Why a ground literal holds, in the books you may read whole.', input: obj({ literal: str() }, ['literal']),
     access: 'anyone', positional: ['literal'], say: explainSay, run: async (ctx, a) => needNode(ctx).why(a.literal as string, ctx.caller) },
   { name: 'whynot', description: 'Why a ground literal does not hold, in the books you may read whole.', input: obj({ literal: str() }, ['literal']),

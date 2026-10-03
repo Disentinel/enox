@@ -3826,6 +3826,62 @@
    "red": [
     "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing"
    ]
+  },
+  {
+   "id": "M283",
+   "title": "r_empty_explains: a bare word is not tried quoted",
+   "file": "src/empty.ts",
+   "edits": [
+    [
+     "if (words.length > 0) {",
+     "if (false) {"
+    ]
+   ],
+   "red": [
+    "ask with an unquoted relation, a misspelt relation, an unknown predicate or an unknown perspective answers no rows with a note naming the cause and the nearest existing names"
+   ]
+  },
+  {
+   "id": "M284",
+   "title": "r_empty_explains: a constant is noted without asking whether it occurs elsewhere",
+   "file": "src/empty.ts",
+   "edits": [
+    [
+     "if (!isString(x) || await occurs(x, i)) continue;",
+     "if (!isString(x)) continue;"
+    ]
+   ],
+   "red": [
+    "ask whose question is well formed but matches nothing answers no rows and no note"
+   ]
+  },
+  {
+   "id": "M285",
+   "title": "r_empty_explains: an unknown perspective answers silently",
+   "file": "src/empty.ts",
+   "edits": [
+    [
+     "if (perspective !== null && !perspectives.has(perspective)) {",
+     "if (false) {"
+    ]
+   ],
+   "red": [
+    "ask with an unquoted relation, a misspelt relation, an unknown predicate or an unknown perspective answers no rows with a note naming the cause and the nearest existing names"
+   ]
+  },
+  {
+   "id": "M286",
+   "title": "r_empty_explains: an unknown predicate answers silently",
+   "file": "src/empty.ts",
+   "edits": [
+    [
+     "if (!predicates.has(rel)) {",
+     "if (false) {"
+    ]
+   ],
+   "red": [
+    "ask with an unquoted relation, a misspelt relation, an unknown predicate or an unknown perspective answers no rows with a note naming the cause and the nearest existing names"
+   ]
   }
  ]
 }

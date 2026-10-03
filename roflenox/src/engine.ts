@@ -69,7 +69,7 @@ export interface AskRow { identity: string; cells: (string | number)[] }
  *  (budget, unit), or a feed the answer reads that has gone silent (window,
  *  last_report) — never an empty answer that reads like an all-clear. */
 export interface Unknown { identity: string; reason: string; budget?: number; unit?: string; window?: number; last_report?: string | null; proof?: unknown[] }
-export interface AskAnswer { vars: string[]; rows: AskRow[]; unknown?: Unknown[] }
+export interface AskAnswer { vars: string[]; rows: AskRow[]; unknown?: Unknown[]; /** Why there are no rows, when the cause is in the question (src/empty.ts). */ note?: string }
 export interface Explanation { identity: string; holds: boolean; text: string; unknown?: { reason: string; budget: number; unit: string } }
 
 export class Engine {
