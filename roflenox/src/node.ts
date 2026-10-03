@@ -1414,7 +1414,7 @@ export class RoflenoxNode {
    *  travels, marked withheld, so the chain still verifies. Before anything is
    *  signed or sent, a leak audit re-reads every outgoing line on its own.
    *  With a challenge, and when this node IS that identity, the head is attested. */
-  feed(asked: string, after: string | null, challenge: string | null = null, reader: string | null = null): Promise<{
+  feed(asked: string, after: string | null, challenge: string | null = null, reader: string | null = null, limit: number | null = null): Promise<{
     identity: IdentityDoc[]; batches: FeedEntry[]; attestation?: FeedAttestation;
   }> {
     const identity = canonicalOrNull(asked) ?? asked;
@@ -1431,7 +1431,7 @@ export class RoflenoxNode {
       const sc = (await this.scopeFor(reader)).get(bookOf(identity));
       const allowed = (fid: string) => sc !== undefined && (sc.only === null || sc.only.has(fid));
       const byDigest = new Map(this.log.receipts.filter((r) => r.identity === identity && r.kind === undefined).map((r) => [r.digest, r]));
-      const batches = chain.slice(from).map((d): FeedEntry => {
+      const batches = chain.slice(from, limit !== null ? from + Math.max(1, Math.floor(limit)) : undefined).map((d): FeedEntry => {
         const s = this.log.read(byDigest.get(d)!);
         const extra = s.receipt.reattest ? { reattest: s.receipt.reattest } : {};
         if (s.jsonl === null || !parseJsonl(s.jsonl).every((f) => allowed(factId(f)))) {

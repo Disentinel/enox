@@ -75,7 +75,7 @@ test('update_assertion and delete_assertion answer within 100 ms and a read afte
     const byKey = <T>(xs: T[]) => xs.map((x) => JSON.stringify(x)).sort();
     assert.deepEqual(byKey(await op('query_graph', {}) as unknown[]), byKey([...fresh.nodes.values()].map((x) => fresh.record(x))), 'the same entities');
     const rows = fresh.edges.map((e) => ({ source_name: fresh.nodes.get(e.source)!.name, source_id: e.source, relation: e.relation, target_name: fresh.nodes.get(e.target)!.name,
-      target_id: e.target, confidence: e.confidence, context: e.context, created_at: e.created_at, updated_at: e.updated_at }));
+      target_id: e.target, asserted_by: e.asserted_by, claimed_by: e.claimed_by, confidence: e.confidence, context: e.context, created_at: e.created_at, updated_at: e.updated_at }));
     assert.deepEqual(byKey(await op('recent_activity', { limit: 1_000_000 }) as unknown[]), byKey(rows), 'the same assertions');
   } finally {
     writing = false;

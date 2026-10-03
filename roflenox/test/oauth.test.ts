@@ -56,6 +56,16 @@ async function mcp(a: Running, bearer: string | null, method = 'tools/list') {
   return { status: r.status, auth: r.headers.get('www-authenticate'), body: await r.json() as Record<string, any> };
 }
 
+/** What of the machine a page shows: its paths, its host name, key files and
+ *  token — as substrings — and the OS user name as a whole word only (on a
+ *  host whose user is "dev", "developer" is not a leak). */
+function machineLeaks(html: string, dir: string, token: string): string[] {
+  const word = (w: string) => new RegExp(`(^|[^A-Za-z0-9_.-])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9_-])`);
+  const user = os.userInfo().username;
+  return [...[dir, os.homedir(), os.hostname(), 'operator-token', 'key/', token].filter((s) => html.includes(s)),
+    ...(word(user).test(html) ? [user] : [])];
+}
+
 /** The whole flow for one client: registered, approved, redeemed. */
 async function connect(a: Running, name = 'Connector') {
   const client = (await register(a, { client_name: name })).body.client_id as string;
@@ -99,9 +109,10 @@ test('a client registered dynamically completes authorize with the owner\'s secr
     const html = await page.text();
     assert.match(html, /<b>Connector<\/b>/);
     assert.match(html, /<b>connector\.example\.org<\/b>/);
-    for (const secretish of [a.dir, os.homedir(), os.userInfo().username, os.hostname(), 'operator-token', 'key/', a.node.operatorToken()]) {
-      assert.ok(!html.includes(secretish), `the authorize page shows ${secretish}`);
-    }
+    assert.deepEqual(machineLeaks(html, a.dir, a.node.operatorToken()), [], 'the authorize page shows nothing of the machine');
+    // The check can say no: a page naming this user, or this home, is caught.
+    assert.deepEqual(machineLeaks(`<p>served by ${os.userInfo().username}.</p>`, a.dir, 'x'), [os.userInfo().username]);
+    assert.deepEqual(machineLeaks(`<p>${os.homedir()}/node</p>`, a.dir, 'x').includes(os.homedir()), true);
 
     const ok = await approve(a, params, a.node.operatorToken());
     assert.equal(ok.status, 302);

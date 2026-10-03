@@ -151,7 +151,7 @@ test('the embedder embeds a book of mixed text lengths in bounded memory and fin
       calls.push({ n: texts.length, longest: Math.max(...texts.map((t) => t.length)) });
       return HASH.embed(texts, role);
     } };
-    // Writes land while it reads the book, page by page.
+    // Writes land while it reads the book, batch by batch.
     let landed = 0;
     const onPage = async (page: number) => {
       if (page > 3) return;
@@ -160,7 +160,7 @@ test('the embedder embeds a book of mixed text lengths in bounded memory and fin
     };
     const { LocalIdentity } = await import('../src/identity.ts');
     const me = LocalIdentity.load(exDir)!;
-    const answered = await answerSearches(a.url, me, measured, () => {}, { pageSize: 200, onPage });
+    const answered = await answerSearches(a.url, me, measured, () => {}, { feedPage: 1, onPage });
     assert.equal(answered, 1, 'it finished');
     assert.ok(landed >= 2, `writes landed during the read (${landed})`);
 

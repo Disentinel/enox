@@ -1774,8 +1774,8 @@
    "file": "executors/embedder/embedder.ts",
    "edits": [
     [
-     "  for (const { cells } of own) {",
-     "  for (const { cells } of own.slice(0, 0)) {"
+     "        if (f.relation === EMBEDDING) this.index.set(f.source, decode(f.target));",
+     "        if (false) this.index.set(f.source, decode(f.target));"
     ]
    ],
    "red": [
@@ -3717,12 +3717,12 @@
   },
   {
    "id": "M275",
-   "title": "r_compat_parity: the embedder does not resume a read a write interrupted",
+   "title": "r_compat_parity: the embedder reads only the first page of a book (writes landing during its read are left unread)",
    "file": "executors/embedder/embedder.ts",
    "edits": [
     [
-     "...(cursor ? { cursor, resume: true } : {})",
-     "...(cursor ? { cursor } : {})"
+     "      if (r.batches.length < limit) return;",
+     "      return;"
     ]
    ],
    "red": [
@@ -3993,6 +3993,66 @@
    ],
    "red": [
     "recent_activity with and without a limit agrees on its first rows, and a write made now comes first in both"
+   ]
+  },
+  {
+   "id": "M295",
+   "title": "r_search_latency: the embedder rebuilds its index from the log for every search",
+   "file": "executors/embedder/embedder.ts",
+   "edits": [
+    [
+     "    const had = this.index.size;",
+     "    this.index.clear(); this.own.head = null;\n    const had = this.index.size;"
+    ]
+   ],
+   "red": [
+    "a second search on an unchanged book is answered within ten seconds, and a search after five new facts within ten seconds too"
+   ]
+  },
+  {
+   "id": "M296",
+   "title": "r_search_latency: the embedder re-reads the whole book for every search",
+   "file": "executors/embedder/embedder.ts",
+   "edits": [
+    [
+     "      const book = this.books.get(author) ?? new Book();",
+     "      const book = new Book();"
+    ]
+   ],
+   "red": [
+    "a second search on an unchanged book is answered within ten seconds, and a search after five new facts within ten seconds too"
+   ]
+  },
+  {
+   "id": "M297",
+   "title": "r_search_latency: the embedder signs its requests with a time taken before its work",
+   "file": "executors/embedder/embedder.ts",
+   "edits": [
+    [
+     "    this.node = httpCaller(url, me, this.now);",
+     "    const at = this.now();\n    this.node = httpCaller(url, me, () => at);"
+    ]
+   ],
+   "red": [
+    "an embedder whose embedding takes longer than the freshness window still has every request admitted"
+   ]
+  },
+  {
+   "id": "M298",
+   "title": "r_search_latency: the embedder claims its answer at the time its round began",
+   "file": "executors/embedder/embedder.ts",
+   "edits": [
+    [
+     "    const first = this.rounds++ === 0;",
+     "    const first = this.rounds++ === 0;\n    const t0 = this.now();"
+    ],
+    [
+     "    await publishVia(this.node, this.me, results, this.now);",
+     "    await publishVia(this.node, this.me, results, () => t0);"
+    ]
+   ],
+   "red": [
+    "an embedder whose embedding takes longer than the freshness window still has every request admitted"
    ]
   }
  ]

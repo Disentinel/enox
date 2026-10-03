@@ -8,7 +8,9 @@ import * as path from 'node:path';
 import { spawnExecutor } from '../src/executor.ts';
 import { publish } from '../src/client.ts';
 import type { Fact } from '../src/facts.ts';
-import { DAY, get, grant, identityAt, iso, post, serveAsIs, start, tmpDir, type Clock } from './helpers.ts';
+import { DAY, get, grant, identityAt, iso, post, serveAsIs, start, T0, tmpDir, type Clock } from './helpers.ts';
+import { answerSearches } from '../executors/embedder/embedder.ts';
+import { HASH, type Model } from '../executors/embedder/embed.ts';
 
 const EMBEDDER = path.join(import.meta.dirname, '..', 'executors', 'embedder', 'embedder.ts');
 const wall = { get t() { return Date.now(); }, set t(_v: number) { /* the wall clock */ } } as Clock;
@@ -166,5 +168,37 @@ test('a search the operator asks is never published by a wildcard export', async
     // Only an export that NAMES the relation publishes it.
     await publish(a.url, a.me, [{ source: 'roflenox:search', relation: 'roflenox:export', target: 'public', perspective: 'policy', confidence: 1 }]);
     assert.equal((await anon('edge(F, K, "roflenox:search", Q)')).length, 1);
+  } finally { await a.stop(); }
+});
+
+test('an embedder whose embedding takes longer than the freshness window still has every request admitted', async () => {
+  // One clock for the node and the embedder; the model's work moves it past
+  // the node's freshness window (1 s here) on every call — nothing sleeps.
+  const clock = { t: T0 };
+  const a = await start(tmpDir('search-slow'), 'node-a', { clock, freshnessSec: 1 });
+  try {
+    const now = () => clock.t;
+    await publish(a.url, a.me, [...entity('difference-engine', 'Difference Engine', 'a mechanical calculator that tabulates polynomial functions'),
+      ...entity('loom', 'Jacquard loom', 'a weaving machine controlled by punched cards'), f(E('loom'), 'inspired', E('difference-engine'))], now);
+    const exDir = tmpDir('search-slow-e');
+    const ex = identityAt(exDir, 'embedder');
+    assert.equal((await post(a.url, '/identities', ex.identityChain())).status, 200);
+    await publish(a.url, a.me, [f('embedder', 'roflenox:embedder', 'search'), grant('embedder', iso(T0 + 365 * DAY))], now);
+    const search = async () => {
+      const r = await fetch(`${a.url}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${a.node.operatorToken()}` },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'semantic_search', arguments: { query: 'punched cards' } } }) });
+      return JSON.parse(((await r.json()) as { result: { content: { text: string }[] } }).result.content[0]!.text) as { index: string; nodes: { name: string }[] };
+    };
+    assert.equal((await search()).index, 'pending');
+    let calls = 0;
+    const slow: Model = { id: HASH.id, embed: async (texts, role) => { calls++; clock.t += 5_000; return HASH.embed(texts, role); } };
+    const started = clock.t;
+    // Every request it sends after the work — its embeddings, its answer —
+    // is signed as it is sent: admitted, not refused as stale.
+    assert.equal(await answerSearches(a.url, ex, slow, () => {}, { now }), 1);
+    assert.ok(calls >= 2 && clock.t - started >= 10_000, `the work took ${(clock.t - started) / 1000} s on the clock, ${calls} model calls`);
+    const answered = await search();
+    assert.equal(answered.index, 'embedder:embedder');
+    assert.equal(answered.nodes[0]?.name, 'Jacquard loom');
   } finally { await a.stop(); }
 });
