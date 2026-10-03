@@ -127,3 +127,5 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_recent_order` at "1dcc12009d821a4aaffe32d272f5128a71e03fec".
 - `roflenox_core` takes `r_search_latency`.
 - `roflenox_core` finished `r_search_latency` at "b94815c03e05ce373341269681e3a5672bb6778f".
+- `roflenox_core` takes `r_stats_bounded`.
+- `roflenox_core` finished `r_stats_bounded` at "33c9cc5018f71e79599f6cf86188ac80886d62a7".
