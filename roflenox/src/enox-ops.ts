@@ -74,6 +74,7 @@ function staleness<T extends { domain: string; updated_at: string | null }>(row:
 }
 const STALE_TTL_DEFAULT = 365;
 
+const cmpDesc = (x: string, y: string) => (x < y ? 1 : x > y ? -1 : 0);
 const confStr = (e: Edge) => (e.confidence < 1 ? ` (${e.confidence})` : '');
 const byStr = (e: Edge) => (e.asserted_by ? ` [by ${e.asserted_by}${e.claimed_by ? `, claims ${JSON.stringify(e.claimed_by)}` : ''}]` : '');
 const NOT_FOUND = (term: string) => refuseText(`Entity "${term}" not found`);
@@ -260,12 +261,16 @@ export const ENOX_OPS: Op[] = [
       return { nodes, ...(a.include_edges ? { edges } : {}), index: `embedder:${r.embedder}`,
         message: `${nodes.length} entities${a.include_edges ? ` and ${edges.length} assertions` : ''} by meaning, answered by ${r.embedder}` };
     } },
-  { name: 'recent_activity', description: 'The most recently updated assertions.', input: obj({ since: s(), limit: n() }), access: 'anyone', text: pretty,
+  { name: 'recent_activity', description: 'The most recently written assertions, newest first: by when this node received the write (an updated_at is only what its writer claims), the same order with any limit.',
+    input: obj({ since: s(), limit: n() }), access: 'anyone', text: pretty,
     run: async (ctx, a) => {
       const g = await graph(ctx);
       const since = a.since as string | undefined;
+      // One total order (r_recent_order): the log first, then the claimed
+      // time, then the fact — so no limit and no rebuild of the view moves a row.
       return g.edges.filter((e) => since === undefined || (e.updated_at ?? '') >= since)
-        .sort((x, y) => ((y.updated_at ?? '') < (x.updated_at ?? '') ? -1 : 1)).slice(0, (a.limit as number | undefined) ?? 20)
+        .sort((x, y) => y.written - x.written || cmpDesc(x.updated_at ?? '', y.updated_at ?? '') || (x.F < y.F ? -1 : x.F > y.F ? 1 : 0))
+        .slice(0, (a.limit as number | undefined) ?? 20)
         .map((e) => ({ source_name: g.nodes.get(e.source)!.name, source_id: e.source, relation: e.relation, target_name: g.nodes.get(e.target)!.name,
           target_id: e.target, asserted_by: e.asserted_by, claimed_by: e.claimed_by, confidence: e.confidence, context: e.context,
           created_at: e.created_at, updated_at: e.updated_at }));

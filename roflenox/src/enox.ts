@@ -51,7 +51,10 @@ export function deriveDescription(text: string, max = 240): string {
 const enoxFactId = (s: string, r: string, t: string) => createHash('sha256').update(`${s}|${r}|${t}`).digest('hex');
 
 export interface Node { id: string; type: string; domain: string; name: string; description: string; aliases: string[]; source_ref: string; created_at: string | null; updated_at: string | null; attrs: Map<string, string> }
-export interface Edge { F: string; fact_id: string; source: string; target: string; relation: string; confidence: number; asserted_by: string | null; claimed_by: string | null; context: string; proof_depth: number; created_at: string | null; updated_at: string | null }
+export interface Edge { F: string; fact_id: string; source: string; target: string; relation: string; confidence: number; asserted_by: string | null; claimed_by: string | null; context: string; proof_depth: number; created_at: string | null; updated_at: string | null;
+  /** When it was last written: the log position of the latest batch holding
+   *  the assertion or a fact about it (RoflenoxNode.writtenAt). */
+  written: number }
 
 /** The Enox graph as `caller` may see it, built from asks. */
 export class Graph {
@@ -65,6 +68,9 @@ export class Graph {
   private readonly raw = new Map<string, { S: string; R: string; T: string }>();
   private readonly conf = new Map<string, number>();
   private readonly seq = new Map<string, number>();
+  /** Where in the log each fact was last asserted (r_recent_order). */
+  private readonly written = new Map<string, number>();
+  private orderOf: (identity: string, seq: number) => number = () => -1;
   /** Who signed each fact: the identities whose books hold it. */
   private readonly by = new Map<string, Set<string>>();
   /** First-seen order of each fact: the order a full derivation walks them. */
@@ -89,16 +95,24 @@ export class Graph {
 
   static async load(node: RoflenoxNode, caller: string | null): Promise<Graph> {
     const g = new Graph();
+    g.orderOf = (identity, seq) => node.writtenAt(identity, seq);
     const facts = (await node.ask('edge(F, S, R, T)', caller)).rows as { identity: string; cells: string[] }[];
     const seqRows = await node.ask('asserted(F, P, C, S)', caller).catch((e: unknown) => {
       if (e instanceof Refusal && e.reason === 'engine_down') throw e;     // never a plain answer from a dead engine
       return { rows: [] };
     });
-    for (const r of seqRows.rows as { cells: [string, string, number, number] }[]) g.seq.set(r.cells[0], Math.max(g.seq.get(r.cells[0]) ?? -1, r.cells[3]));
+    for (const r of seqRows.rows as { identity: string; cells: [string, string, number, number] }[]) {
+      g.seq.set(r.cells[0], Math.max(g.seq.get(r.cells[0]) ?? -1, r.cells[3]));
+      g.wrote(r.cells[0], r.identity, r.cells[3]);
+    }
     for (const r of (await node.ask('conf(F, C)', caller)).rows as { cells: [string, number] }[]) g.conf.set(r.cells[0], r.cells[1]);
     for (const { identity, cells: [F, S, R, T] } of facts) { g.hold(F!, S!, R!, T!); g.signedBy(F!, identity); }
     g.ensure();
     return g;
+  }
+
+  private wrote(F: string, identity: string, seq: number): void {
+    this.written.set(F, Math.max(this.written.get(F) ?? -1, this.orderOf(identity, seq)));
   }
 
   private signedBy(F: string, identity: string): void {
@@ -134,6 +148,7 @@ export class Graph {
       const F = factId(f);
       this.conf.set(F, Math.round(f.confidence * 1000));
       this.seq.set(F, seq);
+      this.wrote(F, identity, seq);
       this.hold(F, f.source, f.relation, f.target);
       this.signedBy(F, identity);
     }
@@ -224,10 +239,14 @@ export class Graph {
     if (c === undefined || c === 0) return;                           // deleted (or not visible)
     if (!this.nodes.has(a.S) || !this.nodes.has(a.T)) return;
     const attr = (x: string) => this.attr(F, x);
+    let written = this.written.get(F) ?? -1;
+    for (const Fs of this.attrFacts.get(F)?.values() ?? []) {
+      for (const G of Fs) if ((this.conf.get(G) ?? 1) !== 0) written = Math.max(written, this.written.get(G) ?? -1);
+    }
     const e: Edge = {
       F, fact_id: attr('fact_id') ?? enoxFactId(a.S, a.R, a.T), source: a.S, target: a.T, relation: a.R,
       confidence: c / 1000, asserted_by: [...(this.by.get(F) ?? [])].sort().join(', ') || null, claimed_by: attr('asserted_by') ?? null, context: attr('context') ?? '',
-      proof_depth: Number(attr('proof_depth') ?? 0), created_at: attr('created_at') ?? null, updated_at: attr('updated_at') ?? null,
+      proof_depth: Number(attr('proof_depth') ?? 0), created_at: attr('created_at') ?? null, updated_at: attr('updated_at') ?? null, written,
     };
     this.edgeOf.set(F, e);
     for (const [m, k] of [[this.outOf, e.source], [this.inOf, e.target], [this.byFactId, e.fact_id]] as const) {

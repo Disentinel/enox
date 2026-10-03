@@ -354,7 +354,7 @@ test('a hundred and one wrong secrets from distinct IPv6 addresses in one /64 lo
 test('a write over OAuth without asserted_by is claimed by the approved client\'s name, and every read tool shows asserted_by and claimed_by on that edge', async () => {
   // The wall clock: the embedder (below) signs with it. Lifetimes long enough not to matter.
   const wall = { get t() { return Date.now(); }, set t(_v: number) { /* the wall clock */ } } as Clock;
-  const a = await start(tmpDir('oauth-claims'), 'node-a', { publicUrl: PUBLIC, oauth: { ...OAUTH, accessTtlMs: 600_000, refreshTtlMs: 600_000 }, clock: wall });
+  const a = await start(tmpDir('oauth-claims'), 'node-a', { publicUrl: PUBLIC, oauth: { ...OAUTH, codeTtlMs: 600_000, accessTtlMs: 600_000, refreshTtlMs: 600_000 }, clock: wall });
   try {
     const { access } = await connect(a, 'Claude');
     let id = 0;

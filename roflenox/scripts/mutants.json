@@ -3952,6 +3952,48 @@
    "red": [
     "a write over OAuth without asserted_by is claimed by the approved client's name, and every read tool shows asserted_by and claimed_by on that edge"
    ]
+  },
+  {
+   "id": "M292",
+   "title": "r_recent_order: recent_activity orders by the claimed updated_at, with a comparator that never ties",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     ".sort((x, y) => y.written - x.written || cmpDesc(x.updated_at ?? '', y.updated_at ?? '') || (x.F < y.F ? -1 : x.F > y.F ? 1 : 0))",
+     ".sort((x, y) => ((y.updated_at ?? '') < (x.updated_at ?? '') ? -1 : 1))"
+    ]
+   ],
+   "red": [
+    "recent_activity with and without a limit agrees on its first rows, and a write made now comes first in both"
+   ]
+  },
+  {
+   "id": "M293",
+   "title": "r_recent_order: rows written together tie by the view's input order",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     " || (x.F < y.F ? -1 : x.F > y.F ? 1 : 0))",
+     ")"
+    ]
+   ],
+   "red": [
+    "recent_activity with and without a limit agrees on its first rows, and a write made now comes first in both"
+   ]
+  },
+  {
+   "id": "M294",
+   "title": "r_recent_order: the kept Enox view does not learn when an applied write was written",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "      this.wrote(F, identity, seq);\n      this.hold",
+     "      this.hold"
+    ]
+   ],
+   "red": [
+    "recent_activity with and without a limit agrees on its first rows, and a write made now comes first in both"
+   ]
   }
  ]
 }

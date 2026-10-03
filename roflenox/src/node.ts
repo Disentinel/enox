@@ -583,6 +583,21 @@ export class RoflenoxNode {
     return this.version;
   }
 
+  /** Where an identity's batch `seq` stands in the log: the order this node
+   *  received its writes in, -1 if it holds no such batch. The time a write
+   *  was written, as recent_activity orders by it (r_recent_order): an
+   *  updated_at fact is only what the writer claims. */
+  writtenAt(identity: string, seq: number): number {
+    const d = this.chains.get(identity)?.[seq];
+    if (d === undefined) return -1;
+    const w = this.written;
+    const rs = this.log.receipts;
+    if (w.of !== rs) { w.of = rs; w.n = 0; w.at.clear(); }
+    for (; w.n < rs.length; w.n++) if (rs[w.n]!.kind === undefined) w.at.set(`${rs[w.n]!.identity}\n${rs[w.n]!.digest}`, w.n);
+    return w.at.get(`${identity}\n${d}`) ?? -1;
+  }
+  private readonly written: { of: unknown; n: number; at: Map<string, number> } = { of: null, n: 0, at: new Map() };
+
   /** The batches admitted after `version`, oldest first — or null if they
    *  are no longer all remembered (the caller rebuilds). */
   admittedSince(version: number): { identity: string; facts: Fact[]; seq: number }[] | null {
