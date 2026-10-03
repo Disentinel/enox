@@ -325,9 +325,11 @@ Declared as facts:
 - `r_empty_explains` binds as `must`.
 - `r_empty_explains` says "an answer with no rows says why whenever the cause is in the question: a bare lowercase word where the stored values are strings (edge(F, S, supersedes, T) while 'supersedes' as a string holds rows) names the quoted form; a relation, predicate or constant that occurs nowhere is named with the nearest names that do occur; an unknown perspective lists the perspectives that exist, or says that none do".
 - `r_empty_explains` says "a question that has no rows for a reason outside it (the data simply holds none) still answers empty with no note, so the note is never noise".
+- `r_empty_explains` says "a note costs the question no more than one second on a book the size of the owner's: the names it offers come from what the node already keeps, never from a scan of a whole relation for each question, so a missed lookup stays as cheap as a hit".
 - `r_empty_explains` is stated in "owner's claude.ai session on rofl.enox.dev, 2026-10-03".
 - `r_empty_explains` is to be checked by "ask with an unquoted relation, a misspelt relation, an unknown predicate or an unknown perspective answers no rows with a note naming the cause and the nearest existing names".
 - `r_empty_explains` is to be checked by "ask whose question is well formed but matches nothing answers no rows and no note".
+- `r_empty_explains` is to be checked by "on an owner-sized book a misspelt relation and an unknown constant are answered with their note within one second".
 - `r_claimed_author` is about `hybrid`.
 - `r_claimed_author` binds as `must`.
 - `r_claimed_author` says "every read tool that returns an edge (query_graph, explore, traverse, recent_activity, recall, semantic_search) shows both who signed it and who claims it".
@@ -876,6 +878,11 @@ Accepted after verification:
 - `r_public_url_local` is accepted at "cc469048fba19185bbf5dd4887aba590cd83e675".
 - `r_mcp_oauth` is accepted at "80c11531fe867af06dcac3149f4392d487ec6bd5".
 - `r_oauth_lockout` is accepted at "90919f04e155273b0abb638291406340b1d48bb2".
+- `r_claimed_author` is accepted at "7492bfda798144fda7282e4bbafa5aeb36c711d9".
+- `r_recent_order` is accepted at "1dcc12009d821a4aaffe32d272f5128a71e03fec".
+- `r_search_latency` is accepted at "b94815c03e05ce373341269681e3a5672bb6778f".
+- `r_stats_bounded` is accepted at "33c9cc5018f71e79599f6cf86188ac80886d62a7".
+- `r_empty_explains` is rejected at "8d4df0e50f16fa1e49e689bf532aa3e1276489d4".
 
 > Решение 2026-09-27 по замерам на 200000 фактах: rofl-serve пересчитывает
 > все выведенные факты при каждом evaluate (Eval::run → clear_derived), форк
@@ -1218,6 +1225,16 @@ The checks that exist:
 - "wrong secrets from one address lock that address only: the owner approves from another address meanwhile, and a forwarded address from a non-loopback peer is ignored" lives in "roflenox/test/oauth.test.ts".
 - "a hundred and one wrong secrets from distinct IPv6 addresses in one /64 lock that /64 only, and the owner at a fresh address still approves after any number of wrong secrets from other addresses" guards `r_oauth_lockout`.
 - "a hundred and one wrong secrets from distinct IPv6 addresses in one /64 lock that /64 only, and the owner at a fresh address still approves after any number of wrong secrets from other addresses" lives in "roflenox/test/oauth.test.ts".
+- "a write over OAuth without asserted_by is claimed by the approved client's name, and every read tool shows asserted_by and claimed_by on that edge" guards `r_claimed_author`.
+- "a write over OAuth without asserted_by is claimed by the approved client's name, and every read tool shows asserted_by and claimed_by on that edge" lives in "roflenox/test/oauth.test.ts".
+- "recent_activity with and without a limit agrees on its first rows, and a write made now comes first in both" guards `r_recent_order`.
+- "recent_activity with and without a limit agrees on its first rows, and a write made now comes first in both" lives in "roflenox/test/recent.test.ts".
+- "a second search on an unchanged book is answered within ten seconds, and a search after five new facts within ten seconds too" guards `r_search_latency`.
+- "a second search on an unchanged book is answered within ten seconds, and a search after five new facts within ten seconds too" lives in "roflenox/test/perf/search.test.ts".
+- "an embedder whose embedding takes longer than the freshness window still has every request admitted" guards `r_search_latency`.
+- "an embedder whose embedding takes longer than the freshness window still has every request admitted" lives in "roflenox/test/search.test.ts".
+- "graph_stats by default stays under 4 KB on the owner's book and its full form still matches the Enox breakdown" guards `r_stats_bounded`.
+- "graph_stats by default stays under 4 KB on the owner's book and its full form still matches the Enox breakdown" lives in "roflenox/test/stats.test.ts".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" lives in "personal-node/src/mcp/main-graph.test.ts".
 
 ## Что выводится
