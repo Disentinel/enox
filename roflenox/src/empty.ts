@@ -4,47 +4,59 @@
 // reason: `edge(F, S, supersedes, T)` (a bare word is an atom, and every
 // stored value is a string), a misspelt relation, an unknown predicate, a
 // perspective nothing is asserted under. Each of these reads like "the data
-// holds none". So, when an answer has no rows, the node asks a few more
-// questions of the same scope and, if one of them shows the cause is in the
-// question, says so with the nearest names that do occur. A question that is
+// holds none". So, when an answer has no rows, the node looks the question's
+// names up in what it keeps (the predicates, the perspectives, each book's
+// values by place) and, if that shows the cause is in the question, says so
+// with the nearest names that do occur — at the cost of a hit, never of a
+// scan (a scan per miss took ~3 s on an owner-sized book). A question that is
 // well formed and simply matches nothing gets no note: the note is never noise.
 import { parseLiteral, splitArgs } from './engine.ts';
-import { ARITY, type RoflenoxNode } from './node.ts';
+import { ARITY, VALUE_MAX, type RoflenoxNode } from './node.ts';
 
 const ATOM = /^[a-z][A-Za-z0-9_]*$/;
 const isString = (x: string) => x.startsWith('"');
-/** Fact-keyed predicates: their first argument is a fact id, which has no
- *  "nearest" worth naming. */
-const FACT_FIRST = new Set(['edge', 'edge_num', 'asserted', 'conf', 'persp']);
-const ORDINAL = ['1st', '2nd', '3rd', '4th', '5th', '6th'];
 const NAMED: Record<string, string[]> = { edge: ['fact', 'source', 'relation', 'target'], edge_num: ['fact', 'source', 'relation', 'number'] };
 
 /** Edit distance (Levenshtein), stopping early past `most`. */
+let rowA = new Uint32Array(64), rowB = new Uint32Array(64);
 export function distance(a: string, b: string, most = Infinity): number {
   if (Math.abs(a.length - b.length) > most) return most + 1;
-  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  if (rowA.length <= b.length) { rowA = new Uint32Array(b.length * 2 + 1); rowB = new Uint32Array(b.length * 2 + 1); }
+  let prev = rowA, cur = rowB;
+  for (let j = 0; j <= b.length; j++) prev[j] = j;
   for (let i = 1; i <= a.length; i++) {
-    const cur = [i];
+    cur[0] = i;
     let low = i;
+    const ca = a.charCodeAt(i - 1);
     for (let j = 1; j <= b.length; j++) {
-      cur[j] = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
-      low = Math.min(low, cur[j]!);
+      const v = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + (ca === b.charCodeAt(j - 1) ? 0 : 1));
+      cur[j] = v;
+      if (v < low) low = v;
     }
     if (low > most) return most + 1;
-    prev = cur;
+    [prev, cur] = [cur, prev];
   }
   return prev[b.length]!;
 }
 
-/** The `n` names nearest to `word`, closest first (ties by name). */
-export function nearest(word: string, names: Iterable<string>, n = 3): string[] {
+/** The `n` names nearest to `word`, closest first (ties by name), from one
+ *  or more sets — walked, not copied. */
+export function nearest(word: string, names: Iterable<string> | Iterable<string>[], n = 3): string[] {
+  const sources = Array.isArray(names) && names.length > 0 && typeof names[0] !== 'string' ? names as Iterable<string>[] : [names as Iterable<string>];
+  const w = word.toLowerCase();
   const best: [number, string][] = [];
-  for (const x of new Set(names)) {
-    const d = distance(word.toLowerCase(), x.toLowerCase(), best.length === n ? best[n - 1]![0] : Infinity);
-    if (best.length === n && d > best[n - 1]![0]) continue;
-    best.push([d, x]);
-    best.sort((p, q) => p[0] - q[0] || (p[1] < q[1] ? -1 : 1));
-    if (best.length > n) best.pop();
+  const seen = new Set<string>();
+  for (const src of sources) {
+    for (const x of src) {
+      const cut = best.length === n ? best[n - 1]![0] : Infinity;
+      if (Math.abs(x.length - w.length) > cut || seen.has(x)) continue;
+      const d = distance(w, x.toLowerCase(), cut);
+      if (d > cut || (d === cut && best.length === n && x > best[n - 1]![1])) continue;
+      seen.add(x);
+      best.push([d, x]);
+      best.sort((p, q) => p[0] - q[0] || (p[1] < q[1] ? -1 : 1));
+      if (best.length > n) best.pop();
+    }
   }
   return best.map(([, x]) => x);
 }
@@ -57,7 +69,7 @@ export async function explainEmpty(node: RoflenoxNode, query: string, caller: st
   const { rel, book, args } = parseLiteral(query);
   const a = splitArgs(args);
   const lit = (xs: string[]) => `${rel}${book !== null ? `[${book}]` : ''}(${xs.join(', ')})`;
-  const { predicates, perspectives } = await node.vocabulary(caller);
+  const { predicates, perspectives, whole, partial } = await node.vocabulary(caller, perspective !== null);
 
   if (!predicates.has(rel)) {
     return `no predicate ${rel} here; the nearest that exist: ${nearest(rel, predicates).join(', ')}`;
@@ -82,32 +94,35 @@ export async function explainEmpty(node: RoflenoxNode, query: string, caller: st
     }
   }
 
-  // A constant that occurs nowhere: in no place of the predicate, under any
-  // perspective (one that occurs elsewhere is data that holds none, not a
-  // question at fault).
-  // A fact id is looked for only where fact ids are.
+  // A constant of an edge question that occurs nowhere: in no place of any
+  // edge, under any perspective (one that occurs elsewhere is data that holds
+  // none, not a question at fault). Looked up in what the node keeps of each
+  // book by place (RoflenoxNode.vocabulary) — never by scanning the relation.
+  // Only what the engine is not kept for — a book seen through its exports, a
+  // value too long to keep — is asked of it, with the value bound.
   const notes: string[] = [];
+  if (rel !== 'edge' && rel !== 'edge_num') return undefined;
+  const PLACES = ['F', 'S', 'R', 'T'] as const;
+  const kept = (x: string) => x.length <= VALUE_MAX;
   const occurs = async (x: string, at: number) => {
-    for (let j = 0; j < quoted.length; j++) {
-      if (FACT_FIRST.has(rel) && (j === 0) !== (at === 0)) continue;
-      if ((await rows(quoted.map((_, k) => (k === j ? x : `V${k}`)), null)).length > 0) return true;
-    }
+    const value = JSON.parse(x) as string;
+    if (at === 0) {
+      if (whole.some((b) => b.facts.has(value))) return true;
+    } else if (whole.some((b) => b.S.has(value) || b.R.has(value) || b.T.has(value))) return true;
+    if (partial.length === 0 && (at === 0 || kept(value))) return false;
+    const places = at === 0 ? [0] : [1, 2, 3];
+    for (const j of places) if ((await rows(quoted.map((_, k) => (k === j ? x : `V${k}`)), null)).length > 0) return true;
     return false;
   };
   for (let i = 0; i < quoted.length; i++) {
     const x = quoted[i]!;
     if (!isString(x) || await occurs(x, i)) continue;
-    const what = NAMED[rel]?.[i] ? `as its ${NAMED[rel]![i]}` : `as its ${ORDINAL[i] ?? `${i + 1}th`} argument`;
     const value = JSON.parse(x) as string;
-    let note = `no ${rel} has ${x} ${what}`;
-    if (!(i === 0 && FACT_FIRST.has(rel))) {
-      const all = quoted.map((_, j) => `V${j}`);
-      const seen = new Set<string>();
-      for (const r of await rows(all, null)) {
-        const c = r.cells[i];
-        if (typeof c === 'string') seen.add(c);
-      }
-      note += seen.size ? `; the nearest that do: ${list(nearest(value, seen))}` : '; none has any';
+    let note = `no ${rel} has ${x} as its ${NAMED[rel]![i]}`;
+    if (i > 0) {
+      const place = PLACES[i] as 'S' | 'R' | 'T';
+      const sets = whole.map((b) => b[place]);
+      note += sets.some((x) => x.size) ? `; the nearest that do: ${list(nearest(value, sets))}` : '; none has any you may read';
     }
     notes.push(note);
   }

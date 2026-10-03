@@ -49,6 +49,17 @@ export const ARITY: Record<string, number> = {
   edge: 4, edge_num: 4, asserted: 4, conf: 2, persp: 2, answered: 3, intent: 4, grant: 2, delegate: 2, export: 2, follows: 2, trusts: 1,
 };
 const BASE_PREDICATES = Object.keys(ARITY);
+/** The longest value kept by place for empty-answer notes: a name, an id or
+ *  a date, not a description or an embedding. */
+export const VALUE_MAX = 256;
+/** What a note may name, within what a requester may see: the predicates and
+ *  perspectives, and per book seen whole its values by place and its facts. */
+export interface Vocabulary {
+  predicates: Set<string>; perspectives: Set<string>;
+  whole: { S: Set<string>; R: Set<string>; T: Set<string>; facts: Map<string, Current> }[];
+  /** Books seen only through exports: what they hold is asked of the engine. */
+  partial: string[];
+}
 
 /** The operator's bearer token: 32 random bytes in key/operator-token (0600),
  *  created on first use. It stands for the node's OWN identity and nothing else. */
@@ -213,6 +224,11 @@ export class RoflenoxNode {
   private readonly recent: { version: number; identity: string; facts: Fact[]; seq: number }[] = [];
   /** The newest claimed_at of each identity's batches (ms): when it last spoke. */
   private readonly lastClaimed = new Map<string, number>();
+  /** The values each identity's edges hold, by place — sources, relations,
+   *  targets up to VALUE_MAX characters — kept as facts are admitted, so an
+   *  empty answer names what does occur without scanning a relation
+   *  (r_empty_explains). The edge relation only grows; so do these. */
+  private readonly values = new Map<string, { S: Set<string>; R: Set<string>; T: Set<string> }>();
   private readonly silenceSec: number;
   private readonly domainVouch: DomainVouch | null;
   private recentFacts = 0;
@@ -527,6 +543,13 @@ export class RoflenoxNode {
     plan = this.assertions.plan(v.manifest.identity, bookOf(v.manifest.identity), v.facts, seq)): void {
     const id = v.manifest.identity;
     plan.apply();
+    const vals = this.values.get(id) ?? { S: new Set<string>(), R: new Set<string>(), T: new Set<string>() };
+    this.values.set(id, vals);
+    for (const f of v.facts) {
+      if (f.source.length <= VALUE_MAX) vals.S.add(f.source);
+      vals.R.add(f.relation);
+      if (f.target.length <= VALUE_MAX) vals.T.add(f.target);
+    }
     this.programs.set(id, [...(this.programs.get(id) ?? []), programOf(v, seq)]);
     const res = v.facts.filter((f) => f.relation === RESULT);
     if (res.length) this.results.set(id, [...(this.results.get(id) ?? []), toRofl(res, bookOf(id), seq)]);
@@ -1074,15 +1097,21 @@ export class RoflenoxNode {
 
   /** The predicates a question may name and the perspectives facts are
    *  asserted under, within what `requester` may see (r_empty_explains). */
-  vocabulary(requester: string | null): Promise<{ predicates: Set<string>; perspectives: Set<string> }> {
+  vocabulary(requester: string | null, withPerspectives = true): Promise<Vocabulary> {
     return this.serial(async () => {
       const predicates = new Set(BASE_PREDICATES);
       const perspectives = new Set<string>();
-      for (const [, sc] of await this.scopeFor(requester)) {
-        if (sc.only === null) for (const h of this.headsOf(sc.identity)) if (h) predicates.add(h);
-        for (const [F, c] of this.assertions.of(sc.identity)) if (sc.only === null || sc.only.has(F)) perspectives.add(c.P);
+      const whole: Vocabulary['whole'] = [];
+      const partial: string[] = [];
+      for (const [b, sc] of await this.scopeFor(requester)) {
+        if (sc.only === null) {
+          for (const h of this.headsOf(sc.identity)) if (h) predicates.add(h);
+          const v = this.values.get(sc.identity);
+          if (v) whole.push({ ...v, facts: this.assertions.of(sc.identity) });
+        } else partial.push(b);
+        if (withPerspectives) for (const [F, c] of this.assertions.of(sc.identity)) if (sc.only === null || sc.only.has(F)) perspectives.add(c.P);
       }
-      return { predicates, perspectives };
+      return { predicates, perspectives, whole, partial };
     }, true);
   }
 

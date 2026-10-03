@@ -4110,6 +4110,56 @@
    "red": [
     "graph_stats by default stays under 4 KB on the owner's book and its full form still matches the Enox breakdown"
    ]
+  },
+  {
+   "id": "M303",
+   "title": "r_empty_explains: the node keeps no relation names for notes",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      vals.R.add(f.relation);",
+     "      void f.relation;"
+    ]
+   ],
+   "red": [
+    "ask with an unquoted relation, a misspelt relation, an unknown predicate or an unknown perspective answers no rows with a note naming the cause and the nearest existing names"
+   ]
+  },
+  {
+   "id": "M304",
+   "title": "r_empty_explains: a note's nearest names come from a scan of the relation",
+   "file": "src/empty.ts",
+   "edits": [
+    [
+     "      const sets = whole.map((b) => b[place]);",
+     "      const sets = [new Set((await rows(['V0', 'V1', 'V2', 'V3'], null)).map((r) => String(r.cells[i])))];"
+    ]
+   ],
+   "red": [
+    "on an owner-sized book a misspelt relation and an unknown constant are answered with their note within one second"
+   ]
+  },
+  {
+   "id": "M305",
+   "title": "r_empty_explains: whether a constant occurs is asked of the engine, place by place",
+   "file": "src/empty.ts",
+   "edits": [
+    [
+     "    if (partial.length === 0 && (at === 0 || kept(value))) return false;",
+     "    void kept;"
+    ],
+    [
+     "    } else if (whole.some((b) => b.S.has(value) || b.R.has(value) || b.T.has(value))) return true;",
+     "    }"
+    ],
+    [
+     "    for (const j of places) if ((await rows(quoted.map((_, k) => (k === j ? x : `V${k}`)), null)).length > 0) return true;",
+     "    for (const j of places) if ((await rows(quoted.map((_, k) => (k === j ? x : `V${k}`)), null)).length > 0) return true;\n    for (const j of places) await rows(quoted.map((_, k) => (k === j ? 'V' + k : `V${k}`)), null);"
+    ]
+   ],
+   "red": [
+    "on an owner-sized book a misspelt relation and an unknown constant are answered with their note within one second"
+   ]
   }
  ]
 }
