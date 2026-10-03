@@ -18,6 +18,9 @@
 //
 // A busy executor can only use its own CPU budget: `nice` yields to the node,
 // and `ulimit -t` has the kernel stop it (SIGXCPU) when its seconds run out.
+// The soft limit is the budget and the hard one a second above it: at a hard
+// limit Linux sends SIGKILL, not SIGXCPU (macOS sends SIGXCPU either way), so
+// with the two equal a budget kill on Linux read like any other kill.
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { LocalIdentity } from './identity.ts';
 import { ask, publish } from './client.ts';
@@ -39,7 +42,7 @@ export interface ExecutorOptions {
 /** Start an executor as a separate, CPU-limited, lower-priority process. */
 export function spawnExecutor(o: ExecutorOptions): ChildProcess {
   const cpu = Math.max(1, Math.floor(o.cpuSeconds));
-  const argv = ['-n', String(o.nice ?? 10), '/bin/sh', '-c', `ulimit -t ${cpu}; exec "$0" "$@"`,
+  const argv = ['-n', String(o.nice ?? 10), '/bin/sh', '-c', `ulimit -H -t ${cpu + 1}; ulimit -S -t ${cpu}; exec "$0" "$@"`,
     process.execPath, '--experimental-strip-types', '--no-warnings', o.script];
   return spawn('nice', argv, { env: { ...process.env, ...o.env, ROFLENOX_URL: o.url, ROFLENOX_DATA: o.dataDir }, stdio: ['ignore', 'pipe', 'pipe'] });
 }

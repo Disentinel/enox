@@ -4160,6 +4160,20 @@
    "red": [
     "on an owner-sized book a misspelt relation and an unknown constant are answered with their note within one second"
    ]
+  },
+  {
+   "id": "M306",
+   "title": "executor CPU budget: soft and hard limits equal, so on Linux the budget kill is SIGKILL",
+   "file": "src/executor.ts",
+   "edits": [
+    [
+     "`ulimit -H -t ${cpu + 1}; ulimit -S -t ${cpu}; exec \"$0\" \"$@\"`",
+     "`ulimit -t ${cpu}; exec \"$0\" \"$@\"`"
+    ]
+   ],
+   "red": [
+    "an ask answers within one second while an executor saturates its CPU budget"
+   ]
   }
  ]
 }

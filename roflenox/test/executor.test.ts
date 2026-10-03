@@ -84,7 +84,8 @@ test('an intent derived by a rule is answered by an executor and why of the resu
 test('an ask answers within one second while an executor saturates its CPU budget', async () => {
   const { a, exDir } = await setup('busy');
   const e = run({ url: a.url, dataDir: exDir, script: SCRIPT, cpuSeconds: 1, env: { BURN: '1' } });
-  const stop = () => { if (e.child.exitCode === null && e.child.signalCode === null) e.child.kill('SIGKILL'); };
+  let stopped = false;
+  const stop = () => { if (e.child.exitCode === null && e.child.signalCode === null) { stopped = true; e.child.kill('SIGKILL'); } };
   try {
     let worst = 0, asks = 0, done = false;
     void e.exited.then(() => { done = true; });
@@ -100,7 +101,8 @@ test('an ask answers within one second while an executor saturates its CPU budge
     const exit = await e.exited;
     assert.ok(asks >= 20, `asked ${asks} times while the executor ran`);
     assert.ok(worst < 1000, `the slowest ask took ${worst.toFixed(0)} ms`);
-    assert.equal(exit.signal, 'SIGXCPU', `the kernel ended it at its CPU budget: ${JSON.stringify(exit)} ${e.out()}`);
+    assert.equal(stopped, false, `the executor was still running at the deadline: ${e.out()}`);
+    assert.equal(exit.signal, 'SIGXCPU', `the kernel ended it at its CPU budget, on Linux as on macOS: ${JSON.stringify(exit)} ${e.out()}`);
     assert.equal(((await post(a.url, '/ask', { query: 'answered(K, E, V)' })).body.rows as unknown[]).length, 2);
   } finally { stop(); await a.stop(); }
 });
