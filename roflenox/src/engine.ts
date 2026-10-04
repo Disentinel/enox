@@ -274,7 +274,10 @@ export class Engine {
  *  reports a malformed literal as an error answer, not a crash. */
 async function engineCall<T>(f: () => Promise<T>): Promise<T> {
   try { return await f(); } catch (e) {
-    throw new Refusal(400, 'bad_query', `the engine could not answer: ${(e as Error).message}`);
+    // The engine's own wording names its parser's internals; the asker gets
+    // what to change (r_query_errors).
+    void e;
+    throw new Refusal(400, 'bad_query', `not a literal this node can read: ${ONE_LITERAL}; check its quotes and parentheses`);
   }
 }
 
@@ -312,11 +315,29 @@ export function splitArgs(args: string): string[] {
   return out;
 }
 
+/** What a question is, said the same way by every refusal of one that is not. */
+export const ONE_LITERAL = 'a question is one literal, rel(Args) or rel[book](Args); a conjunction (a, b) or a negation (not a) is not one — ask each literal on its own';
+
 export function parseLiteral(q: string): { rel: string; book: string | null; args: string } {
   if (typeof q !== 'string') throw new Refusal(400, 'bad_query', 'a query is a string');
   const m = LITERAL.exec(q);
-  if (!m) throw new Refusal(400, 'bad_query', 'a query is one ROFL literal: rel(Args) or rel[book](Args)');
+  // `rel(...)` matches from the first ( to the last ): a conjunction closes
+  // the first literal's parenthesis before its end (r_query_errors).
+  if (!m || !balanced(m[3]!)) throw new Refusal(400, 'bad_query', ONE_LITERAL);
   return { rel: m[1]!, book: m[2]?.trim() || null, args: m[3]! };
+}
+
+/** Do an argument list's parentheses stay open-then-closed outside strings? */
+function balanced(args: string): boolean {
+  let depth = 0, inStr = false;
+  for (let i = 0; i < args.length; i++) {
+    const c = args[i]!;
+    if (inStr) { if (c === '\\') i++; else if (c === '"') inStr = false; continue; }
+    if (c === '"') inStr = true;
+    else if (c === '(') depth++;
+    else if (c === ')' && --depth < 0) return false;
+  }
+  return depth === 0 && !inStr;
 }
 
 function targets(book: string | null, scope: Map<string, BookScope>): [string, BookScope][] {

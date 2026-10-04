@@ -4398,6 +4398,80 @@
    "red": [
     "the schema tool lists every predicate ask answers with its arity and every perspective present, and asking each listed predicate with its arity is never refused"
    ]
+  },
+  {
+   "id": "M323",
+   "title": "r_query_errors: a conjunction reaches the engine and comes back in its wording",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "  if (!m || !balanced(m[3]!)) throw new Refusal(400, 'bad_query', ONE_LITERAL);",
+     "  if (!m) throw new Refusal(400, 'bad_query', ONE_LITERAL);"
+    ],
+    [
+     "    void e;\n    throw new Refusal(400, 'bad_query', `not a literal this node can read: ${ONE_LITERAL}; check its quotes and parentheses`);",
+     "    throw new Refusal(400, 'bad_query', `the engine could not answer: ${(e as Error).message}`);"
+    ]
+   ],
+   "red": [
+    "wrong arity, a conjunction, a negation and a fact held only under another perspective each get one consistent explanation without engine internals"
+   ]
+  },
+  {
+   "id": "M324",
+   "title": "r_query_errors: a wrong arity of asserted, conf or persp is refused, not noted",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (a.length !== (rel === 'asserted' ? 4 : 2)) return { vars, rows: [] };   // the note says the arity (src/empty.ts)",
+     "      if (a.length !== (rel === 'asserted' ? 4 : 2)) throw new Refusal(400, 'bad_query', 'arity');"
+    ]
+   ],
+   "red": [
+    "wrong arity, a conjunction, a negation and a fact held only under another perspective each get one consistent explanation without engine internals"
+   ]
+  },
+  {
+   "id": "M325",
+   "title": "r_query_errors: an empty answer under one perspective does not name the others that hold it",
+   "file": "src/empty.ts",
+   "edits": [
+    [
+     "    if (elsewhere.length > 0) {",
+     "    if (false && elsewhere.length > 0) {"
+    ]
+   ],
+   "red": [
+    "wrong arity, a conjunction, a negation and a fact held only under another perspective each get one consistent explanation without engine internals"
+   ]
+  },
+  {
+   "id": "M326",
+   "title": "r_query_errors: a hash-like id gets nearest names",
+   "file": "src/empty.ts",
+   "edits": [
+    [
+     "    if (i > 0 && !HASHLIKE.test(value)) {",
+     "    if (i > 0) {"
+    ]
+   ],
+   "red": [
+    "wrong arity, a conjunction, a negation and a fact held only under another perspective each get one consistent explanation without engine internals"
+   ]
+  },
+  {
+   "id": "M327",
+   "title": "r_query_errors: answered without rules names no variables",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      const ans: AskAnswer = rel === 'answered' ? { vars: named, rows: [] } : await this.engine.ask(query, scope);",
+     "      const ans: AskAnswer = rel === 'answered' ? { vars: [], rows: [] } : await this.engine.ask(query, scope);"
+    ]
+   ],
+   "red": [
+    "wrong arity, a conjunction, a negation and a fact held only under another perspective each get one consistent explanation without engine internals"
+   ]
   }
  ]
 }

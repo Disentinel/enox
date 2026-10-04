@@ -14,6 +14,8 @@ import { parseLiteral, splitArgs } from './engine.ts';
 import { ARITY, VALUE_MAX, type RoflenoxNode } from './node.ts';
 
 const ATOM = /^[a-z][A-Za-z0-9_]*$/;
+/** A hash-like id: hex of 16 or more, maybe after a kind (`search:…`). */
+const HASHLIKE = /^(?:[a-z_]+:)?[0-9a-f]{16,}$/i;
 const isString = (x: string) => x.startsWith('"');
 const NAMED: Record<string, string[]> = { edge: ['fact', 'source', 'relation', 'target'], live: ['fact', 'source', 'relation', 'target'], edge_num: ['fact', 'source', 'relation', 'number'] };
 
@@ -69,13 +71,13 @@ export async function explainEmpty(node: RoflenoxNode, query: string, caller: st
   const { rel, book, args } = parseLiteral(query);
   const a = splitArgs(args);
   const lit = (xs: string[]) => `${rel}${book !== null ? `[${book}]` : ''}(${xs.join(', ')})`;
-  const { predicates, perspectives, whole, partial } = await node.vocabulary(caller, perspective !== null);
+  const { predicates, perspectives, whole, partial, arity: heads } = await node.vocabulary(caller, perspective !== null);
 
   if (!predicates.has(rel)) {
     return `no predicate ${rel} here; the nearest that exist: ${nearest(rel, predicates).join(', ')}`;
   }
-  const arity = ARITY[rel];
-  if (arity !== undefined && a.length !== arity) return `${rel} takes ${arity} arguments, not ${a.length}`;
+  const arity = ARITY[rel] ?? heads.get(rel);
+  if (arity !== undefined && a.length !== arity) return `${rel} takes ${arity} argument${arity === 1 ? '' : 's'}, not ${a.length}`;
   if (perspective !== null && !perspectives.has(perspective)) {
     return perspectives.size === 0
       ? `no fact here is asserted under any perspective you may read, so none under ${JSON.stringify(perspective)}`
@@ -102,6 +104,24 @@ export async function explainEmpty(node: RoflenoxNode, query: string, caller: st
   // value too long to keep — is asked of it, with the value bound.
   const notes: string[] = [];
   if (rel !== 'edge' && rel !== 'edge_num' && rel !== 'live') return undefined;
+  // Facts that match under ANOTHER perspective: named, with how many.
+  if (perspective !== null) {
+    const elsewhere = await rows(a, null);
+    if (elsewhere.length > 0) {
+      const at = /^[A-Z_]/.test(a[0]!) && a[0] !== '_' ? 0 : -1;
+      const by = new Map<string, number>();
+      if (at === 0 || isString(a[0]!)) {
+        for (const r of elsewhere) {
+          const F = at === 0 ? String(r.cells[0]) : JSON.parse(a[0]!) as string;
+          const P = whole.map((b) => b.facts.get(F)?.P).find((x) => x !== undefined);
+          if (P !== undefined && P !== perspective) by.set(P, (by.get(P) ?? 0) + 1);
+        }
+      }
+      const where = [...by].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).map(([P, n]) => `${n} under ${JSON.stringify(P)}`);
+      return `nothing under perspective ${JSON.stringify(perspective)} matches; ${lit(a)} has ${elsewhere.length} row${elsewhere.length === 1 ? '' : 's'}`
+        + `${where.length ? ` asserted under other perspectives: ${where.join(', ')}` : ' under other perspectives'}`;
+    }
+  }
   const PLACES = ['F', 'S', 'R', 'T'] as const;
   const kept = (x: string) => x.length <= VALUE_MAX;
   const occurs = async (x: string, at: number) => {
@@ -119,7 +139,8 @@ export async function explainEmpty(node: RoflenoxNode, query: string, caller: st
     if (!isString(x) || await occurs(x, i)) continue;
     const value = JSON.parse(x) as string;
     let note = `no ${rel} has ${x} as its ${NAMED[rel]![i]}`;
-    if (i > 0) {
+    // An id (a hash) has no near names worth naming: they would be any id.
+    if (i > 0 && !HASHLIKE.test(value)) {
       const place = PLACES[i] as 'S' | 'R' | 'T';
       const sets = whole.map((b) => b[place]);
       note += sets.some((x) => x.size) ? `; the nearest that do: ${list(nearest(value, sets))}` : '; none has any you may read';

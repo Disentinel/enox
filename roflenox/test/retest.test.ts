@@ -337,3 +337,52 @@ test('the schema tool lists every predicate ask answers with its arity and every
     assert.ok(!anon.predicates.some((p) => p.name === 'pair'), 'no rule head of a book it may not read');
   } finally { await a.stop(); }
 });
+
+test('wrong arity, a conjunction, a negation and a fact held only under another perspective each get one consistent explanation without engine internals', async () => {
+  const a = await start(tmpDir('query-errors'), 'node-a');
+  try {
+    const call = tools(a);
+    const asked = async (query: string, perspective?: string) => post(a.url, '/ask', { query, ...(perspective ? { perspective } : {}) });
+    json(await call('add_assertion', { source: 'Alpha', target: 'Beta', relation: 'uses' }));
+    // answered/3 names its variables in a book with no rules too.
+    assert.deepEqual((await asked('answered(K, E, V)')).body.vars, ['K', 'E', 'V']);
+    json(await call('assert', { facts: [{ source: 'session-7', relation: 'zz_claim', target: 'task-42', perspective: 'zz_coord', confidence: 1 },
+      { source: 'pair(X) :- edge(F, X, "zz_claim", T).', relation: 'roflenox:rule', target: 'pair(X) :- edge(F, X, "zz_claim", T).', perspective: 'rules', confidence: 1 }] }));
+    const INTERNAL = /engine|clause|closing dot|parse error|unexpected/i;
+
+    // A wrong arity is a note, for every predicate: the node's own, the engine's, a rule's.
+    for (const [q, n, m] of [['asserted(A, B)', 4, 2], ['conf(F)', 2, 1], ['persp(F, P, X)', 2, 3], ['live(F, S)', 4, 2], ['edge(F, S, R)', 4, 3],
+      ['intent(K, E)', 4, 2], ['delegate(A)', 2, 1], ['export(R, A, X)', 2, 3], ['answered(K, E)', 3, 2], ['grant(R)', 2, 1], ['pair(X, Y)', 1, 2]] as const) {
+      const r = await asked(q);
+      assert.equal(r.status, 200, `${q}: ${JSON.stringify(r.body)}`);
+      assert.deepEqual(r.body.rows, [], q);
+      assert.equal(r.body.note, `${q.split('(')[0]} takes ${n} argument${n === 1 ? '' : 's'}, not ${m}`, q);
+    }
+    // A conjunction and a negation: the same refusal, saying a question is one literal.
+    const conj = await asked('edge(F, S, R, T), conf(F, C)');
+    const neg = await asked('not edge(F, S, "uses", T)');
+    const neg2 = await asked('edge(F, S, R, T), not conf(F, 0)');
+    for (const r of [conj, neg, neg2]) {
+      assert.equal(r.status, 400, JSON.stringify(r.body));
+      assert.equal(r.body.error, 'bad_query');
+      assert.match(String(r.body.message), /^a question is one literal, rel\(Args\) or rel\[book\]\(Args\)/);
+      assert.doesNotMatch(String(r.body.message), INTERNAL);
+    }
+    assert.equal(conj.body.message, neg.body.message);
+    // Malformed inside one literal: no engine wording either.
+    const bad = await asked('edge(F, "unterminated, R, T)');
+    assert.equal(bad.status, 400);
+    assert.doesNotMatch(String(bad.body.message), INTERNAL);
+    // answered/3 names its variables, rules or none.
+    assert.deepEqual((await asked('answered(K, E, V)')).body.vars, ['K', 'E', 'V']);
+    // A fact held only under another perspective: the note names it.
+    const other = await asked('edge(F, S, "zz_claim", T)', 'enox');
+    assert.deepEqual(other.body.rows, []);
+    assert.match(String(other.body.note), /nothing under perspective "enox" matches; edge\(F, S, "zz_claim", T\) has 1 row asserted under other perspectives: 1 under "zz_coord"/);
+    // A hash-like id gets no nearest names.
+    const hash = await asked(`edge(F, "${'ab'.repeat(32)}", R, T)`);
+    assert.equal(hash.body.note, `no edge has "${'ab'.repeat(32)}" as its source`);
+    // Control: a misspelt word still gets its nearest names.
+    assert.match(String((await asked('edge(F, S, "usez", T)')).body.note), /the nearest that do: "uses"/);
+  } finally { await a.stop(); }
+});

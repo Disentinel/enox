@@ -79,6 +79,8 @@ export const VALUE_MAX = 256;
  *  perspectives, and per book seen whole its values by place and its facts. */
 export interface Vocabulary {
   predicates: Set<string>; perspectives: Set<string>;
+  /** The arity of each predicate a reader's rules add (the node's are ARITY). */
+  arity: Map<string, number>;
   whole: { S: Set<string>; R: Set<string>; T: Set<string>; facts: Map<string, Current> }[];
   /** Books seen only through exports: what they hold is asked of the engine. */
   partial: string[];
@@ -995,7 +997,9 @@ export class RoflenoxNode {
         if (forked.length) a.unknown = [...(a.unknown ?? []), ...forked];
         return a;
       }
-      const ans: AskAnswer = rel === 'answered' ? { vars: [], rows: [] } : await this.engine.ask(query, scope);
+      // answered is a rule world's; with none, it still names its variables.
+      const named = splitArgs(args).filter((x, i, xs) => x === '_' || (/^[A-Z_]/.test(x) && xs.indexOf(x) === i));
+      const ans: AskAnswer = rel === 'answered' ? { vars: named, rows: [] } : await this.engine.ask(query, scope);
       // What the authors' own rules derive, from their rule worlds.
       const seen = new Set(ans.rows.map((r) => JSON.stringify([r.identity, r.cells])));
       const unknown: NonNullable<AskAnswer['unknown']> = [];
@@ -1035,7 +1039,8 @@ export class RoflenoxNode {
     const rows: AskAnswer['rows'] = [];
     let vars = a.filter((x, i) => x === '_' || (/^[A-Z_]/.test(x) && a.indexOf(x) === i));
     if (perspective !== null) {
-      if (rel !== 'edge' || a.length !== 4) throw new Refusal(400, 'bad_query', 'a perspective restricts edge(F, S, R, T) questions');
+      if (rel !== 'edge') throw new Refusal(400, 'bad_query', 'a perspective restricts edge(F, S, R, T) questions');
+      if (a.length !== 4) return { vars, rows: [] };               // the note says the arity (src/empty.ts)
       for (const [b, sc] of books) {
         const r = await this.engine.ask(`edge[${b}](${args})`, new Map([[b, sc]]));
         vars = r.vars;
@@ -1047,7 +1052,7 @@ export class RoflenoxNode {
         }
       }
     } else {
-      if (a.length !== (rel === 'asserted' ? 4 : 2)) throw new Refusal(400, 'bad_query', `${rel} takes ${rel === 'asserted' ? 4 : 2} arguments`);
+      if (a.length !== (rel === 'asserted' ? 4 : 2)) return { vars, rows: [] };   // the note says the arity (src/empty.ts)
       for (const [, sc] of books) {
         for (const [F, c] of this.assertions.of(sc.identity)) {
           if (sc.only !== null && !sc.only.has(F)) continue;
@@ -1192,18 +1197,23 @@ export class RoflenoxNode {
   vocabulary(requester: string | null, withPerspectives = true): Promise<Vocabulary> {
     return this.serial(async () => {
       const predicates = new Set(BASE_PREDICATES);
+      const arity = new Map<string, number>();
       const perspectives = new Set<string>();
       const whole: Vocabulary['whole'] = [];
       const partial: string[] = [];
       for (const [b, sc] of await this.scopeFor(requester)) {
         if (sc.only === null) {
           for (const h of this.headsOf(sc.identity)) if (h) predicates.add(h);
+          for (const r of this.currentRules(sc.identity)) {
+            const m = /^([a-z][A-Za-z0-9_]*)\[[^\]]*\]\(([^)]*)\)/.exec(r);
+            if (m && !arity.has(m[1]!)) arity.set(m[1]!, splitArgs(m[2]!).length);
+          }
           const v = this.values.get(sc.identity);
           if (v) whole.push({ ...v, facts: this.assertions.of(sc.identity) });
         } else partial.push(b);
         if (withPerspectives) for (const [F, c] of this.assertions.of(sc.identity)) if (sc.only === null || sc.only.has(F)) perspectives.add(c.P);
       }
-      return { predicates, perspectives, whole, partial };
+      return { predicates, perspectives, whole, partial, arity };
     }, true);
   }
 

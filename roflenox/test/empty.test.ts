@@ -76,8 +76,9 @@ test('ask whose question is well formed but matches nothing answers no rows and 
     for (const [q, p] of [
       ['edge(F, "v2", "contradicts", T)', undefined],      // every constant occurs, the combination does not
       ['edge(F, "lib", R, "v1")', undefined],              // "lib" is a target, and "v1" a source too — just not together
-      ['edge(F, S, "depends_on", T)', 'enox'],             // a perspective that exists, with no such fact under it
-      ['edge(F, S, R, "lib")', 'enox'],
+      ['edge(F, "v2", "depends_on", T)', 'enox'],          // a perspective that exists, with no such fact under it nor under any
+                                                           // (one held under ANOTHER perspective is noted: r_query_errors)
+      ['edge(F, "v3", R, "lib")', 'enox'],
       ['conf(F, 1)', undefined],                           // a number that is not a confidence held
     ] as [string, string | undefined][]) {
       const r = await ask(q, p);
