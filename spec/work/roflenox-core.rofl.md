@@ -161,3 +161,4 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_assert_then_ask` at "8c99d1358167d2c72b7752ae3098da627efe10e7".
 - `roflenox_core` takes `r_knew_head`.
 - `roflenox_core` finished `r_knew_head` at "fa587b8cd203623342364d3cd39117a74fbe66d1".
+- `roflenox_core` takes `r_one_time`.

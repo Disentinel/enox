@@ -46,7 +46,7 @@ export const DEFAULT_FRESHNESS_SEC = 300;
  *  rules of src/engine.ts) and the node's own (conf, persp, asserted,
  *  answered). An author's rules add their heads. */
 export const ARITY: Record<string, number> = {
-  edge: 4, edge_num: 4, live: 4, asserted: 4, conf: 2, persp: 2, answered: 3, intent: 4, grant: 2, delegate: 2, export: 2, follows: 2, trusts: 1,
+  edge: 4, edge_num: 4, live: 4, asserted: 4, conf: 2, admitted_at: 2, persp: 2, answered: 3, intent: 4, grant: 2, delegate: 2, export: 2, follows: 2, trusts: 1,
 };
 const BASE_PREDICATES = Object.keys(ARITY);
 /** What each predicate ask answers holds (r_introspect): its arguments, and
@@ -58,10 +58,11 @@ export const MEANING: Record<string, { args: string[]; meaning: string }> = {
   asserted: { args: ['F', 'P', 'C', 'S'], meaning: 'the current assertion of fact F by the book\'s identity: perspective P, confidence C in per mille (0..1000), S the position of its batch in the identity\'s chain' },
   conf: { args: ['F', 'C'], meaning: 'the current confidence of fact F, in per mille (0..1000; 0 = retired)' },
   persp: { args: ['F', 'P'], meaning: 'the perspective fact F is currently asserted under' },
+  admitted_at: { args: ['F', 'T'], meaning: 'when THIS node admitted the batch of fact F\'s current assertion (its own clock, not the writer\'s claim): what a lease is measured by' },
   answered: { args: ['K', 'E', 'V'], meaning: 'an intent K of a book with rules, answered by executor E with value V' },
   intent: { args: ['K', 'E', 'Kind', 'In'], meaning: 'an intent K addressed to executor E (a follow, a search by meaning, or one a rule derives)' },
-  grant: { args: ['R', 'U'], meaning: 'the grant in force to reader R, until U (Unix seconds)' },
-  delegate: { args: ['A', 'U'], meaning: 'agent A acts for the book\'s identity until U (Unix seconds)' },
+  grant: { args: ['R', 'U'], meaning: 'the grant in force to reader R, until U' },
+  delegate: { args: ['A', 'U'], meaning: 'agent A acts for the book\'s identity until U' },
   export: { args: ['Rel', 'A'], meaning: 'facts of relation Rel (or "*") may leave this node to audience A ("public" or an identity)' },
   follows: { args: ['Name', 'Book'], meaning: 'the book\'s identity follows Name\'s feed; Book is that feed\'s book atom' },
   trusts: { args: ['Name'], meaning: 'the operator runs the rules of Name here' },
@@ -70,7 +71,7 @@ export const MEANING: Record<string, { args: string[]; meaning: string }> = {
 export const UNITS = {
   confidence: 'conf and asserted give confidence in per mille, 0..1000 (1000 = certain, 0 = retired); the Enox tools (add_assertion, explore, recall, ...) give it as 0..1',
   seq: 'asserted\'s S and an assert answer\'s seq are a batch\'s position in its identity\'s chain, from 0 (chain[seq] is its digest)',
-  time: 'grant and delegate expiries are Unix seconds; enox:created_at and enox:updated_at are RFC 3339 text',
+  time: 'every time is shown in one form, ISO 8601 in UTC with milliseconds (2026-10-04T12:00:00.000Z): admitted_at, grant and delegate expiries, created_at and updated_at; admitted_at is this node\'s clock at admission, never the writer\'s',
 };
 /** The longest value kept by place for empty-answer notes: a name, an id or
  *  a date, not a description or an embedding. */
@@ -1010,7 +1011,7 @@ export class RoflenoxNode {
   /** What ask can answer at an earlier head: the facts and their assertions,
    *  which the node can unwind; what rules and control rows derive is the
    *  engine's, and it holds only the latest state. */
-  static readonly AT_REVISION = new Set(['edge', 'edge_num', 'live', 'asserted', 'conf', 'persp']);
+  static readonly AT_REVISION = new Set(['edge', 'edge_num', 'live', 'asserted', 'conf', 'persp', 'admitted_at']);
 
   /** The assertions each later batch changed, as they were at `head`, per
    *  identity — null when `head` is the latest state of every fact. Refused
@@ -1048,7 +1049,7 @@ export class RoflenoxNode {
     if (from === undefined) throw new Refusal(404, 'unknown_batch', `no batch ${digest} in this node's log`);
     const a = splitArgs(args);
     const vars = a.filter((x, i) => x === '_' || (/^[A-Z_]/.test(x) && a.indexOf(x) === i));
-    const width = rel === 'conf' || rel === 'persp' ? 2 : 4;
+    const width = rel === 'conf' || rel === 'persp' || rel === 'admitted_at' ? 2 : 4;
     if (a.length !== width) return { vars, rows: [] };
     const kept = new Map(this.recent.map((e) => [e.at, e.facts]));
     const rs = this.log.receipts;
@@ -1072,13 +1073,20 @@ export class RoflenoxNode {
         const cells: (string | number)[] | null = rel === 'edge' ? [F, f.source, f.relation, f.target]
           : rel === 'edge_num' ? (/^-?(0|[1-9]\d{0,14})$/.test(f.target) ? [F, f.source, f.relation, Number(f.target)] : null)
           : rel === 'live' ? (this.liveNow(r.identity, [F, f.source, f.relation, f.target]) ? [F, f.source, f.relation, f.target] : null)
-          : assertionCells(rel, F, c);
+          : rel === 'admitted_at' ? [F, this.admittedAt(r.identity, c.S)] : assertionCells(rel, F, c);
         const m = cells && match(a, cells);
         if (m) rows.push({ identity: r.identity, cells: m.cells });
       }
     }
     sortRows(rows);
     return { vars, rows };
+  }
+
+  /** When this node admitted an identity's batch `seq` — its own clock, as
+   *  the receipt holds it (r_one_time): a lease is measured by this, never by
+   *  the time the writer claims. */
+  admittedAt(identity: string, seq: number): string {
+    return this.log.receipts[this.writtenAt(identity, seq)]?.received_at ?? '';
   }
 
   /** Where a batch stands in the log: its receipt's index. */
@@ -1092,9 +1100,12 @@ export class RoflenoxNode {
 
   private async askAt(query: string, requester: string | null, perspective: string | null, o: AskOptions): Promise<AskAnswer> {
     const ans = await this.askOrdered(query, requester, perspective, o);
-    if (o.order === 'admission') {
-      const { rel, args } = parseLiteral(query);
-      this.byAdmission(rel, splitArgs(args), ans, o.at !== undefined ? this.undoSince(o.at) : null);
+    const { rel, args } = parseLiteral(query);
+    if (o.order === 'admission') this.byAdmission(rel, splitArgs(args), ans, o.at !== undefined ? this.undoSince(o.at) : null);
+    // One form of time (r_one_time): an expiry the engine compares in seconds is shown as ISO 8601.
+    if (rel === 'grant' || rel === 'delegate') {
+      const u = ans.vars.length === 2 ? 1 : ans.vars.length === 1 && /^[A-Z_]/.test(splitArgs(args)[1] ?? '') ? 0 : -1;
+      for (const r of ans.rows) if (u >= 0 && typeof r.cells[u] === 'number') r.cells[u] = new Date((r.cells[u] as number) * 1000).toISOString();
     }
     return ans;
   }
@@ -1110,7 +1121,7 @@ export class RoflenoxNode {
   private byAdmission(rel: string, a: string[], ans: AskAnswer, undo: Map<string, Map<string, Current | null>> | null): void {
     const view = (id: string) => this.assertions.viewAt(id, undo?.get(id));
     const at = (id: string, seq: number | undefined) => (seq === undefined ? null : this.writtenAt(id, seq));
-    if (['edge', 'edge_num', 'live', 'asserted', 'conf', 'persp'].includes(rel)) {
+    if (['edge', 'edge_num', 'live', 'asserted', 'conf', 'persp', 'admitted_at'].includes(rel)) {
       const constF = /^[A-Z_]/.test(a[0] ?? '') ? null : a[0] !== undefined ? decodeCell(a[0].trim()) : null;
       for (const r of ans.rows) {
         const c = view(r.identity).get(String(constF ?? r.cells[0]));
@@ -1150,7 +1161,7 @@ export class RoflenoxNode {
     if (undo && !RoflenoxNode.AT_REVISION.has(rel)) {
       throw new Refusal(400, 'not_at_revision', `at an earlier head ask answers ${[...RoflenoxNode.AT_REVISION].join(', ')}; ${rel} is derived by the engine, which holds only the latest state`);
     }
-    if (perspective !== null || rel === 'conf' || rel === 'persp' || rel === 'asserted' || rel === 'live' || undo) {
+    if (perspective !== null || rel === 'conf' || rel === 'persp' || rel === 'asserted' || rel === 'admitted_at' || rel === 'live' || undo) {
       const a = rel === 'live' && perspective === null ? await this.askFacts('edge', book, args, scope, (id, t) => this.liveNow(id, t, undo?.get(id)))
         : undo && perspective === null && (rel === 'edge' || rel === 'edge_num')
           ? await this.askFacts(rel, book, args, scope, (id, t) => this.assertions.viewAt(id, undo.get(id)).get(t[0]) !== undefined)
@@ -1218,7 +1229,7 @@ export class RoflenoxNode {
       for (const [, sc] of books) {
         for (const [F, c] of this.assertions.viewAt(sc.identity, undo?.get(sc.identity))) {
           if (sc.only !== null && !sc.only.has(F)) continue;
-          const m = match(a, assertionCells(rel, F, c));
+          const m = match(a, rel === 'admitted_at' ? [F, this.admittedAt(sc.identity, c.S)] : assertionCells(rel, F, c));
           if (m) rows.push({ identity: sc.identity, cells: m.cells });
         }
       }

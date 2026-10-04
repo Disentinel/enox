@@ -134,7 +134,7 @@ test('a grant replaced by a newer grant to the same grantee leaves exactly one g
     const live = await ask(a, 'live(F, "reader", "roflenox:grant", U)');
     assert.deepEqual(live.rows.map((r) => r.cells[1]), [iso(T0 + DAY)]);
     assert.equal((await ask(a, 'edge(F, "reader", "roflenox:grant", U)')).rows.length, 2, 'both stay in edge');
-    assert.deepEqual((await ask(a, 'grant(R, U)')).rows.map((r) => r.cells), [['reader', (T0 + DAY) / 1000]], 'the engine holds the one in force');
+    assert.deepEqual((await ask(a, 'grant(R, U)')).rows.map((r) => r.cells), [['reader', iso(T0 + DAY)]], 'the engine holds the one in force');
     // In force means what access does: the reader reads until the newer grant ends, not the older.
     assert.equal(await reads(), 200);
     a.clock.t = T0 + 2 * DAY;
@@ -684,4 +684,65 @@ test('a batch that names the head its author knew keeps it through admission, mi
     // A knew that is not a head is refused before signing.
     assert.equal((await call('assert', { facts: [note('x')], knew: 'not a head' })).isError, true);
   } finally { await a.stop().catch(() => {}); await b.stop(); }
+});
+
+test('every tool shows times in one form, and a lease that expires by the node\'s admission times expires whatever time its writer claimed', async () => {
+  const a = await start(tmpDir('one-time'), 'node-a');
+  try {
+    const call = tools(a);
+    const ONE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+    const DATEISH = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/;
+    const times = (v: unknown, out: string[] = []): string[] => {
+      if (typeof v === 'string' && DATEISH.test(v)) out.push(v);
+      else if (Array.isArray(v)) v.forEach((x) => times(x, out));
+      else if (v && typeof v === 'object') Object.values(v).forEach((x) => times(x, out));
+      return out;
+    };
+    // Writers' times in other forms: no milliseconds, an offset, a space.
+    const E = 'enox://example.org/graph/main/cs/old';
+    json(await call('assert', { facts: [
+      { source: E, relation: 'enox:label', target: 'Old', perspective: 'enox', confidence: 1 },
+      { source: E, relation: 'enox:type', target: 'concept', perspective: 'enox', confidence: 1 },
+      { source: E, relation: 'enox:created_at', target: '2026-03-01T13:00:00+03:00', perspective: 'enox', confidence: 1 },
+      { source: E, relation: 'enox:updated_at', target: '2026-03-02 10:00:00Z', perspective: 'enox', confidence: 1 }] }));
+    const ab = json<{ source: string }>(await call('add_assertion', { source: 'Old', target: 'New', relation: 'uses' }));
+    const reader = identityAt(tmpDir('one-time-r'), 'reader');
+    await vouch(a, reader);
+    await publish(a.url, a.me, [grant('reader', iso(T0 + DAY))], () => a.clock.t);
+    assert.equal((await call('create_artifact', { title: 'Doc', domain: 'cs', content_type: 'text/plain', body: 'hello' })).isError, false);
+    const shown: string[] = [];
+    for (const [tool, args] of [['query_graph', { node_id: ab.source }], ['query_graph', { query: 'Old' }], ['recent_activity', {}], ['list_artifacts', {}],
+      ['chain', { identity: 'node-a' }], ['ask', { query: 'grant(R, U)' }], ['ask', { query: 'admitted_at(F, T)' }], ['oauth_grants', {}]] as const) {
+      const r = await call(tool, args as Record<string, unknown>);
+      assert.equal(r.isError, false, `${tool}: ${r.text}`);
+      shown.push(...times(JSON.parse(r.text)));
+    }
+    const explore = (await call('explore', { entity: 'Old' })).text;
+    shown.push(...[...explore.matchAll(/(?:Created|Updated): (\S+)/g)].map((m) => m[1]!));
+    assert.ok(shown.length > 10, `times shown: ${shown.length}`);
+    assert.deepEqual(shown.filter((x) => !ONE.test(x)), [], 'every time in one form');
+    assert.ok(shown.includes('2026-03-01T10:00:00.000Z') && shown.includes('2026-03-02T10:00:00.000Z'), 'a writer\'s other forms, shown in it');
+    assert.ok(shown.includes(iso(T0 + DAY)), 'a grant\'s expiry, in it');
+
+    // A lease: a worker claims a task for 60 s, its clock 250 s behind the node's.
+    const worker = identityAt(tmpDir('one-time-w'), 'worker');
+    await vouch(a, worker);
+    const claimed = iso(a.clock.t - 250_000);
+    const b = batch(worker, [{ source: 'worker', relation: 'zz_lease', target: 'task-42', perspective: 'zz_coord', confidence: 1 }], null, claimed);
+    assert.equal((await post(a.url, '/batches', b)).status, 201);
+    const F = factIdOf('worker', 'zz_lease', 'task-42');
+    const admitted = ((await ask(a, `admitted_at(${JSON.stringify(F)}, T)`)).rows[0]!.cells[0]) as string;
+    assert.equal(admitted, iso(a.clock.t), 'the node\'s own clock at admission');
+    assert.notEqual(admitted, claimed);
+    const LEASE = 60_000;
+    const expired = async () => {
+      const t = Date.parse(((await ask(a, `admitted_at(${JSON.stringify(F)}, T)`)).rows[0]!.cells[0]) as string);
+      return a.clock.t > t + LEASE;
+    };
+    a.clock.t += 30_000;
+    assert.equal(await expired(), false, 'held 30 s after admission, though the writer\'s claimed time is 280 s back');
+    assert.ok(a.clock.t > Date.parse(claimed) + LEASE, 'by the writer\'s clock it would have expired');
+    a.clock.t += 31_000;
+    assert.equal(await expired(), true, 'expired 61 s after admission');
+  } finally { await a.stop(); }
 });

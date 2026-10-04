@@ -4750,6 +4750,48 @@
    "red": [
     "a batch that names the head its author knew keeps it through admission, mirroring and a restart, and a forged head breaks the signature"
    ]
+  },
+  {
+   "id": "M347",
+   "title": "r_one_time: a writer's created_at is shown as written",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "  return Number.isNaN(t) ? x : new Date(t).toISOString();",
+     "  return x;"
+    ]
+   ],
+   "red": [
+    "every tool shows times in one form, and a lease that expires by the node's admission times expires whatever time its writer claimed"
+   ]
+  },
+  {
+   "id": "M348",
+   "title": "r_one_time: a grant's expiry is shown in Unix seconds",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      for (const r of ans.rows) if (u >= 0 && typeof r.cells[u] === 'number') r.cells[u] = new Date((r.cells[u] as number) * 1000).toISOString();",
+     ""
+    ]
+   ],
+   "red": [
+    "every tool shows times in one form, and a lease that expires by the node's admission times expires whatever time its writer claimed"
+   ]
+  },
+  {
+   "id": "M349",
+   "title": "r_one_time: admitted_at is the writer's claimed time",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    return this.log.receipts[this.writtenAt(identity, seq)]?.received_at ?? '';",
+     "    return new Date(this.lastClaimed.get(identity) ?? 0).toISOString();"
+    ]
+   ],
+   "red": [
+    "every tool shows times in one form, and a lease that expires by the node's admission times expires whatever time its writer claimed"
+   ]
   }
  ]
 }

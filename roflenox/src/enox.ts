@@ -33,6 +33,15 @@ const STALE_TTL: Record<string, number> = { ml: 90, ai: 90, cs: 180, opinion: 36
 export const DEFAULT_URI_PREFIX = 'enox://example.org/graph/main';
 export const uriPrefix = () => process.env.NODE_URI_PREFIX ?? DEFAULT_URI_PREFIX;
 
+/** Every time a tool shows is one form (r_one_time): ISO 8601 in UTC with
+ *  milliseconds. A writer's created_at or updated_at in any other form a
+ *  date parses from is shown in it; one that is no date is shown as written. */
+export function oneTime(x: string | null | undefined): string | null {
+  if (x == null) return null;
+  const t = Date.parse(x);
+  return Number.isNaN(t) ? x : new Date(t).toISOString();
+}
+
 export function slugify(name: string): string {
   const s = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
   return s || createHash('sha256').update(name).digest('hex').slice(0, 20);
@@ -237,7 +246,7 @@ export class Graph {
     return {
       id, type: attr('type') ?? 'concept', domain: attr('domain') ?? '', name: attr('label') ?? '',
       description: attr('description') ?? '', aliases: listed !== undefined ? JSON.parse(listed) as string[] : [...new Set(aliases)].sort(),
-      source_ref: attr('source_ref') ?? '', created_at: attr('created_at') ?? null, updated_at: attr('updated_at') ?? null,
+      source_ref: attr('source_ref') ?? '', created_at: oneTime(attr('created_at')), updated_at: oneTime(attr('updated_at')),
       attrs: new Map(SINGLE.map((a) => [a, attr(a)]).filter(([, v]) => v !== undefined) as [string, string][]),
     };
   }
@@ -262,7 +271,7 @@ export class Graph {
     const e: Edge = {
       F, fact_id: attr('fact_id') ?? enoxFactId(a.S, a.R, a.T), source: a.S, target: a.T, relation: a.R,
       confidence: c / 1000, asserted_by: [...(this.by.get(F) ?? [])].sort().join(', ') || null, claimed_by: attr('asserted_by') ?? null, context: attr('context') ?? '',
-      proof_depth: Number(attr('proof_depth') ?? 0), created_at: attr('created_at') ?? null, updated_at: attr('updated_at') ?? null, written,
+      proof_depth: Number(attr('proof_depth') ?? 0), created_at: oneTime(attr('created_at')), updated_at: oneTime(attr('updated_at')), written,
     };
     this.edgeOf.set(F, e);
     for (const [m, k] of [[this.outOf, e.source], [this.inOf, e.target], [this.byFactId, e.fact_id]] as const) {
