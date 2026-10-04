@@ -84,7 +84,9 @@ type Held = { S: string; R: string; T: string };
  *  what a text is made of is kept — labels, descriptions, contexts and the
  *  assertions themselves — not bodies or anything else. */
 class Book {
-  head: string | null = null;
+  /** How far each identity's feed has been read into this book: an author's
+   *  own, and its sessions' (r_session_identity). */
+  readonly heads = new Map<string, string>();
   readonly cur = new Map<string, Held>();
   /** The texts, with their keys; derived again only when the book moved. */
   docs: (Doc & { key: string })[] | null = null;
@@ -143,7 +145,7 @@ const lines = (jsonl: string) => jsonl.split('\n').filter(Boolean).map((l) => JS
 export class Embedder {
   private readonly node: OpCaller;
   private readonly now: () => number;
-  /** Embedding key → vector: the embedder's own book, as of `own.head`. */
+  /** Embedding key → vector: the embedder's own book, as of its own head. */
   private readonly index = new Map<string, Float32Array>();
   private readonly answered = new Set<string>();
   private readonly own = new Book();
@@ -172,20 +174,30 @@ export class Embedder {
     let pages = 0;
     for (;;) {
       let r: { batches: { manifest: { digest: string }; jsonl?: string }[] };
+      const head = book.heads.get(identity);
       try {
-        r = await this.node('feed', { identity, ...(book.head ? { after: book.head } : {}), limit });
+        r = await this.node('feed', { identity, ...(head ? { after: head } : {}), limit });
       } catch (e) {
         if (e instanceof RemoteRefusal && e.reason === 'unknown_identity') return;      // nothing published yet
         throw e;
       }
       for (const b of r.batches) {
         if (b.jsonl !== undefined) take(lines(b.jsonl));
-        book.head = b.manifest.digest;
+        book.heads.set(identity, b.manifest.digest);
       }
       this.read += r.batches.length;
       if (r.batches.length < limit) return;
       await this.o.onPage?.(++pages);
     }
+  }
+
+  /** The sessions an author delegated (s<10 hex>.<author>): ever, so what a
+   *  session wrote stays searchable after it ends. A feed this reader may not
+   *  have is simply refused by the node. */
+  private async sessionsOf(author: string): Promise<string[]> {
+    const q = await this.node('ask', { query: 'edge(F, A, "roflenox:delegate", U)', limit: 10_000 }) as { rows: { identity: string; cells: (string | number)[] }[] };
+    const mine = new RegExp(`^s[0-9a-f]{10}\\.${author.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+    return [...new Set(q.rows.filter((r) => r.identity === author && mine.test(String(r.cells[1]))).map((r) => String(r.cells[1])))].sort();
   }
 
   /** The search intents addressed to this embedder that it has not answered. */
@@ -219,7 +231,10 @@ export class Embedder {
     for (const [author, asked] of byAuthor) {
       const book = this.books.get(author) ?? new Book();
       this.books.set(author, book);
-      await this.follow(author, book, (facts) => book.apply(facts));
+      // The author's book, and those of its sessions — the identities its node
+      // derived for the hosted clients it approved, which write as their own
+      // and are read as the author's (r_session_identity).
+      for (const id of [author, ...await this.sessionsOf(author)]) await this.follow(id, book, (facts) => book.apply(facts));
       book.docs ??= docsOf(book.cur).map((d) => ({ ...d, key: embeddingKey(this.model.id, d.text) }));
       const docs = book.docs;
       const missing = [...new Map(docs.map((d) => [d.key, d.text.slice(0, MAX_CHARS)])).entries()]

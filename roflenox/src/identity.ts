@@ -295,6 +295,30 @@ export class LocalIdentity {
     return new LocalIdentity(checkCanonical(j.identity, 'the key file\'s identity'), der(j.private_key), der(j.enc_private_key), j.docs);
   }
 
+  /** A SESSION identity (r_session_identity): `name`, delegated by `parent`,
+   *  its keys derived from the parent's private key and `label` — so nothing
+   *  is stored, the same keys come back after a restart, and a new parent key
+   *  (a rotation, a recovery) gives different ones. Held in memory only. */
+  static derive(parent: LocalIdentity, name: string, label: string, issuedAt: Date): LocalIdentity {
+    const seed = Buffer.from(parent.key.export({ format: 'jwk' }).d!, 'base64url');
+    const sub = (what: string) => crypto.createHmac('sha256', seed).update(`roflenox session ${what} ${label}`).digest();
+    const pkcs8 = (prefix: string, s: Buffer) => crypto.createPrivateKey({ key: Buffer.concat([Buffer.from(prefix, 'hex'), s]), format: 'der', type: 'pkcs8' });
+    const key = pkcs8('302e020100300506032b657004220420', sub('key'));
+    const encKey = pkcs8('302e020100300506032b656e04220420', sub('enc'));
+    const rec = pkcs8('302e020100300506032b657004220420', sub('recovery'));
+    const t = issuedAt.toISOString();
+    const x = xOf(key);
+    const doc: IdentityDocBody = {
+      identity: checkName(name), seq: 0, prev: null,
+      keys: [{ key_id: keyIdOf(x), alg: 'Ed25519', public_key: x, valid_from: t }],
+      recovery: { key_id: keyIdOf(xOf(rec)), public_key: xOf(rec) },
+      enc: { public_key: xOf(encKey) },
+      issued_at: t,
+      delegated_by: parent.name,
+    };
+    return new LocalIdentity(checkName(name), key, encKey, [signDoc(doc, key)]);
+  }
+
   /** The current signed identity document. */
   identityDoc(): IdentityDoc {
     return this.docs[this.docs.length - 1]!;

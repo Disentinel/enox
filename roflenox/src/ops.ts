@@ -43,6 +43,9 @@ export interface Ctx {
    *  OAuth client the owner approved. An Enox write that names no author
    *  claims it (r_claimed_author). */
   agent?: string | null;
+  /** The OAuth grant the call came with: its session's identity signs every
+   *  write it makes (r_session_identity). Null for the owner's own credential. */
+  session?: string | null;
 }
 
 export interface Op {
@@ -57,6 +60,8 @@ export interface Op {
    *  change, a checkpoint): while another process holds the directory, it
    *  refuses instead of signing beside it (r_single_writer). */
   alone?: true;
+  /** Answers only the owner's own credential — never a session (r_session_identity). */
+  ownerOnly?: true;
   /** Callable, but not offered in tools/list, because it does not work on
    *  a node (r_tool_list_clean): why. */
   unlisted?: string;
@@ -272,8 +277,10 @@ export const OPS: Op[] = [
       const ask = q ? { query: await byEdgeId(ctx, q.query), asker: ctx.caller, perspective: (q.perspective as string | undefined) ?? null,
         options: q.order === 'admission' ? { order: 'admission' as const } : {} } : undefined;
       if (a.knew !== undefined && !/^[0-9a-f]{64}$/.test(a.knew as string)) throw new Refusal(400, 'bad_args', 'knew is a log head: 64 hex');
-      const r = await n.signAsSelf(facts, { ...(a.import === true ? { salt: (jsonl: string) => importSalt(n.identity!, jsonl) } : {}), ...(ask ? { ask } : {}),
-        ...(a.knew !== undefined ? { knew: a.knew as string } : {}) });
+      const so = { ...(a.import === true ? { salt: (jsonl: string) => importSalt(n.identity!, jsonl) } : {}), ...(ask ? { ask } : {}),
+        ...(a.knew !== undefined ? { knew: a.knew as string } : {}) };
+      // A session's write is signed as the session (r_session_identity).
+      const r = ctx.session ? await n.signAsSession(ctx.session, facts, so) : await n.signAsSelf(facts, so);
       // What it wrote (r_assert_receipt): the batch's digest, its position in
       // the identity's chain (chain[seq] = digest; asserted's S column), and
       // each fact's id (ask's F).
@@ -428,14 +435,16 @@ export const OPS: Op[] = [
     say: (r) => r.dump, text: (r) => r.dump,
     run: async (ctx, a) => needNode(ctx).exportPerspective(a.perspective as string, a.at as string | undefined) },
   { name: 'oauth_grants', description: 'The OAuth grants hosted MCP clients hold on this node: client, redirect host, when, live tokens, revoked.',
-    input: obj({}), access: 'operator',
+    input: obj({}), access: 'operator', ownerOnly: true,
     say: (r) => r.grants.length ? r.grants.map((g: Record<string, unknown>) => `${g.grant}\t${g.client}\t${g.redirect_host}\t${g.created_at}\t${g.revoked_at ? `revoked ${g.revoked_at}` : `${g.live_access_tokens} live`}`).join('\n') : 'no OAuth grants',
     run: async (ctx) => ({ grants: needNode(ctx).oauth.grants() }) },
   { name: 'oauth_revoke', description: 'Revoke an OAuth grant: every token it issued stops at once.', input: obj({ grant: str() }, ['grant']),
-    access: 'operator', positional: ['grant'], say: (r) => `revoked ${r.grant}`,
+    access: 'operator', ownerOnly: true, positional: ['grant'], say: (r) => `revoked ${r.grant}`,
     run: async (ctx, a) => {
       if (!needNode(ctx).oauth.revoke(a.grant as string)) throw new Refusal(404, 'no_grant', `no OAuth grant ${a.grant}`);
-      return { grant: a.grant, revoked: true };
+      // Its session's identity can sign no more (r_session_identity).
+      const retired = await needNode(ctx).retireSession(a.grant as string);
+      return { grant: a.grant, revoked: true, session_retired: retired };
     } },
   { name: 'operator_token', description: 'The bearer token that stands for this node\'s own identity over MCP.', input: obj({}),
     access: { local: 'it is a credential; it is shown only on the machine that holds it' },
@@ -475,6 +484,9 @@ export async function callOp(name: string, args: unknown, ctx: Ctx, surface: 'ne
   const a = validate(op, args);
   if (op.access === 'operator' && (ctx.caller === null || ctx.caller !== ctx.node?.identity?.name)) {
     throw new Refusal(403, 'not_operator', `${name} is the node's own identity's to call`);
+  }
+  if ((op.ownerOnly || isLocal(op)) && ctx.session) {
+    throw new Refusal(403, 'owner_only', `${name} answers only the owner's own credential, never a session's token`);
   }
   return op.run(ctx, a);
 }

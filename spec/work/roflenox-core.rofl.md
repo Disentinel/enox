@@ -175,3 +175,4 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_owner_rules` at "aea8212bb8277f91d91ecc01fdfc8554628cf6ac".
 - `roflenox_core` takes `r_heap_headroom`.
 - `roflenox_core` finished `r_heap_headroom` at "6447fbfb7bfbf5660449586c3dc1675e3a708481".
+- `roflenox_core` takes `r_session_identity`.

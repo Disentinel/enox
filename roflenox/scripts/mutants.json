@@ -3813,8 +3813,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "    return this.serial(async () => {\n      const me = this.identity;\n      if (!me) throw new Refusal(404, 'no_identity', 'this node has no identity to assert as');\n      const jsonl = toJsonl(facts);",
-     "    return (async (f: () => Promise<any>) => f())(async () => {\n      const me = this.identity;\n      if (!me) throw new Refusal(404, 'no_identity', 'this node has no identity to assert as');\n      const jsonl = toJsonl(facts);"
+     "  signAsSelf(facts: Fact[], o: SignOptions = {}): Promise<Signed> {\n    return this.serial(async () => {",
+     "  signAsSelf(facts: Fact[], o: SignOptions = {}): Promise<Signed> {\n    return (async (f: () => Promise<any>) => f())(async () => {"
     ]
    ],
    "red": [
@@ -3925,8 +3925,8 @@
    "file": "src/http.ts",
    "edits": [
     [
-     "handleRpc(ctx(caller, agent), m, 'network')",
-     "handleRpc(ctx(caller), m, 'network')"
+     "handleRpc(ctx(caller, agent, session), m, 'network')",
+     "handleRpc(ctx(caller, null, session), m, 'network')"
     ]
    ],
    "red": [
@@ -4711,8 +4711,8 @@
    "file": "src/ops.ts",
    "edits": [
     [
-     "...(ask ? { ask } : {}),\n        ...(a.knew !== undefined ? { knew: a.knew as string } : {}) });",
-     "...(a.knew !== undefined ? { knew: a.knew as string } : {}) });\n      if (ask) Object.assign(r, { admission: r.admission, answer: await n.ask(ask.query, ask.asker, ask.perspective, ask.options) });"
+     "      const r = ctx.session ? await n.signAsSession(ctx.session, facts, so) : await n.signAsSelf(facts, so);",
+     "      const { ask: _q, ...so2 } = so;\n      const r = ctx.session ? await n.signAsSession(ctx.session, facts, so2) : await n.signAsSelf(facts, so2);\n      if (ask) Object.assign(r, { admission: r.admission, answer: await n.ask(ask.query, ask.asker, ask.perspective, ask.options) });"
     ]
    ],
    "red": [
@@ -5040,6 +5040,126 @@
    ],
    "red": [
     "an answer longer than the limit is marked cut and the rest is fetched page by page to the same total"
+   ]
+  },
+  {
+   "id": "M364",
+   "title": "r_session_identity: a session's writes are signed as the owner",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "  const r = ctx.session ? await node(ctx).signAsSession(ctx.session, all) : await node(ctx).signAsSelf(all);",
+     "  const r = await node(ctx).signAsSelf(all);"
+    ]
+   ],
+   "red": [
+    "two OAuth sessions write as two distinct identities delegated by the owner, neither can sign as the other or as the owner, and a revoked session can no longer write"
+   ]
+  },
+  {
+   "id": "M365",
+   "title": "r_session_identity: revoking a grant leaves its session delegated",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "      const retired = await needNode(ctx).retireSession(a.grant as string);",
+     "      const retired = true;"
+    ]
+   ],
+   "red": [
+    "two OAuth sessions write as two distinct identities delegated by the owner, neither can sign as the other or as the owner, and a revoked session can no longer write"
+   ]
+  },
+  {
+   "id": "M366",
+   "title": "r_session_identity: a session's token may call the owner-only operations",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "  if ((op.ownerOnly || isLocal(op)) && ctx.session) {",
+     "  if (false) {"
+    ]
+   ],
+   "red": [
+    "a session token is refused for operator_token, the OAuth grant list and revocation, and after the owner's key rotates no session identity can write until approved again"
+   ]
+  },
+  {
+   "id": "M367",
+   "title": "r_session_identity: a new owner key leaves the sessions running",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (pinned && before > 0 && first.doc.identity === this.identity?.name) await this.ownerKeyChanged();",
+     ""
+    ],
+    [
+     "      if (bound !== undefined && bound !== owner.keyId) {",
+     "      if (false) {"
+    ]
+   ],
+   "red": [
+    "a session token is refused for operator_token, the OAuth grant list and revocation, and after the owner's key rotates no session identity can write until approved again"
+   ]
+  },
+  {
+   "id": "M368",
+   "title": "r_session_identity: every session writes as one shared identity",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    return `s${sha256hex(`roflenox session ${grant}`).slice(0, 10)}.${this.identity!.name}`;",
+     "    return `s${sha256hex('roflenox session').slice(0, 10)}.${this.identity!.name}`;"
+    ]
+   ],
+   "red": [
+    "two OAuth sessions write as two distinct identities delegated by the owner, neither can sign as the other or as the owner, and a revoked session can no longer write"
+   ]
+  },
+  {
+   "id": "M371",
+   "title": "r_session_identity: a session's book is read only by its own grants",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (!owner || !this.isSession(id)) return base;",
+     "    if (true) return base;"
+    ]
+   ],
+   "red": [
+    "a reader granted the owner's book reads what a session wrote while delegated, still reads it after the session is revoked, and a stranger reads none of it"
+   ]
+  },
+  {
+   "id": "M372",
+   "title": "r_session_identity: any delegate of the owner is read as the owner's book",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    return this.oauth.grants().some((g) => this.sessionName(g.grant) === id);",
+     "    return true;"
+    ],
+    [
+     "    if (!owner || !id.endsWith(`.${owner}`) || !/^s[0-9a-f]{10}\\./.test(id)) return false;",
+     "    if (!owner || !id.endsWith(`.${owner}`)) return false;"
+    ]
+   ],
+   "red": [
+    "a reader granted the owner's book reads what a session wrote while delegated, still reads it after the session is revoked, and a stranger reads none of it"
+   ]
+  },
+  {
+   "id": "M373",
+   "title": "r_session_identity: the embedder reads the author's own book only",
+   "file": "executors/embedder/embedder.ts",
+   "edits": [
+    [
+     "      for (const id of [author, ...await this.sessionsOf(author)]) await this.follow(id, book, (facts) => book.apply(facts));",
+     "      for (const id of [author]) await this.follow(id, book, (facts) => book.apply(facts));"
+    ]
+   ],
+   "red": [
+    "a write over OAuth without asserted_by is claimed by the approved client's name, and every read tool shows asserted_by and claimed_by on that edge"
    ]
   }
  ]

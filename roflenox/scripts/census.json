@@ -216,6 +216,12 @@
    "kind": "who",
    "match": "headers['x-forwarded-for']",
    "why": "r_oauth_lockout: the source address wrong secrets are counted against, as reported by a proxy on this machine; trusted only when the TCP peer is loopback, and never proof of who"
+  },
+  {
+   "file": "src/identity.ts",
+   "kind": "who",
+   "match": "createHmac",
+   "why": "session keys (r_session_identity) are DERIVED from the owner's key and a grant by HMAC — key derivation, not a check of who someone is; nothing is stored"
   }
  ]
 }

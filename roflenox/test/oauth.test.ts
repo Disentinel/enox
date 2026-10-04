@@ -129,10 +129,16 @@ test('a client registered dynamically completes authorize with the owner\'s secr
     assert.equal(listed.status, 200);
     const names = (listed.body.result.tools as { name: string }[]).map((x) => x.name);
     assert.ok(names.includes('ask') && names.includes('oauth_grants'), names.join(','));
-    // As the owner: an operator-only tool answers.
-    const r = await fetch(`${a.url}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${t.body.access_token}` },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'oauth_grants', arguments: {} } }) });
-    const grants = JSON.parse(((await r.json()) as any).result.content[0].text).grants;
+    // Through the owner's grant: an operator tool answers (a write, signed as
+    // its session, r_session_identity) — but the grant list is the owner's own
+    // credential's alone.
+    const call = async (name: string, args: Record<string, unknown>) => (await (await fetch(`${a.url}/mcp`, { method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${t.body.access_token}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name, arguments: args } }) })).json()) as any;
+    const wrote = JSON.parse((await call('assert', { facts: [{ source: 'a', relation: 'zz_note', target: 'b', perspective: 'zz', confidence: 1 }] })).result.content[0].text);
+    assert.equal(wrote.admitted, true);
+    assert.equal((await call('oauth_grants', {})).result.isError, true);
+    const grants = a.node.oauth.grants();
     assert.deepEqual(grants.map((g: any) => [g.client, g.redirect_host, g.revoked_at]), [['Connector', 'connector.example.org', null]]);
 
     // The existing credentials keep working at /mcp: the operator's bearer, and a signed request.
@@ -378,7 +384,9 @@ test('a write over OAuth without asserted_by is claimed by the approved client\'
       try { return JSON.parse(text); } catch { return text; }
     };
     const w = await call(access, 'add_assertion', { source: 'Roflenox', target: 'Enox', relation: 'supersedes', context: 'a signed log replaces the database' });
-    assert.deepEqual([w.asserted_by, w.claimed_by], ['node-a', 'Claude'], 'the write claims the approved client');
+    // Signed by the client's session identity (r_session_identity), claimed by the client.
+    const session = a.node.sessionName(a.node.oauth.grantOf(access)!);
+    assert.deepEqual([w.asserted_by, w.claimed_by], [session, 'Claude'], 'the write claims the approved client');
     // An author the caller names is its claim; the operator's own token claims "operator".
     const named = await call(access, 'add_assertion', { source: 'Roflenox', target: 'ROFL', relation: 'depends_on', asserted_by: 'agent:planner' });
     assert.equal(named.claimed_by, 'agent:planner');
@@ -387,7 +395,7 @@ test('a write over OAuth without asserted_by is claimed by the approved client\'
     const blank = await call(access, 'add_assertion', { source: 'Enox', target: 'ROFL', relation: 'about', asserted_by: '  ' });
     assert.equal(blank.claimed_by, 'Claude', 'a blank author is no author');
     const both = (e: { asserted_by?: unknown; claimed_by?: unknown } | undefined, tool: string) =>
-      assert.deepEqual([e?.asserted_by, e?.claimed_by], ['node-a', 'Claude'], `${tool}: ${JSON.stringify(e)}`);
+      assert.deepEqual([e?.asserted_by, e?.claimed_by], [session, 'Claude'], `${tool}: ${JSON.stringify(e)}`);
     const isIt = (e: { relation: string; target_name?: string; target?: string }) => e.relation === 'supersedes';
 
     const q = await call(access, 'query_graph', { node_id: w.source });
@@ -399,7 +407,7 @@ test('a write over OAuth without asserted_by is claimed by the approved client\'
     for (const [tool, args] of [['explore', { entity: 'Roflenox' }], ['traverse', { entity: 'Roflenox', max_depth: 1 }]] as const) {
       const text = await call(access, tool, args) as string;
       const line = text.split('\n').find((l) => l.includes('--[supersedes]--> Enox'));
-      assert.ok(line?.includes('[by node-a, claims "Claude"]'), `${tool}: ${line}`);
+      assert.ok(line?.includes(`[by ${session}, claims "Claude"]`), `${tool}: ${line}`);
     }
     // semantic_search, once an embedder has answered.
     const exDir = tmpDir('oauth-claims-e');

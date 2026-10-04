@@ -87,7 +87,7 @@ export async function edgeIdOf(ctx: Ctx, id: string): Promise<string | null> {
  *  the owner approved, else the operator — never empty (r_claimed_author). */
 const agent = (ctx: Ctx) => ctx.agent?.trim() || 'operator';
 /** The identity every Enox write is signed as: the node's own. */
-const self = (ctx: Ctx) => node(ctx).identity!.name;
+const self = (ctx: Ctx) => (ctx.session ? node(ctx).sessionName(ctx.session) : node(ctx).identity!.name);
 
 /** What a write wrote (r_assert_receipt): its batch's digest, the batch's
  *  position in the node's chain, and the id of every fact in it. */
@@ -96,7 +96,8 @@ export interface Written { digest: string; seq: number; fact_ids: string[] }
 async function write(ctx: Ctx, facts: Fact[]): Promise<Written | null> {
   if (!facts.length) return null;
   const all = uniq(facts);
-  const r = await node(ctx).signAsSelf(all);
+  // A session's write is signed as the session (r_session_identity).
+  const r = ctx.session ? await node(ctx).signAsSession(ctx.session, all) : await node(ctx).signAsSelf(all);
   return { digest: r.receipt.digest, seq: r.seq, fact_ids: all.map((f) => factId(f)) };
 }
 const said = (b: Written | null) => (b ? `\nbatch ${b.digest} (seq ${b.seq}, ${b.fact_ids.length} facts)` : '');

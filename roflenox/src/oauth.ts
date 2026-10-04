@@ -41,7 +41,8 @@ export interface OAuthOptions {
 }
 
 interface Client { name: string; redirect_uris: string[]; created_at: string }
-interface Grant { client_id: string; redirect_uri: string; resource: string; created_at: string; revoked_at: string | null; revoked_why?: string }
+interface Grant { client_id: string; redirect_uri: string; resource: string; created_at: string; revoked_at: string | null; revoked_why?: string;
+  /** The owner's key the grant's session identity was derived from (r_session_identity). */ owner_key?: string }
 interface State {
   clients: Record<string, Client>;
   grants: Record<string, Grant>;
@@ -344,6 +345,28 @@ ${keep}
     if (!a || a.exp <= this.now() || a.aud !== this.resource || this.resource === null) return false;
     const g = this.state.grants[a.grant];
     return !!g && !g.revoked_at;
+  }
+
+  /** The grant an admitted access token belongs to: its session (r_session_identity). */
+  grantOf(presented: string): string | null {
+    return this.admits(presented) ? this.state.access[sha(presented)]!.grant : null;
+  }
+
+  /** The owner's key a grant's session was first derived from, if any. */
+  ownerKeyOf(grant: string): string | undefined {
+    return this.state.grants[grant]?.owner_key;
+  }
+
+  bindOwnerKey(grant: string, keyId: string): void {
+    const g = this.state.grants[grant];
+    if (g && g.owner_key === undefined) { g.owner_key = keyId; this.save(); }
+  }
+
+  /** End every live grant (the owner's key changed: every session approves again). */
+  revokeAll(why: string): string[] {
+    const live = Object.entries(this.state.grants).filter(([, g]) => !g.revoked_at).map(([id]) => id);
+    for (const id of live) this.revoke(id, why);
+    return live;
   }
 
   /** The name of the client an admitted access token was issued to — the

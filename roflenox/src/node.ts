@@ -22,7 +22,7 @@ import * as v8 from 'node:v8';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import * as zlib from 'node:zlib';
 import { canonicalize } from './jcs.ts';
-import { batchDigest, decodeCell, EMBEDDER, factId, GRANT, isSalt, newSalt, parseJsonl, Refusal, roflString, SEARCH, sha256hex, toJsonl, toRofl, type Fact } from './facts.ts';
+import { batchDigest, decodeCell, DELEGATE, EMBEDDER, factId, GRANT, isSalt, newSalt, parseJsonl, Refusal, roflString, SEARCH, sha256hex, toJsonl, toRofl, type Fact } from './facts.ts';
 import {
   bookOf, canonicalOrNull, CHECKPOINT_CONTEXT, checkIdentityDoc, checkManifest, docHash, docSignedBy, FEED_CONTEXT, isTime, keyValidAt, LocalIdentity,
   REATTEST_CONTEXT, verifyIdentityDoc, verifyManifestSig, verifySigned,
@@ -30,7 +30,7 @@ import {
 } from './identity.ts';
 import { Log, writeFileAtomic, type Fault, type Receipt } from './log.ts';
 import {
-  answeredRule, bookRules, Collect, DEFAULT_ROFL_BIN, Engine, mayReadRules, parseLiteral, parseQuery, resultRule, sortRows, splitArgs, SYSTEM_BOOK,
+  answeredRule, bookRules, Collect, DEFAULT_ROFL_BIN, Engine, FOREVER, mayReadRules, parseLiteral, parseQuery, resultRule, sortRows, splitArgs, SYSTEM_BOOK,
   type AskAnswer, type AskOptions, type BookScope, type Explanation, type QueryLiteral, type Unknown, type World,
 } from './engine.ts';
 import { DomainVouch, type DomainTransport } from './domain.ts';
@@ -164,6 +164,18 @@ const loopDelay = monitorEventLoopDelay({ resolution: 10 });
 loopDelay.enable();
 const breathe = () => new Promise<void>((r) => setImmediate(r));
 
+export interface SignOptions { salt?: (jsonl: string) => string; /** The head its author had read (r_knew_head). */ knew?: string;
+  /** A question answered right after this batch, before any other batch
+   *  is admitted, as `asker` (r_assert_then_ask). */
+  ask?: { query: string; asker: string | null; perspective: string | null; options: AskOptions } }
+export interface Signed { receipt: Receipt; body: BatchBody & { manifest: Manifest; jsonl: string; salt: string }; held: boolean;
+  /** The batch's position in this identity's chain (r_assert_receipt). */ seq: number;
+  /** Its admission number, and the answer to `ask`. */ admission: number; answer?: AskAnswer }
+
+/** The owner's delegation of a session: until 2100, retired at revocation. */
+const sessionDelegation = (name: string, confidence: number): Fact =>
+  ({ source: name, relation: DELEGATE, target: new Date(FOREVER * 1000).toISOString(), perspective: 'policy', confidence });
+
 export const DEFAULT_CHECKPOINT_WINDOW_SEC = 24 * 3600;
 
 
@@ -294,6 +306,7 @@ export class RoflenoxNode {
   private recentFacts = 0;
   private recentBytes = 0;
   private readonly recentBytesLimit: number;
+  private keyChangedOffline = false;
   private readonly recentLimit: number;
   /** RFC 9421 nonces seen on signed requests: nonce → expiry (ms). */
   private readonly requestNonces = new Map<string, number>();
@@ -329,6 +342,8 @@ export class RoflenoxNode {
     n.engine = await Engine.fresh(bin);
     try {
       await n.load();
+      // A key rotated or recovered while the node was down ends every session.
+      if (n.keyChangedOffline) await n.ownerKeyChanged();
     } catch (e) {
       // A node that refuses to start leaves no engine process behind.
       await n.engine.stop().catch(() => {});
@@ -368,7 +383,9 @@ export class RoflenoxNode {
       // The key file's chain may be ahead of the log (a rotation or recovery
       // made offline): admit the newer versions, through the same rule.
       try {
+        const had = n.idDocs.get(n.identity.name)!.length;
         await n.applyChain(n.identity.name, n.identity.identityChain(), new Date(n.now()).toISOString(), false, n.identity.name);
+        n.keyChangedOffline = n.idDocs.get(n.identity.name)!.length > had;
       } catch (e) {
         throw new Error(`the key file for ${n.identity.name} does not follow the identity the log knows (${(e as Error).message}); refusing to start`);
       }
@@ -576,7 +593,11 @@ export class RoflenoxNode {
       const first = checkIdentityDoc(Array.isArray(raw) ? raw[0] : raw);
       const before = this.idDocs.get(first.doc.identity)?.length ?? 0;
       await this.applyChain(first.doc.identity, raw, new Date(this.now()).toISOString(), false, by);
-      return { identity: first.doc.identity, pinned: (this.idDocs.get(first.doc.identity)?.length ?? 0) > before };
+      const pinned = (this.idDocs.get(first.doc.identity)?.length ?? 0) > before;
+      // A new version of the node's own identity (a rotation, a recovery): the
+      // session keys derived from the old key are gone; so are their sessions.
+      if (pinned && before > 0 && first.doc.identity === this.identity?.name) await this.ownerKeyChanged();
+      return { identity: first.doc.identity, pinned };
     }));
   }
 
@@ -941,7 +962,7 @@ export class RoflenoxNode {
     await this.checkDelegation(v.manifest, receivedAt, mode, pending);
     await this.trialRules(v, this.chains.get(v.manifest.identity)?.length ?? 0);
     const id = v.manifest.identity;
-    const rules = this.chains.has(id) ? null : bookRules(bookOf(id), id);
+    const rules = this.chains.has(id) ? null : this.rulesFor(id);
     const seq = this.chains.get(id)?.length ?? 0;
     const plan = this.assertions.plan(id, bookOf(id), v.facts, seq);
     const staged = await this.engine.stage(programOf(v, seq) + plan.load, id, rules, () => this.fault('engine:staged'));
@@ -977,7 +998,7 @@ export class RoflenoxNode {
    *  time as the engine takes it, then each identity's current assertions. */
   private *held(): Generator<{ rofl: string; who: string; rules: string | null }> {
     for (const [id, packed] of this.programs) {
-      for (const [i, b] of packed.entries()) yield { rofl: zlib.inflateRawSync(b).toString('utf8'), who: id, rules: i === 0 ? bookRules(bookOf(id), id) : null };
+      for (const [i, b] of packed.entries()) yield { rofl: zlib.inflateRawSync(b).toString('utf8'), who: id, rules: i === 0 ? this.rulesFor(id) : null };
       yield { rofl: this.assertions.lines(id, bookOf(id)), who: id, rules: null };
     }
   }
@@ -1867,34 +1888,120 @@ export class RoflenoxNode {
    *  (the `assert` op) instead of signing. `salt` derives the salt from the
    *  batch (an import's, so a re-import is recognised); a batch already in
    *  the chain is then not signed again. Returns the signed body too (seal). */
-  signAsSelf(facts: Fact[], o: { salt?: (jsonl: string) => string; /** The head its author had read (r_knew_head). */ knew?: string;
-    /** A question answered right after this batch, before any other batch
-     *  is admitted, as `asker` (r_assert_then_ask). */
-    ask?: { query: string; asker: string | null; perspective: string | null; options: AskOptions } } = {}): Promise<{ receipt: Receipt; body: BatchBody & { manifest: Manifest; jsonl: string; salt: string }; held: boolean;
-    /** The batch's position in this identity's chain (r_assert_receipt). */ seq: number;
-    /** Its admission number, and the answer to `ask`. */ admission: number; answer?: AskAnswer }> {
+  signAsSelf(facts: Fact[], o: SignOptions = {}): Promise<Signed> {
     return this.serial(async () => {
       const me = this.identity;
       if (!me) throw new Refusal(404, 'no_identity', 'this node has no identity to assert as');
-      const jsonl = toJsonl(facts);
-      const salt = o.salt ? o.salt(jsonl) : newSalt();
-      if (o.salt) {
-        const digest = batchDigest(salt, jsonl);
-        const had = this.log.receipts.find((r) => r.identity === me.name && r.kind === undefined && r.digest === digest);
-        if (had) {
-          const s = this.log.read(had);
-          return { receipt: had, body: { manifest: s.manifest, jsonl, salt, identity: me.identityChain() }, held: true, seq: this.chainOf(me.name).indexOf(digest),
-            admission: this.admissionOf(digest)!, ...(o.ask ? { answer: await this.askNow(o.ask.query, o.ask.asker, o.ask.perspective, o.ask.options) } : {}) };
-        }
-      }
-      // The later of the clock and the chain's last claim (r_rotation).
-      const manifest = me.signBatch(jsonl, this.head(me.name), new Date(Math.max(this.now(), this.lastClaimed.get(me.name) ?? -Infinity)).toISOString(), salt, o.knew);
-      const body = { manifest, jsonl, salt, identity: me.identityChain() };
-      const receipt = await this.admitNow(body, 'post', new Date(this.now()).toISOString(), [], me.name);
-      // Still inside this one serial slot: no other batch can land before the answer.
-      const answer = o.ask ? await this.askNow(o.ask.query, o.ask.asker, o.ask.perspective, o.ask.options) : undefined;
-      return { receipt, body, held: false, seq: this.chains.get(me.name)!.length - 1, admission: this.log.receipts.length - 1, ...(answer ? { answer } : {}) };
+      return this.signNow(me, facts, o, true);
     });
+  }
+
+  /** Sign `facts` as a local identity `me` — the node's own, or a session it
+   *  derives — and admit them, in the current serial slot. */
+  private async signNow(me: LocalIdentity, facts: Fact[], o: SignOptions, withIdentity: boolean): Promise<Signed> {
+    const jsonl = toJsonl(facts);
+    const salt = o.salt ? o.salt(jsonl) : newSalt();
+    if (o.salt) {
+      const digest = batchDigest(salt, jsonl);
+      const had = this.log.receipts.find((r) => r.identity === me.name && r.kind === undefined && r.digest === digest);
+      if (had) {
+        const s = this.log.read(had);
+        return { receipt: had, body: { manifest: s.manifest, jsonl, salt, ...(withIdentity ? { identity: me.identityChain() } : {}) }, held: true, seq: this.chainOf(me.name).indexOf(digest),
+          admission: this.admissionOf(digest)!, ...(o.ask ? { answer: await this.askNow(o.ask.query, o.ask.asker, o.ask.perspective, o.ask.options) } : {}) };
+      }
+    }
+    // The later of the clock and the chain's last claim (r_rotation).
+    const manifest = me.signBatch(jsonl, this.head(me.name), new Date(Math.max(this.now(), this.lastClaimed.get(me.name) ?? -Infinity)).toISOString(), salt, o.knew);
+    const body = { manifest, jsonl, salt, ...(withIdentity ? { identity: me.identityChain() } : {}) };
+    const receipt = await this.admitNow(body, 'post', new Date(this.now()).toISOString(), [], this.identity?.name ?? me.name);
+    // Still inside this one serial slot: no other batch can land before the answer.
+    const answer = o.ask ? await this.askNow(o.ask.query, o.ask.asker, o.ask.perspective, o.ask.options) : undefined;
+    return { receipt, body, held: false, seq: this.chains.get(me.name)!.length - 1, admission: this.log.receipts.length - 1, ...(answer ? { answer } : {}) };
+  }
+
+  // ---- sessions (r_session_identity) ---------------------------------------
+  // Each OAuth grant the owner approves writes as its own identity:
+  // s<10 hex>.<owner>, delegated by the owner, its keys derived from the
+  // owner's key and the grant (LocalIdentity.derive) — nothing stored. It is
+  // set up on its first write: pinned on the owner's word, and delegated by an
+  // owner-signed roflenox:delegate fact. Revoking the grant retires that
+  // delegation; a new owner key (rotation, recovery) ends every session.
+
+  /** The system rules of a book: an owner's session's book (one this node
+   *  derived for an approved grant) is read and exported as the owner's book
+   *  is — for every batch the session wrote, whatever has happened to its
+   *  delegation since: revoking a session stops its new writes, never what
+   *  readers may already read (r_session_identity). Nobody else's book. */
+  private rulesFor(id: string): string {
+    const base = bookRules(bookOf(id), id);
+    const owner = this.identity?.name;
+    if (!owner || !this.isSession(id)) return base;
+    const sb = roflString(bookOf(id)), ob = bookOf(owner);
+    return base + [
+      `readable_until[${SYSTEM_BOOK}](R, ${sb}, U) :- readable_until[${SYSTEM_BOOK}](R, ${roflString(ob)}, U).`,
+      `exported[${SYSTEM_BOOK}](${sb}, F, A) :- edge[${bookOf(id)}](F, S, Rel, T), export[${ob}](Rel, A).`,
+      `exported[${SYSTEM_BOOK}](${sb}, F, A) :- edge[${bookOf(id)}](F, S, Rel, T), export[${ob}]("*", A), not reserved[${SYSTEM_BOOK}](Rel).`,
+      '',
+    ].join('\n');
+  }
+
+  /** Is `id` a session identity this node derived for one of its grants? */
+  private isSession(id: string): boolean {
+    const owner = this.identity?.name;
+    if (!owner || !id.endsWith(`.${owner}`) || !/^s[0-9a-f]{10}\./.test(id)) return false;
+    return this.oauth.grants().some((g) => this.sessionName(g.grant) === id);
+  }
+
+  /** The identity a session writes as. */
+  sessionName(grant: string): string {
+    return `s${sha256hex(`roflenox session ${grant}`).slice(0, 10)}.${this.identity!.name}`;
+  }
+
+  /** Sign `facts` as the session of `grant`, setting it up first if this is
+   *  its first write. */
+  signAsSession(grant: string, facts: Fact[], o: SignOptions = {}): Promise<Signed> {
+    return this.serial(async () => {
+      const owner = this.identity;
+      if (!owner) throw new Refusal(404, 'no_identity', 'this node has no identity');
+      const bound = this.oauth.ownerKeyOf(grant);
+      if (bound !== undefined && bound !== owner.keyId) {
+        this.oauth.revoke(grant, 'the owner\'s key changed: approve this client again');
+        throw new Refusal(401, 'session_ended', 'the owner\'s key changed since this session was approved; approve the client again');
+      }
+      this.oauth.bindOwnerKey(grant, owner.keyId);
+      const name = this.sessionName(grant);
+      const at = new Date(this.now());
+      const me = LocalIdentity.derive(owner, name, `${grant} ${owner.keyId}`, this.idDocs.get(name) ? new Date(this.idDocs.get(name)![0]!.doc.issued_at) : at);
+      if (!this.idDocs.has(name)) await this.applyChain(name, me.identityChain(), at.toISOString(), false, owner.name);
+      const now = Math.floor(this.now() / 1000);
+      const live = (await this.engine.sysRows(`delegated_until[${SYSTEM_BOOK}](${roflString(name)}, ${roflString(owner.name)}, U)`)).some((r) => now < Number(r[0]));
+      if (!live) await this.signNow(owner, [sessionDelegation(name, 1)], {}, true);
+      return this.signNow(me, facts, o, false);
+    });
+  }
+
+  /** End a session's delegation: its identity can write no more. */
+  retireSession(grant: string): Promise<boolean> {
+    return this.serial(async () => this.retireSessions([this.sessionName(grant)]));
+  }
+
+  /** Retire the delegations of `names` (every session's, when null) that act now. */
+  private async retireSessions(names: string[] | null): Promise<boolean> {
+    const owner = this.identity;
+    if (!owner || !this.chains.has(owner.name)) return false;
+    const cur = this.assertions.of(owner.name);
+    const pattern = new RegExp(`^s[0-9a-f]{10}\\.${owner.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+    const rows = await this.engine.sysRows(`edge[${bookOf(owner.name)}](F, A, "roflenox:delegate", U)`);
+    const retire = rows.filter((r) => (cur.get(String(r[0]))?.C ?? 0) > 0 && (names ? names.includes(String(r[1])) : pattern.test(String(r[1]))))
+      .map((r) => ({ source: String(r[1]), relation: DELEGATE, target: String(r[2]), perspective: 'policy', confidence: 0 }));
+    if (retire.length) await this.signNow(owner, retire, {}, true);
+    return retire.length > 0;
+  }
+
+  /** The owner's key changed: every session approves again (r_session_identity). */
+  private async ownerKeyChanged(): Promise<void> {
+    this.oauth.revokeAll('the owner\'s key changed: approve this client again');
+    await this.retireSessions(null);
   }
 
   /** Search by meaning (r_semantic_search, r_derived_rebuildable). The node

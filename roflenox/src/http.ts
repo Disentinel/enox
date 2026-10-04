@@ -89,6 +89,13 @@ function clientOf(node: RoflenoxNode, headers: http.IncomingHttpHeaders): string
   return typeof auth === 'string' && auth.startsWith('Bearer ') ? node.oauth.clientOf(auth.slice('Bearer '.length).trim()) : null;
 }
 
+/** The OAuth grant an /mcp bearer token belongs to: the session whose
+ *  identity signs its writes (r_session_identity); null for any other caller. */
+function sessionOf(node: RoflenoxNode, headers: http.IncomingHttpHeaders): string | null {
+  const auth = headers.authorization;
+  return typeof auth === 'string' && auth.startsWith('Bearer ') ? node.oauth.grantOf(auth.slice('Bearer '.length).trim()) : null;
+}
+
 /** Match an op's alias path; `:x` segments become args. */
 function matchAlias(op: Op, method: string, path: string): Record<string, string> | null {
   if (!op.http || op.http.method !== method) return null;
@@ -112,9 +119,9 @@ export function createServer(node: RoflenoxNode): http.Server {
       const method = req.method ?? 'GET';
       const target = targetsOf(node, req);
       const raw = method === 'POST' ? await readRaw(req) : null;
-      const ctx = (caller: string | null, agent: string | null = null): Ctx => ({
-        node, caller, dataDir: null, now: () => Date.now(), agent,
-        call: (op, args) => callOp(op, args, ctx(caller, agent), 'network'),
+      const ctx = (caller: string | null, agent: string | null = null, session: string | null = null): Ctx => ({
+        node, caller, dataDir: null, now: () => Date.now(), agent, session,
+        call: (op, args) => callOp(op, args, ctx(caller, agent, session), 'network'),
       });
 
       if (node.publicUrl && serveOAuth(node.oauth, req, res, url, raw)) return;
@@ -138,7 +145,8 @@ export function createServer(node: RoflenoxNode): http.Server {
           return send(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } });
         }
         const agent = clientOf(node, req.headers);
-        const replies = (await Promise.all((Array.isArray(msg) ? msg : [msg]).map((m) => handleRpc(ctx(caller, agent), m, 'network')))).filter((r) => r !== null);
+        const session = sessionOf(node, req.headers);
+        const replies = (await Promise.all((Array.isArray(msg) ? msg : [msg]).map((m) => handleRpc(ctx(caller, agent, session), m, 'network')))).filter((r) => r !== null);
         if (replies.length === 0) { res.writeHead(202).end(); return; }
         return send(res, 200, Array.isArray(msg) ? replies : replies[0]);
       }
