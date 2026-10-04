@@ -1087,6 +1087,7 @@ Accepted after verification:
 - `r_attribute_delete_explains` is accepted at "de7f30329d8983500e268e3c9d3a12703ada001a".
 - `r_heap_headroom` is accepted at "6447fbfb7bfbf5660449586c3dc1675e3a708481".
 - `r_session_identity` is accepted at "de4bee71e25453a30bbdd04c268bcb518afbdc9e".
+- `r_session_no_access_control` is accepted at "87b6f26b38810334702e646cbb9c0b2b992599f6".
 
 > Решение 2026-09-27 по замерам на 200000 фактах: rofl-serve пересчитывает
 > все выведенные факты при каждом evaluate (Eval::run → clear_derived), форк
@@ -1504,6 +1505,8 @@ The checks that exist:
 - "a reader granted the owner's book reads what a session wrote while delegated, still reads it after the session is revoked, and a stranger reads none of it" lives in "roflenox/test/sessions.test.ts".
 - "a session that deletes an edge the owner or another session asserted removes it from live and from every Enox read alike, and conf shows it retired" guards `r_session_identity`.
 - "a session that deletes an edge the owner or another session asserted removes it from live and from every Enox read alike, and conf shows it retired" lives in "roflenox/test/sessions.test.ts".
+- "a session's grant, export, delegation, trust or follow is refused at admission, a stranger it named reads nothing, and the owner's grant still works" guards `r_session_no_access_control`.
+- "a session's grant, export, delegation, trust or follow is refused at admission, a stranger it named reads nothing, and the owner's grant still works" lives in "roflenox/test/sessions.test.ts".
 
 ## Что выводится
 
