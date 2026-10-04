@@ -358,9 +358,10 @@ export function addFacts(g: Graph, a: AddArgs, agent: string, created: Map<strin
     const found = g.nodes.get(name) ?? created.get(name) ?? [...g.nodes.values(), ...created.values()].find((n) => n.name === name);
     if (found) return found.id;
     const id = `${uriPrefix()}/${domain}/${slugify(name)}`;
-    const desc = deriveDescription(a.context ?? '');
-    facts.push(...entityFacts(id, name, type, domain, desc, t));
-    created.set(name, { id, type, domain, name, description: desc, aliases: [], source_ref: '', created_at: t, updated_at: t, attrs: new Map() });
+    // The context is the EDGE's (r_edge_context_stays): a node this call
+    // creates gets no description from it.
+    facts.push(...entityFacts(id, name, type, domain, '', t));
+    created.set(name, { id, type, domain, name, description: '', aliases: [], source_ref: '', created_at: t, updated_at: t, attrs: new Map() });
     return id;
   };
   const sid = res(a.source, a.source_type ?? 'concept', a.source_domain ?? 'cs');

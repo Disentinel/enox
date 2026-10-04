@@ -152,3 +152,30 @@ test('a grant replaced by a newer grant to the same grantee leaves exactly one g
     } finally { await n.close(); }
   } finally { await a.stop().catch(() => {}); }
 });
+
+test('add_assertion that creates its target node leaves that node without a description and keeps the context on the edge', async () => {
+  const a = await start(tmpDir('ctx-stays'), 'node-a');
+  try {
+    const call = tools(a);
+    json(await call('update_node', { node_id: json<{ source: string }>(await call('add_assertion', { source: 'Alpha', target: 'Seed', relation: 'seeds' })).source, description: 'Alpha, described' }));
+    const context = 'Alpha uses Beta because the benchmark said so. More detail follows here.';
+    const ab = json<{ source: string; target: string; context: string; edge_id: string }>(await call('add_assertion', { source: 'Alpha', target: 'Beta', relation: 'uses', context }));
+    assert.equal(ab.context, context);
+    // The created node: no description, in the view and in the facts.
+    const beta = json<{ node: { description: string } }>(await call('query_graph', { node_id: ab.target }));
+    assert.equal(beta.node.description, '');
+    assert.deepEqual((await ask(a, `edge(F, ${JSON.stringify(ab.target)}, "enox:description", T)`)).rows, []);
+    assert.doesNotMatch((await call('explore', { entity: 'Beta' })).text, /benchmark said so\.\n|^> /m);
+    // The existing source keeps its own description.
+    assert.equal(json<{ node: { description: string } }>(await call('query_graph', { node_id: ab.source })).node.description, 'Alpha, described');
+    // The context is on the edge.
+    assert.deepEqual((await ask(a, `edge(G, ${JSON.stringify(ab.edge_id)}, "enox:context", T)`)).rows.map((r) => r.cells[1]), [context]);
+    assert.match((await call('explore', { entity: 'Alpha' })).text, /Alpha --\[uses\]--> Beta[^\n]*\n {4}context: Alpha uses Beta because the benchmark said so/);
+    // batch_assertions the same.
+    json(await call('batch_assertions', { assertions: [{ source: 'Gamma', target: 'Delta', relation: 'uses', context: 'a batch context' }] }));
+    const delta = json<{ id: string; description: string }[]>(await call('query_graph', { query: 'Delta' }));
+    assert.deepEqual(delta.map((x) => x.description), ['']);
+    const gamma = json<{ id: string; description: string }[]>(await call('query_graph', { query: 'Gamma' }));
+    assert.deepEqual(gamma.map((x) => x.description), ['']);
+  } finally { await a.stop(); }
+});

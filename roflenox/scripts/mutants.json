@@ -4272,6 +4272,20 @@
    "red": [
     "a grant replaced by a newer grant to the same grantee leaves exactly one grant in live"
    ]
+  },
+  {
+   "id": "M314",
+   "title": "r_edge_context_stays: a node add_assertion creates is described by the edge's context",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "    facts.push(...entityFacts(id, name, type, domain, '', t));",
+     "    facts.push(...entityFacts(id, name, type, domain, deriveDescription(a.context ?? ''), t));"
+    ]
+   ],
+   "red": [
+    "add_assertion that creates its target node leaves that node without a description and keeps the context on the edge"
+   ]
   }
  ]
 }
