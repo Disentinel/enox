@@ -4834,6 +4834,20 @@
    "red": [
     "two exports of one perspective at the same head are byte-identical, and an export after a retraction no longer holds the retracted fact"
    ]
+  },
+  {
+   "id": "M353",
+   "title": "r_attribute_delete_explains: an attribute fact's id answers not found",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "      if (!f) notAnEdge(g, a.fact_id as string);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "delete_assertion with an attribute fact's id names the node and attribute and points to update_node or retract_node"
+   ]
   }
  ]
 }

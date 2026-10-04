@@ -310,6 +310,14 @@ export class Graph {
       fact_id: e?.fact_id ?? this.attr(F, 'fact_id') ?? F };
   }
 
+  /** An entity's attribute fact by its id (its label, description, ...),
+   *  for a tool that was given one where it wanted an edge. */
+  attributeOf(F: string): { node: string; attribute: string; value: string } | undefined {
+    const a = this.raw.get(F);
+    if (!a || !a.R.startsWith('enox:') || this.assertionIds.has(a.S)) return undefined;
+    return { node: a.S, attribute: a.R.slice(5), value: a.T };
+  }
+
   /** Every fact of `signer`'s about an entity — its attributes — and every
    *  edge touching it, held above confidence 0 now, in first-seen order
    *  (r_retract_node). Facts another identity signed are not `signer`'s to

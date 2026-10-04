@@ -100,6 +100,14 @@ const cmpDesc = (x: string, y: string) => (x < y ? 1 : x > y ? -1 : 0);
 const confStr = (e: Edge) => (e.confidence < 1 ? ` (${e.confidence})` : '');
 const byStr = (e: Edge) => (e.asserted_by ? ` [by ${e.asserted_by}${e.claimed_by ? `, claims ${JSON.stringify(e.claimed_by)}` : ''}]` : '');
 const NOT_FOUND = (term: string) => refuseText(`Entity "${term}" not found`);
+/** An attribute fact given where an edge was wanted (r_attribute_delete_explains): say what it is and which tool changes it. */
+function notAnEdge(g: Graph, id: string): void {
+  const x = g.attributeOf(id);
+  if (!x) return;
+  const name = g.nodes.get(x.node)?.name;
+  throw refuseText(`${id} is not an edge: it is the ${x.attribute} of node ${x.node}${name !== undefined ? ` ("${name}")` : ''}, ${JSON.stringify(x.value.length > 80 ? `${x.value.slice(0, 80)}…` : x.value)}. `
+    + `Change it with update_node (node_id ${x.node}), or retract the whole node with retract_node.`);
+}
 
 const ASSERTION: Record<string, Prop> = {
   source: s(), target: s(), relation: s(), source_type: s(), source_domain: s(), target_type: s(), target_domain: s(),
@@ -435,6 +443,7 @@ export const ENOX_OPS: Op[] = [
       // Any fact the owner asserted, under its own perspective — not only an
       // edge of the Enox view (r_delete_any_perspective).
       const f = g.assertion(a.fact_id as string);
+      if (!f) notAnEdge(g, a.fact_id as string);
       if (!f || f.confidence === 0) throw refuseText(`Assertion ${a.fact_id} not found`);
       const batch = await write(ctx, [{ source: f.S, relation: f.R, target: f.T, perspective: f.P, confidence: 0 },
         meta(f.F, 'deleted_at', new Date().toISOString())]);

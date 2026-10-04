@@ -781,3 +781,23 @@ test('two exports of one perspective at the same head are byte-identical, and an
     assert.equal((await post(a.url, '/op/export_perspective', { perspective: 'zz_coord' }, { as: null })).status, 403);
   } finally { await a.stop(); }
 });
+
+test('delete_assertion with an attribute fact\'s id names the node and attribute and points to update_node or retract_node', async () => {
+  const a = await start(tmpDir('attr-delete'), 'node-a');
+  try {
+    const call = tools(a);
+    const ab = json<{ source: string }>(await call('add_assertion', { source: 'Alpha', target: 'Beta', relation: 'uses' }));
+    json(await call('update_node', { node_id: ab.source, description: 'Alpha, described' }));
+    for (const [attr, value] of [['label', 'Alpha'], ['description', 'Alpha, described'], ['type', 'concept'], ['domain', 'cs']]) {
+      const F = (await ask(a, `edge(F, ${JSON.stringify(ab.source)}, "enox:${attr}", ${JSON.stringify(value)})`)).rows[0]!.cells[0] as string;
+      const r = await call('delete_assertion', { fact_id: F });
+      assert.equal(r.isError, true);
+      assert.doesNotMatch(r.text, /not found/);
+      assert.match(r.text, new RegExp(`is the ${attr} of node ${ab.source.replace(/[/.]/g, '\\$&')} \\("Alpha"\\)`));
+      assert.match(r.text, /update_node/);
+      assert.match(r.text, /retract_node/);
+    }
+    // Nothing was written; an id that names nothing is still not found.
+    assert.match((await call('delete_assertion', { fact_id: 'f'.repeat(64) })).text, /not found/);
+  } finally { await a.stop(); }
+});
