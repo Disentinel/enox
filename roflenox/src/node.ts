@@ -1082,6 +1082,27 @@ export class RoflenoxNode {
     return { vars, rows };
   }
 
+  /** The live facts of one perspective in the node's own book, as a
+   *  deterministic dump (r_perspective_export): one canonical JSONL line per
+   *  fact, with its current confidence, sorted bytewise — the same bytes for
+   *  the same state, fit for keeping in git. `at`: the state at that head. */
+  exportPerspective(perspective: string, at?: string): Promise<{ perspective: string; head: string; facts: number; dump: string }> {
+    return this.serial(async () => {
+      const me = this.identity?.name;
+      if (!me || !this.chains.has(me)) return { perspective, head: at ?? this.log.head(), facts: 0, dump: '' };
+      const undo = at !== undefined ? this.undoSince(at) : null;
+      const view = this.assertions.viewAt(me, undo?.get(me));
+      const b = bookOf(me);
+      const r = await this.askFacts('edge', b, 'F, S, R, T', new Map([[b, { identity: me, only: null }]]),
+        (id, t) => view.get(t[0])?.P === perspective && this.liveNow(id, t, undo?.get(id)));
+      const lines = r.rows.map((x) => {
+        const [F, S, R, T] = x.cells.map(String) as [string, string, string, string];
+        return canonicalize({ source: S, relation: R, target: T, perspective, confidence: view.get(F)!.C / 1000 });
+      }).sort((p, q) => (p < q ? -1 : p > q ? 1 : 0));
+      return { perspective, head: at ?? this.log.head(), facts: lines.length, dump: lines.map((l) => `${l}\n`).join('') };
+    }, true);
+  }
+
   /** When this node admitted an identity's batch `seq` — its own clock, as
    *  the receipt holds it (r_one_time): a lease is measured by this, never by
    *  the time the writer claims. */

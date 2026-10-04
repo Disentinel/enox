@@ -4792,6 +4792,48 @@
    "red": [
     "every tool shows times in one form, and a lease that expires by the node's admission times expires whatever time its writer claimed"
    ]
+  },
+  {
+   "id": "M350",
+   "title": "r_perspective_export: the dump comes in answer order, not sorted",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      }).sort((p, q) => (p < q ? -1 : p > q ? 1 : 0));\n      return { perspective, head: at",
+     "      });\n      return { perspective, head: at"
+    ]
+   ],
+   "red": [
+    "two exports of one perspective at the same head are byte-identical, and an export after a retraction no longer holds the retracted fact"
+   ]
+  },
+  {
+   "id": "M351",
+   "title": "r_perspective_export: retracted facts stay in the dump",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        (id, t) => view.get(t[0])?.P === perspective && this.liveNow(id, t, undo?.get(id)));",
+     "        (id, t) => view.get(t[0])?.P === perspective);"
+    ]
+   ],
+   "red": [
+    "two exports of one perspective at the same head are byte-identical, and an export after a retraction no longer holds the retracted fact"
+   ]
+  },
+  {
+   "id": "M352",
+   "title": "r_perspective_export: an export at a head is of the latest state",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      const undo = at !== undefined ? this.undoSince(at) : null;\n      const view = this.assertions.viewAt(me, undo?.get(me));",
+     "      const undo = null as Map<string, Map<string, Current | null>> | null;\n      const view = this.assertions.viewAt(me, undo?.get(me));"
+    ]
+   ],
+   "red": [
+    "two exports of one perspective at the same head are byte-identical, and an export after a retraction no longer holds the retracted fact"
+   ]
   }
  ]
 }

@@ -746,3 +746,38 @@ test('every tool shows times in one form, and a lease that expires by the node\'
     assert.equal(await expired(), true, 'expired 61 s after admission');
   } finally { await a.stop(); }
 });
+
+test('two exports of one perspective at the same head are byte-identical, and an export after a retraction no longer holds the retracted fact', async () => {
+  const a = await start(tmpDir('export'), 'node-a');
+  try {
+    const call = tools(a);
+    const fact = (s: string, r: string, t: string, c = 1, p = 'zz_coord') => ({ source: s, relation: r, target: t, perspective: p, confidence: c });
+    // Written in an order that is not the sorted one, across batches, with a superseded value.
+    json(await call('assert', { facts: [fact('session-b', 'zz_claim', 'task-2'), fact('session-a', 'zz_claim', 'task-1', 0.5)] }));
+    json(await call('assert', { facts: [fact('session-c', 'zz_claim', 'task-3'), fact('other', 'zz_note', 'x', 1, 'zz_other')] }));
+    json(await call('assert', { facts: [fact('session-a', 'zz_claim', 'task-1', 0.9)] }));
+    type Dump = { head: string; facts: number; dump: string };
+    const exp = (o: Record<string, unknown> = {}) => post(a.url, '/op/export_perspective', { perspective: 'zz_coord', ...o }).then((r) => r.body as unknown as Dump);
+    const one = await exp();
+    assert.equal(one.facts, 3);
+    const lines = one.dump.trimEnd().split('\n');
+    assert.deepEqual([...lines].sort(), lines, 'sorted');
+    assert.ok(lines.every((l) => JSON.parse(l).perspective === 'zz_coord'), 'one perspective');
+    assert.ok(lines.some((l) => l.includes('"confidence":0.9') && l.includes('session-a')), 'the current confidence');
+    // Byte-identical at the same head, while other writes land.
+    json(await call('assert', { facts: [fact('other-2', 'zz_note', 'y', 1, 'zz_other')] }));
+    json(await call('assert', { facts: [fact('session-d', 'zz_claim', 'task-4')] }));
+    const two = await exp({ at: one.head });
+    assert.equal(two.dump, one.dump);
+    assert.equal((await exp()).facts, 4);
+    // The MCP tool answers the dump itself.
+    assert.equal((await call('export_perspective', { perspective: 'zz_coord', at: one.head })).text, one.dump);
+    // After a retraction, the retracted fact is no longer there.
+    json(await call('assert', { facts: [fact('session-b', 'zz_claim', 'task-2', 0)] }));
+    const after = await exp();
+    assert.equal(after.facts, 3);
+    assert.ok(!after.dump.includes('session-b'), after.dump);
+    // Only the owner exports.
+    assert.equal((await post(a.url, '/op/export_perspective', { perspective: 'zz_coord' }, { as: null })).status, 403);
+  } finally { await a.stop(); }
+});

@@ -400,6 +400,10 @@ export const OPS: Op[] = [
       await followLoop(tick, me, (a.interval_ms as number | undefined) ?? 30_000, ac.signal, (s) => process.stderr.write(`${s}\n`));
       return { rounds: limit ?? rounds };
     } },
+  { name: 'export_perspective', description: 'The live facts of one perspective in this node\'s own book as a deterministic dump: one canonical JSONL line per fact, sorted; byte-identical for the same state, fit for keeping in git. at: the state at that log head.',
+    input: obj({ perspective: str(), at: str('a log head: the dump as of then') }, ['perspective']), access: 'operator', positional: ['perspective'],
+    say: (r) => r.dump, text: (r) => r.dump,
+    run: async (ctx, a) => needNode(ctx).exportPerspective(a.perspective as string, a.at as string | undefined) },
   { name: 'oauth_grants', description: 'The OAuth grants hosted MCP clients hold on this node: client, redirect host, when, live tokens, revoked.',
     input: obj({}), access: 'operator',
     say: (r) => r.grants.length ? r.grants.map((g: Record<string, unknown>) => `${g.grant}\t${g.client}\t${g.redirect_host}\t${g.created_at}\t${g.revoked_at ? `revoked ${g.revoked_at}` : `${g.live_access_tokens} live`}`).join('\n') : 'no OAuth grants',
