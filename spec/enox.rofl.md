@@ -457,10 +457,12 @@ Declared as facts:
 - `r_session_identity` says "a session never acts for the owner's keys or credentials: operator_token, the OAuth grant list and revocation, key rotation, recovery and checkpoints answer only the owner's own credential, while a session's ordinary writes, retract_node included, are signed as the session".
 - `r_session_identity` says "when the owner's key rotates, every session identity derived from it is retired, and a hosted client approves again to write".
 - `r_session_identity` says "a grant or an export that covers the owner's book covers what the owner's sessions (the identities this node derived for its approved grants) wrote while they were delegated, and nothing anyone else wrote: revoking a session or rotating the owner's key stops a session's new writes, never what readers already may read".
+- `r_session_identity` says "the owner's sessions act on the owner's facts as the owner does: a retraction, an update or a new confidence that a session writes for a fact the owner or another of its sessions asserted counts in live, conf and every Enox read alike, so the Enox view and live never disagree about what holds".
 - `r_session_identity` is stated in "owner 2026-10-04: coordination of parallel sessions, part B in full".
 - `r_session_identity` is to be checked by "two OAuth sessions write as two distinct identities delegated by the owner, neither can sign as the other or as the owner, and a revoked session can no longer write".
 - `r_session_identity` is to be checked by "a session token is refused for operator_token, the OAuth grant list and revocation, and after the owner's key rotates no session identity can write until approved again".
 - `r_session_identity` is to be checked by "a reader granted the owner's book reads what a session wrote while delegated, still reads it after the session is revoked, and a stranger reads none of it".
+- `r_session_identity` is to be checked by "a session that deletes an edge the owner or another session asserted removes it from live and from every Enox read alike, and conf shows it retired".
 - `r_perspective_export` is about `hybrid`.
 - `r_perspective_export` binds as `should`.
 - `r_perspective_export` says "the owner can export the live facts of one perspective as a deterministic sorted dump, byte-identical for the same state, fit for keeping in git".
@@ -985,6 +987,7 @@ The queue:
 - `r_conjunction` is queued at 109.
 - `r_owner_rules` is queued at 110.
 - `r_session_identity` is queued at 111.
+- `r_session_identity` is rejected at "bbf8ba17ec77d293bb095bb0985007d4506c8888".
 - `r_perspective_export` is queued at 112.
 - `r_attribute_delete_explains` is queued at 113.
 - `r_heap_headroom` is queued at 108.
