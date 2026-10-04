@@ -67,7 +67,10 @@ export interface Edge { /** The fact id ask returns: F of edge(F, S, R, T). */ F
 
 /** What the view holds of one fact. `by`: who signed it — one name, or
  *  several when more than one book holds the fact. */
-interface Fact1 { S: string; R: string; T: string; C: number; seq: number; written: number; rank: number; P: string; by: string | string[] }
+interface Fact1 { S: string; R: string; T: string; C: number; seq: number; written: number; rank: number; P: string; by: string | string[];
+  /** The admission order of the assertion that stands, and whether it is the
+   *  owner's family's (the owner and its sessions, r_session_identity). */
+  N: number; fam: boolean }
 
 /** The Enox graph as `caller` may see it, built from asks. */
 export class Graph {
@@ -120,20 +123,28 @@ export class Graph {
   static async load(node: RoflenoxNode, caller: string | null): Promise<Graph> {
     const g = new Graph();
     g.orderOf = (identity, seq) => node.writtenAt(identity, seq);
+    g.family = (id) => node.inFamily(id);
     await node.eachFact(caller, (R) => !R.startsWith('roflenox:'), (identity, F, S, R, T, cur) => {
       g.hold(F, S, R, T, identity);
-      if (cur) g.assertedAs(F, identity, cur.P, cur.C, cur.S);
+      if (cur) g.assertedAs(F, identity, cur.P, cur.C, cur.S, cur.N, cur.by ?? identity);
     });
     g.ensure();
     return g;
   }
 
-  /** A fact's current assertion by `identity`: the latest in chain position wins. */
-  private assertedAs(F: string, identity: string, P: string, C: number, seq: number): void {
+  /** A fact's current assertion by `identity` (made by `signer`): the latest
+   *  in admission order stands — and the owner's family's over anyone else's,
+   *  so no stranger's assertion overrides what the owner and its sessions
+   *  hold (r_session_identity). */
+  private assertedAs(F: string, identity: string, P: string, C: number, seq: number, N: number, signer = identity): void {
     const r = this.facts.get(F)!;
-    if (seq >= r.seq) { r.seq = seq; r.P = P === ENOX_PERSPECTIVE ? ENOX_PERSPECTIVE : P; r.C = C; }
-    r.written = Math.max(r.written, this.orderOf(identity, seq));
+    const fam = this.family(identity);
+    if ((fam && !r.fam) || (fam === r.fam && N >= r.N)) { r.seq = seq; r.N = N; r.P = P; r.C = C; r.fam = r.fam || fam; }
+    r.written = Math.max(r.written, this.orderOf(signer, seq));
   }
+  private family: (identity: string) => boolean = () => false;
+  /** Writes applied after the load came later than anything it read. */
+  private applied = 2 ** 40;
 
   private signedBy(r: Fact1, identity: string): void {
     if (r.by === identity || (Array.isArray(r.by) && r.by.includes(identity))) return;
@@ -149,7 +160,7 @@ export class Graph {
     if (R.startsWith('roflenox:')) return;
     let rec = this.facts.get(F);
     if (!rec) {
-      rec = { S, R, T, C: 1000, seq: -1, written: -1, rank: this.facts.size, P: ENOX_PERSPECTIVE, by: '' };
+      rec = { S, R, T, C: 1000, seq: -1, written: -1, rank: this.facts.size, P: ENOX_PERSPECTIVE, by: '', N: -1, fam: false };
       this.facts.set(F, rec);
       if (R.startsWith('enox:')) {
         const a = R.slice(5);
@@ -179,7 +190,7 @@ export class Graph {
       if (f.relation.startsWith('roflenox:')) continue;
       const F = factId(f);
       this.hold(F, f.source, f.relation, f.target, identity);
-      this.assertedAs(F, identity, f.perspective, Math.round(f.confidence * 1000), seq);
+      this.assertedAs(F, identity, f.perspective, Math.round(f.confidence * 1000), seq, this.applied++);
     }
   }
 
@@ -240,7 +251,7 @@ export class Graph {
     for (const F of this.attrFacts.get(s)?.get(a) ?? []) {
       const r = this.facts.get(F)!;
       if (r.C === 0) continue;                                        // retired (confidence 0)
-      if (!best || r.seq >= best[0]) best = [r.seq, r.T];
+      if (!best || r.N >= best[0]) best = [r.N, r.T];
     }
     return best?.[1];
   }

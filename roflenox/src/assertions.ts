@@ -26,7 +26,8 @@ import { checkName } from './identity.ts';
  *  position, and N — the order the node received it in, over all facts. A
  *  control fact carries its engine row (ctl) and whether that row is loaded
  *  (on); a grant, its grantee (r_live_view). */
-export interface Current { P: string; C: number; S: number; N: number; /** The chain position of the identity's first assertion of the fact. */ first: number; follow?: string; ctl?: string; on?: boolean; grantee?: string }
+export interface Current { P: string; C: number; S: number; N: number; /** The chain position of the identity's first assertion of the fact. */ first: number;
+  /** In a family view (RoflenoxNode.view): whose assertion this is, when not the book's own. */ by?: string; follow?: string; ctl?: string; on?: boolean; grantee?: string }
 
 /** Relations that hold one value per subject (r_live_view): an entity's
  *  attributes and an edge's (src/enox.ts). The latest assertion above
@@ -81,10 +82,18 @@ export class Assertions {
    *  in `view`, an earlier state (r_ask_at_revision): the latest received
    *  above confidence 0 (r_live_view). */
   valueOf(identity: string, S: string, R: string, view: View = this.of(identity)): string | undefined {
+    return this.valueAcross([[identity, view]], S, R);
+  }
+
+  /** The same across several books seen together — the owner's and its
+   *  sessions' (r_session_identity): the latest received above 0 of any. */
+  valueAcross(books: [string, View][], S: string, R: string): string | undefined {
     let best: [number, string] | undefined;
-    for (const F of this.values.get(identity)?.get(S)?.get(R) ?? []) {
-      const c = view.get(F);
-      if (c && c.C > 0 && (!best || c.N > best[0])) best = [c.N, F];
+    for (const [identity, view] of books) {
+      for (const F of this.values.get(identity)?.get(S)?.get(R) ?? []) {
+        const c = view.get(F);
+        if (c && c.C > 0 && (!best || c.N > best[0])) best = [c.N, F];
+      }
     }
     return best?.[1];
   }

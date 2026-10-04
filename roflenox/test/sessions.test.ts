@@ -179,3 +179,52 @@ test('a reader granted the owner\'s book reads what a session wrote while delega
     assert.deepEqual(((await post(a.url, '/ask', { query: 'edge(F, "written by a helper", R, T)' }, { as: reader })).body.rows as unknown[]), []);
   } finally { await a.stop(); }
 });
+
+test('a session that deletes an edge the owner or another session asserted removes it from live and from every Enox read alike, and conf shows it retired', async () => {
+  const a = await start(tmpDir('sessions-delete'), 'node-a', { publicUrl: PUBLIC, oauth: OAUTH });
+  try {
+    const op = a.node.operatorToken();
+    const ta = await connect(a, 'Session A'), tb = await connect(a, 'Session B');
+    type Added = { fact_id: string; edge_id: string; source: string; target: string };
+    const askRows = async (query: string) => ((await post(a.url, '/ask', { query })).body.rows as { identity: string; cells: (string | number)[] }[]);
+    const outgoing = async (id: string) => ok<{ outgoing: { relation: string; confidence: number }[] }>(await tool(a, op, 'query_graph', { node_id: id })).outgoing;
+    // The owner's edge, deleted by session A.
+    const own = ok<Added>(await tool(a, op, 'add_assertion', { source: 'OwnerNode', target: 'OwnerTarget', relation: 'depends_on' }));
+    const liveOf = (x: Added) => askRows(`live(F, ${JSON.stringify(x.source)}, "depends_on", T)`);
+    assert.equal((await liveOf(own)).length, 1);
+    // A first changes its confidence: the owner's edge reads it everywhere.
+    ok(await tool(a, ta, 'update_assertion', { fact_id: own.fact_id, confidence: 0.4 }));
+    assert.deepEqual((await outgoing(own.source)).map((e) => e.confidence), [0.4]);
+    assert.deepEqual((await askRows(`conf(${JSON.stringify(own.edge_id)}, C)`)).map((r) => [r.identity, r.cells[0]]).filter(([i]) => i === 'node-a'), [['node-a', 400]]);
+    assert.equal((await tool(a, ta, 'delete_assertion', { fact_id: own.fact_id })).isError, false);
+    assert.deepEqual(await outgoing(own.source), [], 'gone from the Enox view');
+    assert.deepEqual(await liveOf(own), [], 'gone from live');
+    assert.doesNotMatch((await tool(a, op, 'explore', { entity: 'OwnerNode' })).text, /depends_on/);
+    assert.ok(!ok<{ relation: string; source_id: string }[]>(await tool(a, op, 'recent_activity', { limit: 100 })).some((e) => e.source_id === own.source && e.relation === 'depends_on'));
+    for (const r of await askRows(`conf(${JSON.stringify(own.edge_id)}, C)`)) assert.equal(r.cells[0], 0, `conf in ${r.identity}'s book: retired`);
+    assert.equal((await askRows(`edge(${JSON.stringify(own.edge_id)}, S, R, T)`)).length >= 1, true, 'history stays in edge');
+
+    // Session B's edge, deleted by session A: the same.
+    const bs = ok<Added>(await tool(a, tb, 'add_assertion', { source: 'BNode', target: 'BTarget', relation: 'depends_on' }));
+    assert.equal((await liveOf(bs)).length, 1);
+    assert.equal((await tool(a, ta, 'delete_assertion', { fact_id: bs.edge_id })).isError, false);
+    assert.deepEqual(await outgoing(bs.source), []);
+    assert.deepEqual(await liveOf(bs), []);
+    for (const r of await askRows(`conf(${JSON.stringify(bs.edge_id)}, C)`)) assert.equal(r.cells[0], 0, `conf in ${r.identity}'s book`);
+
+    // A session's new description of the owner's entity is the one value, in live and in the view.
+    ok(await tool(a, op, 'update_node', { node_id: own.source, description: 'by the owner' }));
+    ok(await tool(a, tb, 'update_node', { node_id: own.source, description: 'by session B' }));
+    assert.deepEqual((await askRows(`live(F, ${JSON.stringify(own.source)}, "enox:description", T)`)).map((r) => r.cells[1]), ['by session B']);
+    assert.equal(ok<{ node: { description: string } }>(await tool(a, op, 'query_graph', { node_id: own.source })).node.description, 'by session B');
+
+    // Anyone else's retraction is their own: another delegate of the owner deletes nothing of the owner's.
+    const kept = ok<Added>(await tool(a, op, 'add_assertion', { source: 'KeptNode', target: 'KeptTarget', relation: 'depends_on' }));
+    const helper = LocalIdentity.create(tmpDir('sessions-delete-h'), 'helper.node-a', new Date(a.clock.t - DAY), { delegatedBy: 'node-a' });
+    await publish(a.url, LocalIdentity.load(a.dir)!, [{ source: 'helper.node-a', relation: 'roflenox:delegate', target: iso(a.clock.t + DAY), perspective: 'policy', confidence: 1 }], () => a.clock.t);
+    const raw = (await askRows(`edge(${JSON.stringify(kept.edge_id)}, S, R, T)`))[0]!.cells;
+    assert.equal((await post(a.url, '/batches', batch(helper, [{ source: String(raw[0]), relation: String(raw[1]), target: String(raw[2]), perspective: 'enox', confidence: 0 }], null, iso(a.clock.t)))).status, 201);
+    assert.equal((await liveOf(kept)).filter((r) => r.identity === 'node-a').length, 1, 'the owner\'s edge is still live');
+    assert.deepEqual((await outgoing(kept.source)).length, 1, 'and in the Enox view');
+  } finally { await a.stop(); }
+});

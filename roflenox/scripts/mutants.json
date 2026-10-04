@@ -819,7 +819,7 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "(id, t) => this.assertions.viewAt(id, undo?.get(id)).get(t[0])?.P === perspective, o.window)",
+     "(id, t) => this.view(id, undo).get(t[0])?.P === perspective, o.window)",
      "() => true, o.window)"
     ]
    ],
@@ -3995,7 +3995,7 @@
    "file": "src/enox.ts",
    "edits": [
     [
-     "    r.written = Math.max(r.written, this.orderOf(identity, seq));\n",
+     "    r.written = Math.max(r.written, this.orderOf(signer, seq));\n",
      ""
     ]
    ],
@@ -4228,11 +4228,11 @@
   {
    "id": "M310",
    "title": "r_live_view: every value of a one-value attribute is live",
-   "file": "src/assertions.ts",
+   "file": "src/node.ts",
    "edits": [
     [
-     "    return !oneValue(R) || this.valueOf(identity, S, R, view) === F;",
-     "    return true;"
+     "      return this.assertions.valueAcross(books, S, R) === F;",
+     "      return true;"
     ]
    ],
    "red": [
@@ -4245,7 +4245,7 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "(id, t) => this.liveNow(id, t, undo?.get(id)), o.window)",
+     "(id, t) => this.liveNow(id, t, undo), o.window)",
      "() => true, o.window)"
     ]
    ],
@@ -4669,8 +4669,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "        r.admission = at(r.identity, rel === 'edge' || rel === 'edge_num' ? c?.first : c?.S);",
-     "        r.admission = at(r.identity, c?.S);"
+     "        r.admission = at(c?.by ?? r.identity, rel === 'edge' || rel === 'edge_num' ? c?.first : c?.S);",
+     "        r.admission = at(c?.by ?? r.identity, c?.S);"
     ]
    ],
    "red": [
@@ -4817,7 +4817,7 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "        (id, t) => view.get(t[0])?.P === perspective && this.liveNow(id, t, undo?.get(id)));",
+     "        (id, t) => view.get(t[0])?.P === perspective && this.liveNow(id, t, undo));",
      "        (id, t) => view.get(t[0])?.P === perspective);"
     ]
    ],
@@ -4831,8 +4831,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "      const undo = at !== undefined ? this.undoSince(at) : null;\n      const view = this.assertions.viewAt(me, undo?.get(me));",
-     "      const undo = null as Map<string, Map<string, Current | null>> | null;\n      const view = this.assertions.viewAt(me, undo?.get(me));"
+     "      const undo = at !== undefined ? this.undoSince(at) : null;\n      const view = this.view(me, undo);",
+     "      const undo = null as Map<string, Map<string, Current | null>> | null;\n      const view = this.view(me, undo);"
     ]
    ],
    "red": [
@@ -5160,6 +5160,52 @@
    ],
    "red": [
     "a write over OAuth without asserted_by is claimed by the approved client's name, and every read tool shows asserted_by and claimed_by on that edge"
+   ]
+  },
+  {
+   "id": "M374",
+   "title": "r_session_identity: live ignores what the owner's sessions asserted",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    const view = this.view(identity, undo);\n    if (oneValue(R)) {",
+     "    const view = this.assertions.viewAt(identity, undo?.get(identity));\n    if (oneValue(R)) {"
+    ],
+    [
+     "      const books = (this.familyOf(identity) ?? [identity]).map((m) => [m, this.view(m, undo)] as [string, View]);",
+     "      const books = [[identity, view]] as [string, View][];"
+    ]
+   ],
+   "red": [
+    "a session that deletes an edge the owner or another session asserted removes it from live and from every Enox read alike, and conf shows it retired"
+   ]
+  },
+  {
+   "id": "M375",
+   "title": "r_session_identity: conf and the Enox view count only each book's own assertions",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    const family = this.familyOf(identity)?.filter((m) => m !== identity) ?? [];\n    if (family.length === 0) return own;",
+     "    return own;\n    const family = this.familyOf(identity)?.filter((m) => m !== identity) ?? [];"
+    ]
+   ],
+   "red": [
+    "a session that deletes an edge the owner or another session asserted removes it from live and from every Enox read alike, and conf shows it retired"
+   ]
+  },
+  {
+   "id": "M376",
+   "title": "r_session_identity: anyone's assertion overrides the owner's family's in the Enox view",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "    if ((fam && !r.fam) || (fam === r.fam && N >= r.N)) {",
+     "    if (N >= r.N) {"
+    ]
+   ],
+   "red": [
+    "a session that deletes an edge the owner or another session asserted removes it from live and from every Enox read alike, and conf shows it retired"
    ]
   }
  ]

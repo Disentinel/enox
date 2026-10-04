@@ -37,7 +37,7 @@ import { DomainVouch, type DomainTransport } from './domain.ts';
 import { verifyRequest } from './httpsig.ts';
 import { compileRule, RULE } from './rules.ts';
 import { RESULT } from './executor.ts';
-import { Assertions, match, oneValue, type Current } from './assertions.ts';
+import { Assertions, match, oneValue, type Current, type View } from './assertions.ts';
 import { whyNotDelegated, whyNotReadable } from './expiry.ts';
 import { open as openSealed, type Envelope } from './seal.ts';
 import { OAuth, type OAuthOptions } from './oauth.ts';
@@ -1241,7 +1241,7 @@ export class RoflenoxNode {
       const sc = scope.get(b);
       if (!sc || (book !== null && book !== b)) continue;
       const facts = kept.get(i) ?? parseJsonl(this.log.read(r).jsonl!);
-      const cur = this.assertions.of(r.identity);
+      const cur = this.view(r.identity);
       for (const f of facts) {
         const F = factId(f);
         const k = `${r.identity}\n${F}`;
@@ -1269,10 +1269,10 @@ export class RoflenoxNode {
       const me = this.identity?.name;
       if (!me || !this.chains.has(me)) return { perspective, head: at ?? this.log.head(), facts: 0, dump: '' };
       const undo = at !== undefined ? this.undoSince(at) : null;
-      const view = this.assertions.viewAt(me, undo?.get(me));
+      const view = this.view(me, undo);
       const b = bookOf(me);
       const r = await this.askFacts('edge', b, 'F, S, R, T', new Map([[b, { identity: me, only: null }]]),
-        (id, t) => view.get(t[0])?.P === perspective && this.liveNow(id, t, undo?.get(id)));
+        (id, t) => view.get(t[0])?.P === perspective && this.liveNow(id, t, undo));
       const lines = r.rows.map((x) => {
         const [F, S, R, T] = x.cells.map(String) as [string, string, string, string];
         return canonicalize({ source: S, relation: R, target: T, perspective, confidence: view.get(F)!.C / 1000 });
@@ -1318,13 +1318,13 @@ export class RoflenoxNode {
    *  number is the log's order, so it is the same on every read and after a
    *  restart. */
   private byAdmission(rel: string, a: string[], ans: AskAnswer, undo: Map<string, Map<string, Current | null>> | null): void {
-    const view = (id: string) => this.assertions.viewAt(id, undo?.get(id));
+    const view = (id: string) => (rel === 'asserted' ? this.assertions.viewAt(id, undo?.get(id)) : this.view(id, undo));
     const at = (id: string, seq: number | undefined) => (seq === undefined ? null : this.writtenAt(id, seq));
     if (['edge', 'edge_num', 'live', 'asserted', 'conf', 'persp', 'admitted_at'].includes(rel)) {
       const constF = /^[A-Z_]/.test(a[0] ?? '') ? null : a[0] !== undefined ? decodeCell(a[0].trim()) : null;
       for (const r of ans.rows) {
         const c = view(r.identity).get(String(constF ?? r.cells[0]));
-        r.admission = at(r.identity, rel === 'edge' || rel === 'edge_num' ? c?.first : c?.S);
+        r.admission = at(c?.by ?? r.identity, rel === 'edge' || rel === 'edge_num' ? c?.first : c?.S);
       }
     } else if (['grant', 'delegate', 'export', 'trusts', 'follows'].includes(rel)) {
       const byRow = new Map<string, Map<string, number>>();
@@ -1361,11 +1361,11 @@ export class RoflenoxNode {
       throw new Refusal(400, 'not_at_revision', `at an earlier head ask answers ${[...RoflenoxNode.AT_REVISION].join(', ')}; ${rel} is derived by the engine, which holds only the latest state`);
     }
     if (perspective !== null || rel === 'conf' || rel === 'persp' || rel === 'asserted' || rel === 'admitted_at' || rel === 'live' || undo) {
-      const a = rel === 'live' && perspective === null ? await this.askFacts('edge', book, args, scope, (id, t) => this.liveNow(id, t, undo?.get(id)), o.window)
+      const a = rel === 'live' && perspective === null ? await this.askFacts('edge', book, args, scope, (id, t) => this.liveNow(id, t, undo), o.window)
         : undo && perspective === null && (rel === 'edge' || rel === 'edge_num')
           ? await this.askFacts(rel, book, args, scope, (id, t) => this.assertions.viewAt(id, undo.get(id)).get(t[0]) !== undefined, o.window)
           : perspective !== null && rel === 'edge'
-            ? await this.askFacts('edge', book, args, scope, (id, t) => this.assertions.viewAt(id, undo?.get(id)).get(t[0])?.P === perspective, o.window)
+            ? await this.askFacts('edge', book, args, scope, (id, t) => this.view(id, undo).get(t[0])?.P === perspective, o.window)
             : await this.askAssertions(rel, book, args, scope, perspective, undo, o.window);
       const forked = this.forkedUnknowns(scope, book);
       if (forked.length) a.unknown = [...(a.unknown ?? []), ...forked];
@@ -1427,10 +1427,12 @@ export class RoflenoxNode {
     const out = new Collect(window);
     let j = 0;
     for (const [, sc] of books) {
-      for (const [F, c] of this.assertions.viewAt(sc.identity, undo?.get(sc.identity))) {
+      // asserted is the book's own assertion; conf, persp and admitted_at are
+      // the fact as it stands (r_session_identity).
+      for (const [F, c] of rel === 'asserted' ? this.assertions.viewAt(sc.identity, undo?.get(sc.identity)) : this.view(sc.identity, undo)) {
         if (++j % YIELD_EVERY === 0) await breathe();
         if (sc.only !== null && !sc.only.has(F)) continue;
-        const m = match(a, rel === 'admitted_at' ? [F, this.admittedAt(sc.identity, c.S)] : assertionCells(rel, F, c));
+        const m = match(a, rel === 'admitted_at' ? [F, this.admittedAt(c.by ?? sc.identity, c.S)] : assertionCells(rel, F, c));
         if (m) out.push({ identity: sc.identity, cells: m.cells });
       }
     }
@@ -1444,7 +1446,7 @@ export class RoflenoxNode {
     each: (identity: string, F: string, S: string, R: string, T: string, cur: Current | undefined) => void): Promise<void> {
     return this.serial(async () => {
       for (const [b, sc] of await this.scopeFor(caller)) {
-        const cur = this.assertions.of(sc.identity);
+        const cur = this.view(sc.identity);
         const one = new Map([[b, sc]]);
         for (const R of [...(this.values.get(sc.identity)?.R ?? [])].filter(want).sort()) {
           const r = await this.engine.ask(`edge[${b}](F, S, ${roflString(R)}, T)`, one);
@@ -1493,8 +1495,17 @@ export class RoflenoxNode {
 
   /** Whether a fact of `identity`'s is live now (r_live_view); a grant also
    *  only before its expiry. */
-  private liveNow(identity: string, [F, S, R, T]: [string, string, string, string], undo?: Map<string, Current | null>): boolean {
-    if (!this.assertions.live(identity, F, S, R, this.assertions.viewAt(identity, undo))) return false;
+  private liveNow(identity: string, [F, S, R, T]: [string, string, string, string], undo?: Map<string, Map<string, Current | null>> | null): boolean {
+    const view = this.view(identity, undo);
+    if (oneValue(R)) {
+      // One value across the family's books: a session's new description of
+      // the owner's entity replaces the owner's (r_session_identity).
+      const c = view.get(F);
+      if (!c || c.C <= 0) return false;
+      const books = (this.familyOf(identity) ?? [identity]).map((m) => [m, this.view(m, undo)] as [string, View]);
+      return this.assertions.valueAcross(books, S, R) === F;
+    }
+    if (!this.assertions.live(identity, F, S, R, view)) return false;
     return R !== GRANT || this.now() < Date.parse(T);
   }
 
@@ -1603,7 +1614,7 @@ export class RoflenoxNode {
     const books = [...scope].filter(([b, sc]) => sc.only === null && (book === null || b === book)).sort((x, y) => (x[0] < y[0] ? -1 : 1));
     return books.map(([b, sc]) => {
       const lit = `${rel}[${b}](${a.join(',')})`;
-      const cur = this.assertions.of(sc.identity);
+      const cur = rel === 'asserted' ? this.assertions.of(sc.identity) : this.view(sc.identity);
       const row = (F: string, c: Current) => `asserted[${b}](${roflString(F)},${roflString(c.P)},${c.C},${c.S})`;
       const hit = [...cur].find(([F, c]) => match(a, assertionCells(rel, F, c)) !== null);
       if (hit) {
@@ -1630,7 +1641,7 @@ export class RoflenoxNode {
     for (const [b, sc] of books) {
       const lit = `live[${b}](${a.join(',')})`;
       const r = await this.engine.ask(`edge[${b}](${a.join(', ')})`, new Map([[b, sc]]));
-      const cur = this.assertions.of(sc.identity);
+      const cur = this.view(sc.identity);
       const ground = a.map((x) => decodeCell(x.trim()));
       if (r.rows.length === 0) {
         out.push({ identity: sc.identity, holds: false, text: op === 'why' ? `${lit} does not hold; ${sc.identity} never asserted it` : `whynot ${lit}:\n  ${sc.identity} never asserted edge[${b}](${a.join(',')})` });
@@ -1645,7 +1656,7 @@ export class RoflenoxNode {
       else if (c.C <= 0) reason = `${asserted}: retired (confidence 0)`;
       else if (R === GRANT && c.on === true) reason = `${asserted}: expired at ${T}`;
       else if (R === GRANT) reason = `${asserted}: replaced by a newer grant to ${c.grantee}`;
-      else reason = `${asserted}: replaced by ${roflString(this.assertions.valueOf(sc.identity, S, R) ?? '')}, the latest value of ${R} for ${S}`;
+      else reason = `${asserted}: replaced by ${roflString(this.assertions.valueOf(sc.identity, S, R, cur) ?? '')}, the latest value of ${R} for ${S}`;
       out.push({ identity: sc.identity, holds, text: holds ? (op === 'why' ? `${lit}\n  ${reason}` : `whynot ${lit}: it holds —\n  ${reason}`)
         : (op === 'why' ? `${lit} does not hold; ${reason}` : `whynot ${lit}:\n  ${reason}`) });
     }
@@ -1943,6 +1954,63 @@ export class RoflenoxNode {
       `exported[${SYSTEM_BOOK}](${sb}, F, A) :- edge[${bookOf(id)}](F, S, Rel, T), export[${ob}]("*", A), not reserved[${SYSTEM_BOOK}](Rel).`,
       '',
     ].join('\n');
+  }
+
+  /** The owner and the sessions it derived, when `id` is one of them: one
+   *  family, whose members act on each other's facts (r_session_identity). */
+  private familyOf(id: string): string[] | null {
+    const owner = this.identity?.name;
+    if (!owner || (id !== owner && !this.isSession(id))) return null;
+    return [owner, ...[...this.chains.keys()].filter((x) => x !== owner && this.isSession(x))];
+  }
+
+  /** An identity's current assertions as live, conf, persp and the Enox reads
+   *  count them (r_session_identity): for the owner and its sessions, a fact
+   *  any of them asserted stands as the latest any of them asserted, by
+   *  admission order — so a session's retraction of the owner's fact, or of
+   *  another session's, retracts it everywhere. Control facts (grants,
+   *  delegations, exports, rules, trust, follows) are only ever their own
+   *  signer's. Anyone else's assertions are their own. `undo`: at an earlier
+   *  head (r_ask_at_revision). */
+  view(identity: string, undo?: Map<string, Map<string, Current | null>> | null): View {
+    if (!undo) {
+      if (this.views.version !== this.version) { this.views.version = this.version; this.views.of.clear(); }
+      let v = this.views.of.get(identity);
+      if (!v) { v = this.familyView(identity, null); this.views.of.set(identity, v); }
+      return v;
+    }
+    return this.familyView(identity, undo);
+  }
+  private readonly views: { version: number; of: Map<string, View> } = { version: -1, of: new Map() };
+
+  private familyView(identity: string, undo: Map<string, Map<string, Current | null>> | null): View {
+    const own = this.assertions.viewAt(identity, undo?.get(identity));
+    const family = this.familyOf(identity)?.filter((m) => m !== identity) ?? [];
+    if (family.length === 0) return own;
+    const others = family.map((m) => [m, this.assertions.viewAt(m, undo?.get(m))] as const);
+    // The owner's book is the large one: the few facts its sessions hold are
+    // gathered once; a session's lookups go to the others directly.
+    const latest = new Map<string, Current>();
+    if (identity === this.identity?.name) {
+      for (const [m, v] of others) for (const [F, c] of v) if ((latest.get(F)?.N ?? -1) < c.N) latest.set(F, c.by ? c : { ...c, by: m });
+    }
+    const pick = (F: string, c: Current | undefined): Current | undefined => {
+      if (!c || c.ctl !== undefined || c.follow !== undefined) return c;
+      let best = c;
+      if (identity === this.identity?.name) {
+        const o = latest.get(F);
+        if (o && o.N > best.N && o.ctl === undefined) best = o;
+      } else {
+        for (const [m, v] of others) { const o = v.get(F); if (o && o.N > best.N && o.ctl === undefined) best = { ...o, by: m }; }
+      }
+      return best;
+    };
+    return { get: (F) => pick(F, own.get(F)), *[Symbol.iterator]() { for (const [F, c] of own) yield [F, pick(F, c)!]; } };
+  }
+
+  /** Is `id` the owner or one of its sessions? */
+  inFamily(id: string): boolean {
+    return this.familyOf(id) !== null;
   }
 
   /** Is `id` a session identity this node derived for one of its grants? */
