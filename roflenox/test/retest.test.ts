@@ -359,21 +359,34 @@ test('wrong arity, a conjunction, a negation and a fact held only under another 
       assert.deepEqual(r.body.rows, [], q);
       assert.equal(r.body.note, `${q.split('(')[0]} takes ${n} argument${n === 1 ? '' : 's'}, not ${m}`, q);
     }
-    // A conjunction and a negation: the same refusal, saying a question is one literal.
-    const conj = await asked('edge(F, S, R, T), conf(F, C)');
-    const neg = await asked('not edge(F, S, "uses", T)');
-    const neg2 = await asked('edge(F, S, R, T), not conf(F, 0)');
-    for (const r of [conj, neg, neg2]) {
+    // A conjunction that is not well formed, and a negation no other literal
+    // binds: each explained without the engine's wording (r_conjunction answers
+    // a well-formed one).
+    const conj = await asked('edge(F, S, R, T), conf(F');
+    const conj2 = await asked('edge(F, S, R, T), , conf(F, C)');
+    for (const r of [conj, conj2]) {
       assert.equal(r.status, 400, JSON.stringify(r.body));
       assert.equal(r.body.error, 'bad_query');
-      assert.match(String(r.body.message), /^a question is one literal, rel\(Args\) or rel\[book\]\(Args\)/);
+      assert.match(String(r.body.message), /^a question is one literal, rel\(Args\) or rel\[book\]\(Args\), or a conjunction of them/);
       assert.doesNotMatch(String(r.body.message), INTERNAL);
     }
-    assert.equal(conj.body.message, neg.body.message);
-    // Malformed inside one literal: no engine wording either.
-    const bad = await asked('edge(F, "unterminated, R, T)');
-    assert.equal(bad.status, 400);
-    assert.doesNotMatch(String(bad.body.message), INTERNAL);
+    assert.equal(conj.body.message, conj2.body.message);
+    const neg = await asked('not edge(F, S, "uses", T)');
+    const neg2 = await asked('edge(F, S, R, T), not conf(G, 0)');
+    for (const [r, v] of [[neg, 'F, S, T are'], [neg2, 'G is']] as const) {
+      assert.equal(r.status, 400, JSON.stringify(r.body));
+      assert.equal(r.body.error, 'unbound_negation');
+      assert.match(String(r.body.note), new RegExp(`${v} bound by no other literal`));
+      assert.doesNotMatch(String(r.body.message), INTERNAL);
+    }
+    // Malformed inside one literal — an open quote, a missing comma the engine
+    // itself rejects: no engine wording either.
+    for (const q of ['edge(F, "unterminated, R, T)', 'edge(F, S R, T)', 'edge(F, S, R, T), edge(G, S R, T)']) {
+      const bad = await asked(q);
+      assert.equal(bad.status, 400, q);
+      assert.equal(bad.body.error, 'bad_query', q);
+      assert.doesNotMatch(String(bad.body.message), INTERNAL, q);
+    }
     // answered/3 names its variables, rules or none.
     assert.deepEqual((await asked('answered(K, E, V)')).body.vars, ['K', 'E', 'V']);
     // A fact held only under another perspective: the note names it.
@@ -800,4 +813,53 @@ test('delete_assertion with an attribute fact\'s id names the node and attribute
     // Nothing was written; an id that names nothing is still not found.
     assert.match((await call('delete_assertion', { fact_id: 'f'.repeat(64) })).text, /not found/);
   } finally { await a.stop(); }
+});
+
+test('ask answers a conjunction joining edge and conf, refuses an unbound negation with a note, and stops at the budget with the budget named', async () => {
+  const a = await start(tmpDir('conj'), 'node-a');
+  try {
+    const call = tools(a);
+    const claim = (s: string, t: string, c = 1) => ({ source: s, relation: 'zz_claim', target: t, perspective: 'zz_coord', confidence: c });
+    json(await call('assert', { facts: [claim('session-1', 'task-1'), claim('session-2', 'task-2', 0.5), claim('session-3', 'task-3'),
+      { source: 'task-1', relation: 'zz_state', target: 'done', perspective: 'zz_coord', confidence: 1 }] }));
+    json(await call('assert', { facts: [claim('session-3', 'task-3', 0)] }));
+    type Ans = { vars: string[]; rows: { cells: (string | number)[] }[]; unknown?: { reason: string; budget: number; unit: string }[]; note?: string };
+    const q = async (query: string, o: Record<string, unknown> = {}) => (await post(a.url, '/ask', { query, ...o })).body as unknown as Ans;
+    // edge joined with conf: every named variable bound in every row.
+    const j = await q('edge(F, S, "zz_claim", T), conf(F, C)');
+    assert.deepEqual(j.vars, ['F', 'S', 'T', 'C']);
+    const byS = Object.fromEntries(j.rows.map((r) => [r.cells[1], r.cells[3]]));
+    assert.deepEqual(byS, { 'session-1': 1000, 'session-2': 500, 'session-3': 0 });
+    assert.ok(j.rows.every((r) => r.cells.length === 4 && r.cells.every((c) => c !== undefined && c !== null)));
+    // A constant join and a bound negation: the claims not retired, whose task is not done.
+    const open = await q('edge(F, S, "zz_claim", T), not conf(F, 0), not edge(_, T, "zz_state", "done")');
+    assert.deepEqual(open.rows.map((r) => r.cells[1]), ['session-2']);
+    // Joining through a shared variable across literals of two predicates.
+    const live = await q('live(F, S, "zz_claim", T), asserted(F, P, C, N)');
+    assert.deepEqual(live.vars, ['F', 'S', 'T', 'P', 'C', 'N']);
+    assert.deepEqual(live.rows.map((r) => r.cells[1]).sort(), ['session-1', 'session-2']);
+    // An unbound negation is refused with a note naming the variable.
+    const bad = await post(a.url, '/ask', { query: 'edge(F, S, "zz_claim", T), not conf(G, 0)' });
+    assert.equal(bad.status, 400);
+    assert.match(String(bad.body.note), /G is bound by no other literal/);
+    // Over MCP too.
+    assert.deepEqual(json<Ans>(await call('ask', { query: 'edge(F, S, "zz_claim", T), conf(F, C)' })).rows.length, 3);
+    // More bindings than are asked one by one: joined by the shared variable.
+    json(await call('assert', { facts: Array.from({ length: 70 }, (_, i) => ({ source: `y${i}`, relation: 'zz_y', target: 'v', perspective: 'zz', confidence: (i % 10 + 1) / 10 })) }));
+    const many = await q('edge(F, S, "zz_y", T), conf(F, C)');
+    assert.equal(many.rows.length, 70);
+    assert.ok(many.rows.every((r) => r.cells[3] === ((Number(String(r.cells[1]).slice(1)) % 10) + 1) * 100));
+  } finally { await a.stop(); }
+
+  // A node whose question budget is 20 rows: a conjunction past it stops and names it.
+  const b = await start(tmpDir('conj-budget'), 'node-b', { ruleBudget: 20 });
+  try {
+    await publish(b.url, b.me, Array.from({ length: 30 }, (_, i) => ({ source: `s${i}`, relation: 'zz_x', target: `t${i}`, perspective: 'zz', confidence: 1 })), () => b.clock.t);
+    const r = (await post(b.url, '/ask', { query: 'edge(F, S, "zz_x", T), edge(G, S2, "zz_x", T2)' })).body as unknown as { rows: unknown[]; unknown?: { reason: string; budget: number; unit: string }[] };
+    assert.ok(r.unknown && r.unknown.length === 1, JSON.stringify(r).slice(0, 300));
+    assert.equal(r.unknown![0]!.budget, 20);
+    assert.equal(r.unknown![0]!.unit, 'rows');
+    assert.match(r.unknown![0]!.reason, /^budget/);
+    assert.ok(r.rows.length < 900, `stopped: ${r.rows.length} rows`);
+  } finally { await b.stop(); }
 });

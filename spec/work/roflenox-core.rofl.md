@@ -169,3 +169,4 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_perspective_export` at "9c4300b52797cba876969164f1293a30f5029eb9".
 - `roflenox_core` takes `r_attribute_delete_explains`.
 - `roflenox_core` finished `r_attribute_delete_explains` at "de7f30329d8983500e268e3c9d3a12703ada001a".
+- `roflenox_core` takes `r_conjunction`.

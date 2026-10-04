@@ -4848,6 +4848,74 @@
    "red": [
     "delete_assertion with an attribute fact's id names the node and attribute and points to update_node or retract_node"
    ]
+  },
+  {
+   "id": "M354",
+   "title": "r_conjunction: negations are not applied",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (!stopped && neg.length) {",
+     "    if (false) {"
+    ]
+   ],
+   "red": [
+    "ask answers a conjunction joining edge and conf, refuses an unbound negation with a note, and stops at the budget with the budget named"
+   ]
+  },
+  {
+   "id": "M355",
+   "title": "r_conjunction: an unbound negation is asked anyway",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (free.length) {\n        const note",
+     "      if (false) {\n        const note"
+    ]
+   ],
+   "red": [
+    "ask answers a conjunction joining edge and conf, refuses an unbound negation with a note, and stops at the budget with the budget named"
+   ]
+  },
+  {
+   "id": "M356",
+   "title": "r_conjunction: a conjunction runs past the budget",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (used > this.ruleBudget) { stopped = true; break; }\n      if (rows.length === 0) break;",
+     "      if (rows.length === 0) break;"
+    ],
+    [
+     "          if (used > this.ruleBudget) break;\n        }\n      } else {",
+     "        }\n      } else {"
+    ],
+    [
+     "            if (++used > this.ruleBudget) break;\n          }\n          if (used > this.ruleBudget) break;",
+     "            ++used;\n          }"
+    ]
+   ],
+   "red": [
+    "ask answers a conjunction joining edge and conf, refuses an unbound negation with a note, and stops at the budget with the budget named"
+   ]
+  },
+  {
+   "id": "M357",
+   "title": "r_conjunction: a join keeps rows whose shared variables disagree",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "          for (const r of byKey.get(JSON.stringify(shared.map((v) => row.b.get(v)))) ?? []) {",
+     "          for (const r of [...byKey.values()].flat()) {"
+    ],
+    [
+     "        if (m.has(k) && m.get(k) !== v) return;\n",
+     ""
+    ]
+   ],
+   "red": [
+    "ask answers a conjunction joining edge and conf, refuses an unbound negation with a note, and stops at the budget with the budget named"
+   ]
   }
  ]
 }

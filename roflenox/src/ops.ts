@@ -23,6 +23,7 @@ import { LocalIdentity } from './identity.ts';
 import type { RoflenoxNode } from './node.ts';
 import { edgeIdOf, ENOX_OPS } from './enox-ops.ts';
 import { explainEmpty } from './empty.ts';
+import { parseQuery } from './engine.ts';
 
 /** A property; no `type` means any JSON value. */
 export type Prop = { type?: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object'; description?: string; items?: unknown };
@@ -192,7 +193,9 @@ export const OPS: Op[] = [
       if (a.order !== undefined && a.resume === true) throw new Refusal(400, 'bad_args', 'a page in admission order is not resumed after a change; ask again at the head');
       const ans = await n.ask(query, ctx.caller, perspective, { at, since, ...(a.order === 'admission' ? { order: 'admission' as const } : {}) });
       // (A note looks at the whole latest state; an answer at an earlier head, or since a batch, gets none.)
-      const note = ans.rows.length === 0 && !ans.unknown && at === undefined && since === undefined ? await explainEmpty(n, query, ctx.caller, perspective) : undefined;
+      const one = parseQuery(query);
+      const note = ans.rows.length === 0 && !ans.unknown && at === undefined && since === undefined && one.length === 1 && !one[0]!.neg
+        ? await explainEmpty(n, query, ctx.caller, perspective) : undefined;
       return page(ctx, a, note !== undefined ? { ...ans, note } : ans);
     } },
   { name: 'schema', description: 'How to ask (r_introspect): every predicate ask answers, with its arity, arguments and meaning; every perspective present with its fact count; and the units (confidence in per mille in conf and asserted, 0..1 in the Enox tools). Read it before asking.',

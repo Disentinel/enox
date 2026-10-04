@@ -27,8 +27,8 @@ import {
 } from './identity.ts';
 import { Log, writeFileAtomic, type Fault, type Receipt } from './log.ts';
 import {
-  answeredRule, bookRules, DEFAULT_ROFL_BIN, Engine, mayReadRules, parseLiteral, resultRule, sortRows, splitArgs, SYSTEM_BOOK,
-  type AskAnswer, type AskOptions, type BookScope, type Explanation, type Unknown, type World,
+  answeredRule, bookRules, DEFAULT_ROFL_BIN, Engine, mayReadRules, parseLiteral, parseQuery, resultRule, sortRows, splitArgs, SYSTEM_BOOK,
+  type AskAnswer, type AskOptions, type BookScope, type Explanation, type QueryLiteral, type Unknown, type World,
 } from './engine.ts';
 import { DomainVouch, type DomainTransport } from './domain.ts';
 import { verifyRequest } from './httpsig.ts';
@@ -1003,9 +1003,108 @@ export class RoflenoxNode {
 
   private async askNow(query: string, requester: string | null, perspective: string | null, o: AskOptions): Promise<AskAnswer> {
     const head = o.at ?? this.log.head();
-    const a = await this.askAt(query, requester, perspective, o);
+    const lits = parseQuery(query);
+    const a = lits.length === 1 && !lits[0]!.neg ? await this.askAt(query, requester, perspective, o) : await this.askConjunction(lits, requester, perspective, o);
     a.head = head;
     return a;
+  }
+
+  /** A conjunction (r_conjunction): the positive literals joined left to
+   *  right — a literal sharing variables with few bindings so far is asked
+   *  once per binding with them filled in, otherwise asked whole and joined
+   *  by its shared variables — then each negation asked per binding, which
+   *  its variables must all be bound by. Every literal is asked as `requester`
+   *  through the same access rules; rows examined count against the same
+   *  budget as a rule's steps, and an answer that reaches it stops there and
+   *  names the budget. Each row binds every named variable. */
+  private async askConjunction(lits: QueryLiteral[], requester: string | null, perspective: string | null, o: AskOptions): Promise<AskAnswer> {
+    if (o.since !== undefined || o.order !== undefined) throw new Refusal(400, 'bad_args', 'a conjunction is asked without since or order');
+    const named = (x: string) => /^[A-Z]/.test(x);
+    const varsOf = (l: QueryLiteral) => splitArgs(l.args).filter(named);
+    const pos = lits.filter((l) => !l.neg), neg = lits.filter((l) => l.neg);
+    const bound = new Set(pos.flatMap(varsOf));
+    for (const n of neg) {
+      const free = [...new Set(varsOf(n))].filter((v) => !bound.has(v));
+      if (free.length) {
+        const note = `not ${n.text}: ${free.join(', ')} ${free.length === 1 ? 'is' : 'are'} bound by no other literal; a negation is asked of the bindings the other literals give, so every variable in it must occur in one of them`;
+        throw new Refusal(400, 'unbound_negation', note, { note });
+      }
+    }
+    const vars = [...new Set(pos.flatMap(varsOf))];
+    const term = (v: string | number) => (typeof v === 'number' ? String(v) : roflString(v));
+    const fill = (l: QueryLiteral, b: Map<string, string | number>) =>
+      `${l.rel}${l.book !== null ? `[${l.book}]` : ''}(${splitArgs(l.args).map((x) => (named(x) && b.has(x) ? term(b.get(x)!) : x)).join(', ')})`;
+    const sub = (q: string, l: QueryLiteral) => this.askAt(q, requester, l.rel === 'edge' ? perspective : null, o.at !== undefined ? { at: o.at } : {});
+    type Row = { b: Map<string, string | number>; identity: string };
+    let rows: Row[] = [{ b: new Map(), identity: '' }];
+    let used = 0;
+    let stopped = false;
+    const extend = (row: Row, ans: AskAnswer, r: AskAnswer['rows'][number], out: Row[]) => {
+      const m = new Map(row.b);
+      for (const [i, k] of ans.vars.entries()) {
+        if (!named(k)) continue;
+        const v = r.cells[i]!;
+        if (m.has(k) && m.get(k) !== v) return;
+        m.set(k, v);
+      }
+      out.push({ b: m, identity: row.identity || r.identity });
+    };
+    for (const l of pos) {
+      const shared = varsOf(l).filter((v) => rows[0]?.b.has(v));
+      const next: Row[] = [];
+      if (shared.length && rows.length <= 64) {
+        for (const row of rows) {
+          const ans = await sub(fill(l, row.b), l);
+          used += ans.rows.length;
+          for (const r of ans.rows) extend(row, ans, r, next);
+          if (used > this.ruleBudget) break;
+        }
+      } else {
+        const ans = await sub(l.text, l);
+        used += ans.rows.length;
+        const at = shared.map((v) => ans.vars.indexOf(v));
+        const byKey = new Map<string, AskAnswer['rows']>();
+        for (const r of ans.rows) {
+          const k = JSON.stringify(at.map((i) => r.cells[i]));
+          const xs = byKey.get(k);
+          if (xs) xs.push(r); else byKey.set(k, [r]);
+        }
+        for (const row of rows) {
+          for (const r of byKey.get(JSON.stringify(shared.map((v) => row.b.get(v)))) ?? []) {
+            extend(row, ans, r, next);
+            if (++used > this.ruleBudget) break;
+          }
+          if (used > this.ruleBudget) break;
+        }
+      }
+      rows = next;
+      if (used > this.ruleBudget) { stopped = true; break; }
+      if (rows.length === 0) break;
+    }
+    if (!stopped && neg.length) {
+      const held = new Map<string, boolean>();
+      const kept: Row[] = [];
+      for (const row of rows) {
+        let ok = true;
+        for (const n of neg) {
+          const q = fill(n, row.b);
+          if (!held.has(q)) { held.set(q, (await sub(q, n)).rows.length > 0); used++; }
+          if (held.get(q)) { ok = false; break; }
+        }
+        if (ok) kept.push(row);
+        if (used > this.ruleBudget) { stopped = true; break; }
+      }
+      rows = kept;
+    }
+    const seen = new Set<string>();
+    const out: AskAnswer['rows'] = [];
+    for (const row of rows) {
+      const cells = vars.map((v) => row.b.get(v)!);
+      const k = JSON.stringify([row.identity, cells]);
+      if (!seen.has(k)) { seen.add(k); out.push({ identity: row.identity, cells }); }
+    }
+    sortRows(out);
+    return { vars, rows: out, ...(stopped ? { unknown: [{ identity: requester ?? 'anonymous', reason: `budget: the conjunction stopped after examining ${used} rows; the rows here are those found before it`, budget: this.ruleBudget, unit: 'rows' }] } : {}) };
   }
 
   /** What ask can answer at an earlier head: the facts and their assertions,

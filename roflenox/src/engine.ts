@@ -321,7 +321,36 @@ export function splitArgs(args: string): string[] {
 }
 
 /** What a question is, said the same way by every refusal of one that is not. */
-export const ONE_LITERAL = 'a question is one literal, rel(Args) or rel[book](Args); a conjunction (a, b) or a negation (not a) is not one — ask each literal on its own';
+export const ONE_LITERAL = 'a question is one literal, rel(Args) or rel[book](Args), or a conjunction of them, a, b, not c (r_conjunction): each literal well formed, with its quotes and parentheses closed';
+
+/** One literal of a question: negated or not. */
+export interface QueryLiteral { neg: boolean; text: string; rel: string; book: string | null; args: string }
+
+/** A question as literals (r_conjunction): split at the top-level commas,
+ *  each one a literal, `not` before a negated one. A piece that is no
+ *  literal refuses the whole question in one wording, never the engine's. */
+export function parseQuery(q: string): QueryLiteral[] {
+  if (typeof q !== 'string') throw new Refusal(400, 'bad_query', 'a query is a string');
+  const pieces: string[] = [];
+  let cur = '', depth = 0, inStr = false;
+  for (let i = 0; i < q.length; i++) {
+    const c = q[i]!;
+    if (inStr) { cur += c; if (c === '\\') { cur += q[++i] ?? ''; } else if (c === '"') inStr = false; continue; }
+    if (c === '"') inStr = true;
+    else if (c === '(' || c === '[') depth++;
+    else if ((c === ')' || c === ']') && --depth < 0) throw new Refusal(400, 'bad_query', ONE_LITERAL);
+    if (c === ',' && depth === 0) { pieces.push(cur); cur = ''; continue; }
+    cur += c;
+  }
+  if (inStr || depth !== 0) throw new Refusal(400, 'bad_query', ONE_LITERAL);
+  pieces.push(cur);
+  return pieces.map((p) => {
+    const m = /^\s*(not\s+|\\\+\s*)?([\s\S]*)$/.exec(p)!;
+    const text = m[2]!.trim();
+    if (text === '') throw new Refusal(400, 'bad_query', ONE_LITERAL);
+    return { neg: m[1] !== undefined, text, ...parseLiteral(text) };
+  });
+}
 
 export function parseLiteral(q: string): { rel: string; book: string | null; args: string } {
   if (typeof q !== 'string') throw new Refusal(400, 'bad_query', 'a query is a string');
