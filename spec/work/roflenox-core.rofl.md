@@ -166,3 +166,5 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_conjunction`.
 - `roflenox_core` is blocked on `r_conjunction` by "it conflicts with the accepted r_query_errors, which says a conjunction gets the refusal that a question is one literal and whose test checks that refusal; waiting for the lead to narrow r_query_errors".
 - `roflenox_core` takes `r_perspective_export`.
+- `roflenox_core` finished `r_perspective_export` at "9c4300b52797cba876969164f1293a30f5029eb9".
+- `roflenox_core` takes `r_attribute_delete_explains`.
