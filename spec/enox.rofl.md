@@ -393,7 +393,8 @@ Declared as facts:
 - `r_introspect` is to be checked by "the schema tool lists every predicate ask answers with its arity and every perspective present, and asking each listed predicate with its arity is never refused".
 - `r_query_errors` is about `hybrid`.
 - `r_query_errors` binds as `should`.
-- `r_query_errors` says "every malformed question gets one kind of answer: a wrong arity is a note for every predicate, a conjunction or a negation says a question is one literal without the engine's internal wording, answered/3 names its variables, an empty answer whose facts exist under another perspective names that perspective, and a hash-like id gets no nearest names".
+- `r_query_errors` says "every malformed question gets one kind of answer: a wrong arity is a note for every predicate, a conjunction that is not well formed, or a negation no other literal binds, gets one explanation without the engine's internal wording, answered/3 names its variables, an empty answer whose facts exist under another perspective names that perspective, and a hash-like id gets no nearest names".
+- `r_query_errors` is stated in "narrowed 2026-10-04 so r_conjunction can answer well-formed conjunctions; the refusal without engine internals stays for malformed ones".
 - `r_query_errors` is stated in "owner's claude.ai retest of rofl.enox.dev, 2026-10-04".
 - `r_query_errors` is to be checked by "wrong arity, a conjunction, a negation and a fact held only under another perspective each get one consistent explanation without engine internals".
 - `r_bounded_reads` is about `hybrid`.
