@@ -1070,6 +1070,11 @@ Accepted after verification:
 - `r_assert_then_ask` is accepted at "8c99d1358167d2c72b7752ae3098da627efe10e7".
 - `r_knew_head` is accepted at "fa587b8cd203623342364d3cd39117a74fbe66d1".
 - `r_one_time` is accepted at "976f7b1c712bfd9d91db6cc1a7aa182ef0a3488d".
+- `r_conjunction` is accepted at "f02869996dd4d43be58de1ba4022a4d3519af3ca".
+- `r_owner_rules` is accepted at "aea8212bb8277f91d91ecc01fdfc8554628cf6ac".
+- `r_perspective_export` is accepted at "9c4300b52797cba876969164f1293a30f5029eb9".
+- `r_attribute_delete_explains` is accepted at "de7f30329d8983500e268e3c9d3a12703ada001a".
+- `r_heap_headroom` is accepted at "6447fbfb7bfbf5660449586c3dc1675e3a708481".
 
 > Решение 2026-09-27 по замерам на 200000 фактах: rofl-serve пересчитывает
 > все выведенные факты при каждом evaluate (Eval::run → clear_derived), форк
@@ -1465,6 +1470,20 @@ The checks that exist:
 - "every tool shows times in one form, and a lease that expires by the node's admission times expires whatever time its writer claimed" guards `r_one_time`.
 - "every tool shows times in one form, and a lease that expires by the node's admission times expires whatever time its writer claimed" lives in "roflenox/test/retest.test.ts".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" lives in "personal-node/src/mcp/main-graph.test.ts".
+- "ask answers a conjunction joining edge and conf, refuses an unbound negation with a note, and stops at the budget with the budget named" guards `r_conjunction`.
+- "ask answers a conjunction joining edge and conf, refuses an unbound negation with a note, and stops at the budget with the budget named" lives in "roflenox/test/retest.test.ts".
+- "a rule in the owner's book derives a predicate that ask answers and why explains with that rule" guards `r_owner_rules`.
+- "a rule in the owner's book derives a predicate that ask answers and why explains with that rule" lives in "roflenox/test/retest.test.ts".
+- "a rule that concludes a built-in predicate or exceeds the budget is refused at admission and stored facts and grants are unchanged" guards `r_owner_rules`.
+- "a rule that concludes a built-in predicate or exceeds the budget is refused at admission and stored facts and grants are unchanged" lives in "roflenox/test/retest.test.ts".
+- "a rule written by a delegated session derives for the owner, and goes inert once that session is revoked" guards `r_owner_rules`.
+- "a rule written by a delegated session derives for the owner, and goes inert once that session is revoked" lives in "roflenox/test/retest.test.ts".
+- "two exports of one perspective at the same head are byte-identical, and an export after a retraction no longer holds the retracted fact" guards `r_perspective_export`.
+- "two exports of one perspective at the same head are byte-identical, and an export after a retraction no longer holds the retracted fact" lives in "roflenox/test/retest.test.ts".
+- "delete_assertion with an attribute fact's id names the node and attribute and points to update_node or retract_node" guards `r_attribute_delete_explains`.
+- "delete_assertion with an attribute fact's id names the node and attribute and points to update_node or retract_node" lives in "roflenox/test/retest.test.ts".
+- "on an owner-sized book under a 1 GB heap, ten concurrent graph_stats, recall and ask calls while an embedder polls leave the node alive and answering, and graph_stats answers within 200 ms" guards `r_heap_headroom`.
+- "on an owner-sized book under a 1 GB heap, ten concurrent graph_stats, recall and ask calls while an embedder polls leave the node alive and answering, and graph_stats answers within 200 ms" lives in "roflenox/test/perf/headroom.test.ts".
 
 ## Что выводится
 
