@@ -1037,11 +1037,68 @@ export class RoflenoxNode {
     return undo;
   }
 
+  /** ask since a batch (r_ask_since): the rows of the facts admitted after
+   *  it — in any book the reader may see, as they stand now — found by
+   *  walking only the batches after it, never the whole relation. */
+  private async askSince(digest: string, rel: string, book: string | null, args: string, scope: Map<string, BookScope>, perspective: string | null): Promise<AskAnswer> {
+    if (!RoflenoxNode.AT_REVISION.has(rel)) {
+      throw new Refusal(400, 'not_since', `since answers ${[...RoflenoxNode.AT_REVISION].join(', ')}; ${rel} is derived by the engine`);
+    }
+    const from = this.admissionOf(digest);
+    if (from === undefined) throw new Refusal(404, 'unknown_batch', `no batch ${digest} in this node's log`);
+    const a = splitArgs(args);
+    const vars = a.filter((x, i) => x === '_' || (/^[A-Z_]/.test(x) && a.indexOf(x) === i));
+    const width = rel === 'conf' || rel === 'persp' ? 2 : 4;
+    if (a.length !== width) return { vars, rows: [] };
+    const kept = new Map(this.recent.map((e) => [e.at, e.facts]));
+    const rs = this.log.receipts;
+    const seen = new Set<string>();
+    const rows: AskAnswer['rows'] = [];
+    for (let i = from + 1; i < rs.length; i++) {
+      const r = rs[i]!;
+      if (r.kind !== undefined || r.withheld) continue;
+      const b = bookOf(r.identity);
+      const sc = scope.get(b);
+      if (!sc || (book !== null && book !== b)) continue;
+      const facts = kept.get(i) ?? parseJsonl(this.log.read(r).jsonl!);
+      const cur = this.assertions.of(r.identity);
+      for (const f of facts) {
+        const F = factId(f);
+        const k = `${r.identity}\n${F}`;
+        if (seen.has(k) || (sc.only !== null && !sc.only.has(F))) continue;
+        seen.add(k);
+        const c = cur.get(F);
+        if (!c || (perspective !== null && c.P !== perspective)) continue;
+        const cells: (string | number)[] | null = rel === 'edge' ? [F, f.source, f.relation, f.target]
+          : rel === 'edge_num' ? (/^-?(0|[1-9]\d{0,14})$/.test(f.target) ? [F, f.source, f.relation, Number(f.target)] : null)
+          : rel === 'live' ? (this.liveNow(r.identity, [F, f.source, f.relation, f.target]) ? [F, f.source, f.relation, f.target] : null)
+          : assertionCells(rel, F, c);
+        const m = cells && match(a, cells);
+        if (m) rows.push({ identity: r.identity, cells: m.cells });
+      }
+    }
+    sortRows(rows);
+    return { vars, rows };
+  }
+
+  /** Where a batch stands in the log: its receipt's index. */
+  admissionOf(digest: string): number | undefined {
+    const w = this.byDigest;
+    const rs = this.log.receipts;
+    for (; w.n < rs.length; w.n++) if (rs[w.n]!.kind === undefined) w.at.set(rs[w.n]!.digest, w.n);
+    return w.at.get(digest);
+  }
+  private readonly byDigest: { n: number; at: Map<string, number> } = { n: 0, at: new Map() };
+
   private async askAt(query: string, requester: string | null, perspective: string | null, o: AskOptions): Promise<AskAnswer> {
     const scope = await this.scopeFor(requester);
     await this.requireBook(query, requester, scope, false);
     this.fault('engine:ask');
     const { rel, book, args } = parseLiteral(query);
+    if (o.since !== undefined) {
+      if (o.at !== undefined) throw new Refusal(400, 'bad_args', 'ask takes since or at, not both');
+      return this.askSince(o.since, rel, book, args, scope, perspective);
+    }
     const undo = o.at !== undefined ? this.undoSince(o.at) : null;
     if (undo && !RoflenoxNode.AT_REVISION.has(rel)) {
       throw new Refusal(400, 'not_at_revision', `at an earlier head ask answers ${[...RoflenoxNode.AT_REVISION].join(', ')}; ${rel} is derived by the engine, which holds only the latest state`);

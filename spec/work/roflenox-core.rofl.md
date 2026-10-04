@@ -153,3 +153,4 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_tool_list_clean` at "259149f0acb8e962b4469dda6a8da6906cd0d8a1".
 - `roflenox_core` takes `r_ask_at_revision`.
 - `roflenox_core` finished `r_ask_at_revision` at "04d3cc543cb308c15665f94fc437228847ac9129".
+- `roflenox_core` takes `r_ask_since`.

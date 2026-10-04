@@ -71,7 +71,8 @@ export interface AskRow { identity: string; cells: (string | number)[] }
 export interface Unknown { identity: string; reason: string; budget?: number; unit?: string; window?: number; last_report?: string | null; proof?: unknown[] }
 export interface AskAnswer { vars: string[]; rows: AskRow[]; unknown?: Unknown[]; /** Why there are no rows, when the cause is in the question (src/empty.ts). */ note?: string;
   /** The log head the answer is of (r_ask_at_revision). */ head?: string }
-export interface AskOptions { /** A log head: answer as the node would have when it was the latest. */ at?: string }
+export interface AskOptions { /** A log head: answer as the node would have when it was the latest. */ at?: string;
+  /** A batch digest: answer only from the facts admitted after that batch (r_ask_since). */ since?: string }
 export interface Explanation { identity: string; holds: boolean; text: string; unknown?: { reason: string; budget: number; unit: string } }
 
 export class Engine {

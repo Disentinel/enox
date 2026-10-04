@@ -179,16 +179,17 @@ export const OPS: Op[] = [
       perspective: str('the perspective the facts were asserted under (facts written through the Enox tools and imports are under "enox"); only for edge(F, S, R, T)'),
       limit: { type: 'number' }, cursor: str('from the previous page'),
       resume: { type: 'boolean', description: 'with a cursor of a log that has changed since: continue after its last row instead of refusing' },
-      at: str('a log head (an earlier answer\'s head, or health\'s log_head): answer as the node would have when it was the latest, so several questions read one state') }, ['query']),
+      at: str('a log head (an earlier answer\'s head, or health\'s log_head): answer as the node would have when it was the latest, so several questions read one state'),
+      since: str('a batch digest (an assert answer\'s digest, or one from chain): answer only from the facts admitted after that batch') }, ['query']),
     access: 'anyone', positional: ['query'], http: { method: 'POST', path: '/ask' }, say: rowsSay,
     run: async (ctx, a) => {
       const n = needNode(ctx);
       const perspective = (a.perspective as string | undefined) ?? null;
       const query = await byEdgeId(ctx, a.query);
-      const at = a.at as string | undefined;
-      const ans = await n.ask(query, ctx.caller, perspective, { at });
-      // (A note looks at the latest state; an answer at an earlier head gets none.)
-      const note = ans.rows.length === 0 && !ans.unknown && at === undefined ? await explainEmpty(n, query, ctx.caller, perspective) : undefined;
+      const at = a.at as string | undefined, since = a.since as string | undefined;
+      const ans = await n.ask(query, ctx.caller, perspective, { at, since });
+      // (A note looks at the whole latest state; an answer at an earlier head, or since a batch, gets none.)
+      const note = ans.rows.length === 0 && !ans.unknown && at === undefined && since === undefined ? await explainEmpty(n, query, ctx.caller, perspective) : undefined;
       return page(ctx, a, note !== undefined ? { ...ans, note } : ans);
     } },
   { name: 'schema', description: 'How to ask (r_introspect): every predicate ask answers, with its arity, arguments and meaning; every perspective present with its fact count; and the units (confidence in per mille in conf and asserted, 0..1 in the Enox tools). Read it before asking.',

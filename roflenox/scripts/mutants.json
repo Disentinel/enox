@@ -4616,6 +4616,48 @@
    "red": [
     "two asks at the same head answer the same rows while writes land between them, and an ask at a head older than the node keeps is refused naming the oldest it keeps"
    ]
+  },
+  {
+   "id": "M338",
+   "title": "r_ask_since: since starts from the first batch of the log",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    for (let i = from + 1; i < rs.length; i++) {\n      const r = rs[i]!;\n      if (r.kind !== undefined || r.withheld) continue;",
+     "    for (let i = 0; i < rs.length; i++) {\n      const r = rs[i]!;\n      if (r.kind !== undefined || r.withheld) continue;"
+    ]
+   ],
+   "red": [
+    "ask since a digest answers only the facts admitted after it, and its cost on an owner-sized book grows with the new facts, not the log"
+   ]
+  },
+  {
+   "id": "M339",
+   "title": "r_ask_since: since ignores the perspective",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        if (!c || (perspective !== null && c.P !== perspective)) continue;",
+     "        if (!c) continue;"
+    ]
+   ],
+   "red": [
+    "ask since a digest answers only the facts admitted after it, and its cost on an owner-sized book grows with the new facts, not the log"
+   ]
+  },
+  {
+   "id": "M340",
+   "title": "r_ask_since: since reads every batch of the log and keeps those after the digest",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    for (let i = from + 1; i < rs.length; i++) {\n      const r = rs[i]!;\n      if (r.kind !== undefined || r.withheld) continue;",
+     "    for (let i = 0; i < rs.length; i++) {\n      const r = rs[i]!;\n      if (r.kind !== undefined || r.withheld) continue;\n      if (i <= from) { parseJsonl(this.log.read(r).jsonl!); continue; }"
+    ]
+   ],
+   "red": [
+    "ask since a digest answers only the facts admitted after it, and its cost on an owner-sized book grows with the new facts, not the log"
+   ]
   }
  ]
 }
