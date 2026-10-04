@@ -121,9 +121,9 @@ export const DEFAULT_LIMIT = 1000;
 export const CHAIN_LIMIT = 100;
 export const MAX_LIMIT = 10_000;
 
-function page(ctx: Ctx, a: Record<string, unknown>, ans: { vars: string[]; rows: unknown[]; unknown?: unknown }) {
+function page(ctx: Ctx, a: Record<string, unknown>, ans: { vars: string[]; rows: unknown[]; unknown?: unknown; head?: string }) {
   const limit = Math.min(MAX_LIMIT, Math.max(1, Math.floor((a.limit as number | undefined) ?? DEFAULT_LIMIT)));
-  const head = (ctx.node!.health() as { log_head: string }).log_head;
+  const head = ans.head ?? (ctx.node!.health() as { log_head: string }).log_head;
   const q = createHash('sha256').update(JSON.stringify([a.query, a.perspective ?? null, ctx.caller])).digest('hex').slice(0, 16);
   const key = (r: unknown) => { const x = r as { identity: string; cells: unknown[] }; return JSON.stringify([x.identity, x.cells]); };
   let offset = 0;
@@ -174,18 +174,21 @@ export const OPS: Op[] = [
   { name: 'identity_chain', description: 'An identity\'s document chain as this node holds it.', input: obj({ identity: str() }, ['identity']),
     access: 'anyone', positional: ['identity'], http: { method: 'GET', path: '/identities/:identity' },
     run: async (ctx, a) => needNode(ctx).readIdentityChain(a.identity as string, ctx.caller) },
-  { name: 'ask', description: `Ask one ROFL literal, e.g. edge(F, S, R, T) or edge(F, S, "supersedes", T): stored values are strings, so a constant is quoted (a bare lowercase word is an atom and matches nothing). Optional perspective restricts edge questions to the facts asserted under it. At most \`limit\` rows (default ${DEFAULT_LIMIT}); a longer answer is marked cut, with a cursor for the next page. An answer with no rows carries a \`note\` when the cause is in the question (r_empty_explains). The schema tool lists every predicate with its arity and meaning, the perspectives and the units.`,
+  { name: 'ask', description: `Ask one ROFL literal, e.g. edge(F, S, R, T) or edge(F, S, "supersedes", T): stored values are strings, so a constant is quoted (a bare lowercase word is an atom and matches nothing). Optional perspective restricts edge questions to the facts asserted under it. At most \`limit\` rows (default ${DEFAULT_LIMIT}); a longer answer is marked cut, with a cursor for the next page. An answer with no rows carries a \`note\` when the cause is in the question (r_empty_explains). The schema tool lists every predicate with its arity and meaning, the perspectives and the units. Every answer names the log head it is of: give it as \`at\` to ask more questions of that same state.`,
     input: obj({ query: str('one ROFL literal; quote constants: edge(F, S, "supersedes", T)'),
       perspective: str('the perspective the facts were asserted under (facts written through the Enox tools and imports are under "enox"); only for edge(F, S, R, T)'),
       limit: { type: 'number' }, cursor: str('from the previous page'),
-      resume: { type: 'boolean', description: 'with a cursor of a log that has changed since: continue after its last row instead of refusing' } }, ['query']),
+      resume: { type: 'boolean', description: 'with a cursor of a log that has changed since: continue after its last row instead of refusing' },
+      at: str('a log head (an earlier answer\'s head, or health\'s log_head): answer as the node would have when it was the latest, so several questions read one state') }, ['query']),
     access: 'anyone', positional: ['query'], http: { method: 'POST', path: '/ask' }, say: rowsSay,
     run: async (ctx, a) => {
       const n = needNode(ctx);
       const perspective = (a.perspective as string | undefined) ?? null;
       const query = await byEdgeId(ctx, a.query);
-      const ans = await n.ask(query, ctx.caller, perspective);
-      const note = ans.rows.length === 0 && !ans.unknown ? await explainEmpty(n, query, ctx.caller, perspective) : undefined;
+      const at = a.at as string | undefined;
+      const ans = await n.ask(query, ctx.caller, perspective, { at });
+      // (A note looks at the latest state; an answer at an earlier head gets none.)
+      const note = ans.rows.length === 0 && !ans.unknown && at === undefined ? await explainEmpty(n, query, ctx.caller, perspective) : undefined;
       return page(ctx, a, note !== undefined ? { ...ans, note } : ans);
     } },
   { name: 'schema', description: 'How to ask (r_introspect): every predicate ask answers, with its arity, arguments and meaning; every perspective present with its fact count; and the units (confidence in per mille in conf and asserted, 0..1 in the Enox tools). Read it before asking.',

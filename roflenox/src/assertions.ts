@@ -34,6 +34,8 @@ export interface Current { P: string; C: number; S: number; N: number; follow?: 
 const ONE_VALUE = new Set(['type', 'domain', 'label', 'description', 'source_ref', 'created_at', 'updated_at', 'aliases', 'content_type', 'body',
   'sha256', 'size', 'filename', 'artifact_id', 'asserted_by', 'context', 'proof_depth', 'fact_id', 'deleted_at'].map((a) => `enox:${a}`));
 export const oneValue = (R: string) => ONE_VALUE.has(R);
+/** An identity's assertions, now or as they stood at an earlier head. */
+export interface View { get(F: string): Current | undefined; [Symbol.iterator](): Iterator<[string, Current]> }
 
 /** A CONTROL fact's engine row (r_confidence): grant[book](R, Until),
  *  delegate[book](Agent, Until), export[book](Rel, Audience). One row per
@@ -75,31 +77,46 @@ export class Assertions {
     return m;
   }
 
-  /** The fact that holds the value of a one-value relation of `S` now: the
-   *  latest received above confidence 0 (r_live_view). */
-  valueOf(identity: string, S: string, R: string): string | undefined {
-    const m = this.of(identity);
+  /** The fact that holds the value of a one-value relation of `S` now — or
+   *  in `view`, an earlier state (r_ask_at_revision): the latest received
+   *  above confidence 0 (r_live_view). */
+  valueOf(identity: string, S: string, R: string, view: View = this.of(identity)): string | undefined {
     let best: [number, string] | undefined;
     for (const F of this.values.get(identity)?.get(S)?.get(R) ?? []) {
-      const c = m.get(F)!;
-      if (c.C > 0 && (!best || c.N > best[0])) best = [c.N, F];
+      const c = view.get(F);
+      if (c && c.C > 0 && (!best || c.N > best[0])) best = [c.N, F];
     }
     return best?.[1];
   }
 
-  /** Is this fact live (r_live_view): asserted above confidence 0 now, and —
-   *  for a one-value relation — the value; for a grant, the one in force. */
-  live(identity: string, F: string, S: string, R: string): boolean {
-    const c = this.of(identity).get(F);
+  /** Is this fact live (r_live_view): asserted above confidence 0 now (or in
+   *  `view`), and — for a one-value relation — the value; for a grant, the
+   *  one in force. */
+  live(identity: string, F: string, S: string, R: string, view: View = this.of(identity)): boolean {
+    const c = view.get(F);
     if (!c || c.C <= 0) return false;
     if (c.grantee !== undefined) return c.on === true;
-    return !oneValue(R) || this.valueOf(identity, S, R) === F;
+    return !oneValue(R) || this.valueOf(identity, S, R, view) === F;
+  }
+
+  /** An identity's assertions as they stood before the batches `undo` names
+   *  undid them (r_ask_at_revision): `undo` maps each fact a later batch
+   *  touched to its assertion before that — null where it had none. */
+  viewAt(identity: string, undo: Map<string, Current | null> | undefined): View {
+    const m = this.of(identity);
+    if (!undo || undo.size === 0) return m;
+    return {
+      get: (F) => { const o = undo.get(F); return o === undefined ? m.get(F) : o ?? undefined; },
+      *[Symbol.iterator]() {
+        for (const [F, c] of m) { const o = undo.get(F); if (o === undefined) yield [F, c]; else if (o !== null) yield [F, o]; }
+      },
+    };
   }
 
   /** What a batch changes, without changing anything yet: the engine rows it
    *  replaces (to retract), the rows to load, and `apply` to record it once
    *  the batch is admitted. */
-  plan(identity: string, book: string, facts: Fact[], seq: number): { retract: string[]; load: string; apply: () => void } {
+  plan(identity: string, book: string, facts: Fact[], seq: number): { retract: string[]; load: string; before: Map<string, Current | null>; apply: () => void } {
     const m = this.of(identity);
     const retract: string[] = [];
     const load: string[] = [];
@@ -156,7 +173,10 @@ export class Assertions {
       const still = (F: string, c: Current) => c.follow === name && c.C > 0 && (next.get(F) ?? c) === c;
       if (![...next].some(([F, c]) => still(F, c)) && ![...m].some(([F, c]) => !next.has(F) && still(F, c))) retract.push(followRow(book, name));
     }
-    return { retract, load: load.length ? `${load.join('\n')}\n` : '', apply: () => {
+    // What each fact this batch changes was before it (r_ask_at_revision).
+    const before = new Map<string, Current | null>();
+    for (const F of [...next.keys(), ...on.keys()]) { const c = m.get(F); before.set(F, c ? { ...c } : null); }
+    return { retract, load: load.length ? `${load.join('\n')}\n` : '', before, apply: () => {
       for (const [F, c] of next) m.set(F, c);
       for (const [F, act] of on) m.get(F)!.on = act;
       for (const { F, f } of firsts) this.index(identity, F, f);

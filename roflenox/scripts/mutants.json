@@ -4574,6 +4574,48 @@
    "red": [
     "tools/list holds no tool described as not offered, and re-adding a deleted edge answers restored"
    ]
+  },
+  {
+   "id": "M335",
+   "title": "r_ask_at_revision: an ask at a head answers the latest assertions",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "    if (!undo || undo.size === 0) return m;",
+     "    return m;"
+    ]
+   ],
+   "red": [
+    "two asks at the same head answer the same rows while writes land between them, and an ask at a head older than the node keeps is refused naming the oldest it keeps"
+   ]
+  },
+  {
+   "id": "M336",
+   "title": "r_ask_at_revision: a head older than the node keeps is answered from what it has",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (kept === undefined || first < kept) {",
+     "    if (kept === undefined) {"
+    ]
+   ],
+   "red": [
+    "two asks at the same head answer the same rows while writes land between them, and an ask at a head older than the node keeps is refused naming the oldest it keeps"
+   ]
+  },
+  {
+   "id": "M337",
+   "title": "r_ask_at_revision: an ask at a head keeps the facts admitted after it",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "          ? await this.askFacts(rel, book, args, scope, (id, t) => this.assertions.viewAt(id, undo.get(id)).get(t[0]) !== undefined)",
+     "          ? await this.askFacts(rel, book, args, scope, () => true)"
+    ]
+   ],
+   "red": [
+    "two asks at the same head answer the same rows while writes land between them, and an ask at a head older than the node keeps is refused naming the oldest it keeps"
+   ]
   }
  ]
 }

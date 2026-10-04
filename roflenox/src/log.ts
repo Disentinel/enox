@@ -21,6 +21,7 @@
 // crash can leave in the index is a partial LAST line; it is moved to
 // quarantine/ and reported, never read as a receipt (r_atomic_write,
 // r_no_silent_reset).
+import { createHash, type Hash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { canonicalize } from './jcs.ts';
@@ -77,6 +78,12 @@ export class Log {
   receipts: Receipt[] = [];
   /** What opening had to set aside; reported by /health, never silent. */
   recovered: string[] = [];
+  /** Every head this log has had, by how many receipts it held then
+   *  (r_ask_at_revision): kept from a running SHA-256 of the index, so
+   *  neither a head nor its lookup re-reads the file. */
+  private running: Hash = createHash('sha256');
+  private readonly heads: string[] = [];
+  private readonly countOf = new Map<string, number>();
 
   constructor(dataDir: string, fault: Fault = () => {}) {
     this.dir = path.join(dataDir, 'log');
@@ -100,7 +107,13 @@ export class Log {
       text = text.slice(0, cut);
       this.recovered.push(`a torn last index line (${tail.length} chars, an admission interrupted before its commit) was moved to ${q}`);
     }
+    this.running = createHash('sha256');
+    this.heads.length = 0;
+    this.countOf.clear();
+    this.noteHead(0);
     this.receipts = text.split('\n').filter((l) => l.length > 0).map((l, i) => {
+      this.running.update(`${l}\n`);
+      this.noteHead(i + 1);
       try { return JSON.parse(l) as Receipt; } catch {
         throw new Error(`log/index.jsonl line ${i + 1} is complete but unreadable; refusing to start (the log is not replaced)`);
       }
@@ -125,9 +138,26 @@ export class Log {
     return p;
   }
 
-  /** SHA-256 of the index bytes: names this exact log state, for the snapshot. */
+  /** SHA-256 of the index bytes: names this exact log state. */
   head(): string {
-    return sha256hex(fs.existsSync(this.indexPath) ? fs.readFileSync(this.indexPath) : '');
+    return this.heads[this.heads.length - 1] ?? sha256hex('');
+  }
+
+  /** How many receipts the log held when `head` was its head; undefined for
+   *  a head it never had. */
+  receiptsAt(head: string): number | undefined {
+    return this.countOf.get(head);
+  }
+
+  /** The head the log had when it held `n` receipts. */
+  headAt(n: number): string {
+    return this.heads[n]!;
+  }
+
+  private noteHead(n: number): void {
+    const h = this.running.copy().digest('hex');
+    this.heads[n] = h;
+    this.countOf.set(h, n);
   }
 
   private batchPath(identity: string, digest: string, ext: string): string {
@@ -221,6 +251,8 @@ export class Log {
     } finally { fs.closeSync(fd); }
     this.fault('index:committed');
     this.receipts.push(receipt);
+    this.running.update(line);
+    this.noteHead(this.receipts.length);
     return receipt;
   }
 }

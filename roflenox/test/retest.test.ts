@@ -488,3 +488,83 @@ test('tools/list holds no tool described as not offered, and re-adding a deleted
     assert.deepEqual([batch.results[0]!.created, batch.results[0]!.restored], [false, true]);
   } finally { await a.stop(); }
 });
+
+test('two asks at the same head answer the same rows while writes land between them, and an ask at a head older than the node keeps is refused naming the oldest it keeps', async () => {
+  const a = await start(tmpDir('at-head'), 'node-a');
+  try {
+    const call = tools(a);
+    const claim = (s: string, t: string, c = 1) => ({ source: s, relation: 'zz_claim', target: t, perspective: 'zz_coord', confidence: c });
+    json(await call('assert', { facts: [claim('session-1', 'task-1'), claim('session-2', 'task-2')] }));
+    const ab = json<{ source: string; edge_id: string }>(await call('add_assertion', { source: 'Alpha', target: 'Beta', relation: 'uses' }));
+    json(await call('update_node', { node_id: ab.source, description: 'first' }));
+    type At = Rows & { head: string };
+    const first = (await post(a.url, '/ask', { query: 'live(F, S, "zz_claim", T)' })).body as unknown as At;
+    assert.match(first.head, /^[0-9a-f]{64}$/);
+    const head = first.head;
+    const qs = ['live(F, S, "zz_claim", T)', 'edge(F, S, "zz_claim", T)', 'asserted(F, P, C, S)', 'conf(F, C)', 'persp(F, P)',
+      `live(F, ${JSON.stringify(ab.source)}, "enox:description", T)`, 'edge(F, S, R, T)', 'edge(F, S, "zz_claim", T)'];
+    const before = await Promise.all(qs.map(async (q, i) => (await post(a.url, '/ask', { query: q, at: head, ...(i === 7 ? { perspective: 'zz_coord' } : {}) })).body as unknown as At));
+    // Writes land: a new claim, a retraction, a new value, a new fact, a new identity's book.
+    json(await call('assert', { facts: [claim('session-3', 'task-3'), claim('session-1', 'task-1', 0)] }));
+    json(await call('update_node', { node_id: ab.source, description: 'second' }));
+    assert.equal((await call('delete_assertion', { fact_id: ab.edge_id })).isError, false);
+    const other = identityAt(tmpDir('at-head-b'), 'node-b');
+    await vouch(a, other);
+    await publish(a.url, other, [claim('session-9', 'task-9')], () => a.clock.t);
+    // At the head: exactly the rows of before.
+    for (const [i, q] of qs.entries()) {
+      const again = (await post(a.url, '/ask', { query: q, at: head, ...(i === 7 ? { perspective: 'zz_coord' } : {}) })).body as unknown as At;
+      assert.deepEqual(again.rows, before[i]!.rows, q);
+      assert.equal(again.head, head);
+    }
+    assert.deepEqual(before[0]!.rows.map((r) => r.cells[1]).sort(), ['session-1', 'session-2']);
+    assert.deepEqual(before[5]!.rows.map((r) => r.cells[1]), ['first']);
+    // … and now, the writes are there.
+    const now = (await post(a.url, '/ask', { query: 'live(F, S, "zz_claim", T)' })).body as unknown as At;
+    assert.deepEqual(now.rows.map((r) => [r.identity, r.cells[1]]).sort(), [['node-a', 'session-2'], ['node-a', 'session-3'], ['node-b', 'session-9']]);
+    assert.notEqual(now.head, head);
+    assert.deepEqual(((await post(a.url, '/ask', { query: `live(F, ${JSON.stringify(ab.source)}, "enox:description", T)` })).body as unknown as At).rows.map((r) => r.cells[1]), ['second']);
+    // A derived predicate is answered only at the latest head; an unknown head is refused.
+    assert.equal((await post(a.url, '/ask', { query: 'grant(R, U)', at: head })).status, 400);
+    assert.equal((await post(a.url, '/ask', { query: 'grant(R, U)', at: now.head })).status, 200);
+    assert.equal((await post(a.url, '/ask', { query: 'conf(F, C)', at: 'ab'.repeat(32) })).status, 404);
+    // Paging at a head survives writes landing between the pages.
+    const p1 = (await post(a.url, '/ask', { query: 'edge(F, S, R, T)', at: head, limit: 3 })).body as unknown as At & { cursor: string };
+    json(await call('assert', { facts: [claim('session-4', 'task-4')] }));
+    const p2 = (await post(a.url, '/ask', { query: 'edge(F, S, R, T)', at: head, limit: 1000, cursor: p1.cursor }));
+    assert.equal(p2.status, 200, JSON.stringify(p2.body));
+    assert.deepEqual([...p1.rows, ...(p2.body as unknown as At).rows], before[6]!.rows);
+  } finally { await a.stop(); }
+
+  // A node that keeps the history of its last 5 admitted facts: a head older
+  // than that is refused, naming the oldest head it keeps.
+  const k = await start(tmpDir('at-old'), 'node-k', { recentFacts: 5 });
+  try {
+    const call = tools(k);
+    const facts = (n: number) => Array.from({ length: 3 }, (_, i) => ({ source: `s${n}-${i}`, relation: 'zz_bulk', target: 't', perspective: 'zz', confidence: 1 }));
+    const headNow = async () => ((await post(k.url, '/ask', { query: 'conf(F, C)', limit: 1 })).body as unknown as { head: string }).head;
+    const h0 = await headNow();
+    json(await call('assert', { facts: facts(1) }));
+    const h1 = await headNow();
+    json(await call('assert', { facts: facts(2) }));
+    const h2 = await headNow();
+    json(await call('assert', { facts: facts(3) }));
+    for (const h of [h0, h1]) {
+      const old = await post(k.url, '/ask', { query: 'conf(F, C)', at: h });
+      assert.equal(old.status, 410);
+      assert.equal(old.body.error, 'head_gone');
+      assert.equal(old.body.oldest, h2, 'the oldest head it keeps');
+      assert.match(String(old.body.message), new RegExp(`oldest head it answers at is ${h2}$`));
+    }
+    assert.equal(((await post(k.url, '/ask', { query: 'edge(F, S, "zz_bulk", T)', at: h2 })).body as unknown as Rows).rows.length, 6);
+    // After a restart the window is the same: replay remembers the same batches.
+    await k.node.close();
+    const { RoflenoxNode } = await import('../src/node.ts');
+    const n = await RoflenoxNode.open({ dataDir: k.dir, now: () => k.clock.t, recentFacts: 5 });
+    try {
+      assert.equal((await n.ask('edge(F, S, "zz_bulk", T)', 'node-k', null, { at: h2 })).rows.length, 6);
+      await assert.rejects(n.ask('conf(F, C)', 'node-k', null, { at: h1 }), /oldest head it answers at/);
+    } finally { await n.close(); }
+  } finally { await k.stop().catch(() => {}); }
+});
+

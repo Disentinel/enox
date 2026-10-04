@@ -28,7 +28,7 @@ import {
 import { Log, writeFileAtomic, type Fault, type Receipt } from './log.ts';
 import {
   answeredRule, bookRules, DEFAULT_ROFL_BIN, Engine, mayReadRules, parseLiteral, resultRule, sortRows, splitArgs, SYSTEM_BOOK,
-  type AskAnswer, type BookScope, type Explanation, type Unknown, type World,
+  type AskAnswer, type AskOptions, type BookScope, type Explanation, type Unknown, type World,
 } from './engine.ts';
 import { DomainVouch, type DomainTransport } from './domain.ts';
 import { verifyRequest } from './httpsig.ts';
@@ -141,6 +141,9 @@ export interface NodeOptions {
   domainVouch?: boolean | DomainTransport;
   /** Lifetimes and limits of the OAuth flow (r_mcp_oauth); on with a public URL. */
   oauth?: OAuthOptions;
+  /** How many recently admitted facts are remembered (default RECENT_FACTS):
+   *  the window of earlier heads ask answers at (r_ask_at_revision). */
+  recentFacts?: number;
 }
 
 export const DEFAULT_SILENCE_SEC = 3600;
@@ -196,7 +199,7 @@ export const DEFAULT_RULE_BUDGET = 50_000;
  *  (admittedSince). Counted in facts, not batches: a thousand batches of 2000
  *  would hold two million facts in memory (r_bounded_memory). A view further
  *  behind than this rebuilds. */
-const RECENT_FACTS = 50_000;
+export const RECENT_FACTS = 50_000;
 
 /** What a stranger's failed admission may say about a held identity:
  *  exactly what it would say about an unknown one (RoflenoxNode.asStranger). */
@@ -246,7 +249,10 @@ export class RoflenoxNode {
   private readonly assertions = new Assertions();
   private version = 0;
   /** The last admissions, for views that apply writes instead of rebuilding. */
-  private readonly recent: { version: number; identity: string; facts: Fact[]; seq: number }[] = [];
+  private readonly recent: { version: number; identity: string; facts: Fact[]; seq: number;
+    /** Its receipt's place in the log, and what each fact it changed was
+     *  before it — so an ask can be answered at an earlier head (r_ask_at_revision). */
+    at: number; before: Map<string, Current | null> }[] = [];
   /** The newest claimed_at of each identity's batches (ms): when it last spoke. */
   private readonly lastClaimed = new Map<string, number>();
   /** The values each identity's edges hold, by place — sources, relations,
@@ -257,6 +263,7 @@ export class RoflenoxNode {
   private readonly silenceSec: number;
   private readonly domainVouch: DomainVouch | null;
   private recentFacts = 0;
+  private readonly recentLimit: number;
   /** RFC 9421 nonces seen on signed requests: nonce → expiry (ms). */
   private readonly requestNonces = new Map<string, number>();
 
@@ -271,6 +278,7 @@ export class RoflenoxNode {
     this.oauth = new OAuth(o.dataDir, this.publicUrl, () => operatorTokenOf(o.dataDir), this.now, o.oauth);
     this.warnings.push(...this.oauth.warnings);
     this.ruleBudget = o.ruleBudget ?? DEFAULT_RULE_BUDGET;
+    this.recentLimit = o.recentFacts ?? RECENT_FACTS;
     this.silenceSec = o.silenceSec ?? DEFAULT_SILENCE_SEC;
     this.domainVouch = o.domainVouch ? new DomainVouch(o.domainVouch === true ? {} : o.domainVouch, () => this.now()) : null;
     this.checkpointWindowMs = (o.checkpointWindowSec ?? DEFAULT_CHECKPOINT_WINDOW_SEC) * 1000;
@@ -325,7 +333,7 @@ export class RoflenoxNode {
       }
       const rules = n.chains.has(r.identity) ? null : bookRules(bookOf(r.identity), r.identity);
       const seq = n.chains.get(r.identity)?.length ?? 0;
-      n.record(v, r.via !== undefined);
+      n.record(v, ri, r.via !== undefined);
       batches.push({ v, rules, seq });
     }
     if (n.identity && n.idDocs.has(n.identity.name)) {
@@ -564,7 +572,7 @@ export class RoflenoxNode {
 
   /** `mirrored`: the batch came by a feed or an envelope, not from its author
    *  posting here — its rules are inert until trusted (r_foreign_rules_opt_in). */
-  private record(v: Verified, mirrored = false, seq = (this.chains.get(v.manifest.identity)?.length ?? 0),
+  private record(v: Verified, at: number, mirrored = false, seq = (this.chains.get(v.manifest.identity)?.length ?? 0),
     plan = this.assertions.plan(v.manifest.identity, bookOf(v.manifest.identity), v.facts, seq)): void {
     const id = v.manifest.identity;
     plan.apply();
@@ -586,9 +594,9 @@ export class RoflenoxNode {
     this.version++;
     const claimed = Date.parse(v.manifest.claimed_at);
     if (claimed > (this.lastClaimed.get(id) ?? -Infinity)) this.lastClaimed.set(id, claimed);
-    this.recent.push({ version: this.version, identity: id, facts: v.facts, seq });
+    this.recent.push({ version: this.version, identity: id, facts: v.facts, seq, at, before: plan.before });
     this.recentFacts += v.facts.length;
-    while (this.recentFacts > RECENT_FACTS) this.recentFacts -= this.recent.shift()!.facts.length;
+    while (this.recentFacts > this.recentLimit) this.recentFacts -= this.recent.shift()!.facts.length;
     if (v.pin) this.idDocs.set(id, [v.pin]);
     const chain = this.chains.get(id) ?? [];
     chain.push(v.manifest.digest);
@@ -900,7 +908,7 @@ export class RoflenoxNode {
       throw e;
     }
     await staged.commit();
-    this.record(v, mode !== 'post', seq, plan);
+    this.record(v, this.log.receipts.length - 1, mode !== 'post', seq, plan);
     return receipt;
   }
 
@@ -985,54 +993,104 @@ export class RoflenoxNode {
     throw new Refusal(403, 'no_grant', `${requester} has no live grant to read ${owner}'s book`, { whynot });
   }
 
-  ask(query: string, requester: string | null = null, perspective: string | null = null): Promise<AskAnswer> {
-    return this.serial(async () => {
-      const scope = await this.scopeFor(requester);
-      await this.requireBook(query, requester, scope, false);
-      this.fault('engine:ask');
-      const { rel, book, args } = parseLiteral(query);
-      if (perspective !== null || rel === 'conf' || rel === 'persp' || rel === 'asserted' || rel === 'live') {
-        const a = rel === 'live' && perspective === null ? await this.askLive(book, args, scope) : await this.askAssertions(rel, book, args, scope, perspective);
-        const forked = this.forkedUnknowns(scope, book);
-        if (forked.length) a.unknown = [...(a.unknown ?? []), ...forked];
-        return a;
+  /** Ask one literal as `requester`. `at`: a log head — answer as the node
+   *  would have when that was its latest (r_ask_at_revision). Every answer
+   *  names the head it is of. */
+  ask(query: string, requester: string | null = null, perspective: string | null = null, o: AskOptions = {}): Promise<AskAnswer> {
+    return this.serial(() => this.askNow(query, requester, perspective, o), true);
+  }
+
+  private async askNow(query: string, requester: string | null, perspective: string | null, o: AskOptions): Promise<AskAnswer> {
+    const head = o.at ?? this.log.head();
+    const a = await this.askAt(query, requester, perspective, o);
+    a.head = head;
+    return a;
+  }
+
+  /** What ask can answer at an earlier head: the facts and their assertions,
+   *  which the node can unwind; what rules and control rows derive is the
+   *  engine's, and it holds only the latest state. */
+  static readonly AT_REVISION = new Set(['edge', 'edge_num', 'live', 'asserted', 'conf', 'persp']);
+
+  /** The assertions each later batch changed, as they were at `head`, per
+   *  identity — null when `head` is the latest state of every fact. Refused
+   *  for a head the log never had, and for one older than the node keeps. */
+  private undoSince(head: string): Map<string, Map<string, Current | null>> | null {
+    const n = this.log.receiptsAt(head);
+    if (n === undefined) throw new Refusal(404, 'unknown_head', `${head} was never this node's log head`);
+    const rs = this.log.receipts;
+    let first = -1;
+    for (let i = n; i < rs.length; i++) if (rs[i]!.kind === undefined) { first = i; break; }
+    if (first < 0) return null;
+    const kept = this.recent[0]?.at;
+    if (kept === undefined || first < kept) {
+      const oldest = this.log.headAt(kept ?? rs.length);
+      throw new Refusal(410, 'head_gone', `this node no longer answers at ${head}; the oldest head it answers at is ${oldest}`, { oldest });
+    }
+    const undo = new Map<string, Map<string, Current | null>>();
+    for (const e of this.recent) {
+      if (e.at < n) continue;
+      const m = undo.get(e.identity) ?? new Map<string, Current | null>();
+      undo.set(e.identity, m);
+      for (const [F, c] of e.before) if (!m.has(F)) m.set(F, c);
+    }
+    return undo;
+  }
+
+  private async askAt(query: string, requester: string | null, perspective: string | null, o: AskOptions): Promise<AskAnswer> {
+    const scope = await this.scopeFor(requester);
+    await this.requireBook(query, requester, scope, false);
+    this.fault('engine:ask');
+    const { rel, book, args } = parseLiteral(query);
+    const undo = o.at !== undefined ? this.undoSince(o.at) : null;
+    if (undo && !RoflenoxNode.AT_REVISION.has(rel)) {
+      throw new Refusal(400, 'not_at_revision', `at an earlier head ask answers ${[...RoflenoxNode.AT_REVISION].join(', ')}; ${rel} is derived by the engine, which holds only the latest state`);
+    }
+    if (perspective !== null || rel === 'conf' || rel === 'persp' || rel === 'asserted' || rel === 'live' || undo) {
+      const a = rel === 'live' && perspective === null ? await this.askFacts('edge', book, args, scope, (id, t) => this.liveNow(id, t, undo?.get(id)))
+        : undo && perspective === null && (rel === 'edge' || rel === 'edge_num')
+          ? await this.askFacts(rel, book, args, scope, (id, t) => this.assertions.viewAt(id, undo.get(id)).get(t[0]) !== undefined)
+          : await this.askAssertions(rel, book, args, scope, perspective, undo);
+      const forked = this.forkedUnknowns(scope, book);
+      if (forked.length) a.unknown = [...(a.unknown ?? []), ...forked];
+      return a;
+    }
+    // answered is a rule world's; with none, it still names its variables.
+    const named = splitArgs(args).filter((x, i, xs) => x === '_' || (/^[A-Z_]/.test(x) && xs.indexOf(x) === i));
+    const ans: AskAnswer = rel === 'answered' ? { vars: named, rows: [] } : await this.engine.ask(query, scope);
+    // What the authors' own rules derive, from their rule worlds.
+    const seen = new Set(ans.rows.map((r) => JSON.stringify([r.identity, r.cells])));
+    const unknown: NonNullable<AskAnswer['unknown']> = [];
+    for (const [b, sc] of scope) {
+      if (sc.only !== null || (book !== null && book !== b)) continue;
+      unknown.push(...await this.silentFeeds(sc.identity));
+      const w = await this.ruleWorld(sc.identity);
+      if (!w) continue;
+      const q = rel === 'answered' ? `answered[${SYSTEM_BOOK}](${roflString(b)}, ${args})` : `${rel}[${b}](${args})`;
+      let a;
+      try { this.fault('engine:world-ask'); a = await w.ask(q); } catch (e) {
+        if (this.engine.dead) throw e;       // a death is never an empty answer
+        continue;                            // the relation is not in this world
       }
-      // answered is a rule world's; with none, it still names its variables.
-      const named = splitArgs(args).filter((x, i, xs) => x === '_' || (/^[A-Z_]/.test(x) && xs.indexOf(x) === i));
-      const ans: AskAnswer = rel === 'answered' ? { vars: named, rows: [] } : await this.engine.ask(query, scope);
-      // What the authors' own rules derive, from their rule worlds.
-      const seen = new Set(ans.rows.map((r) => JSON.stringify([r.identity, r.cells])));
-      const unknown: NonNullable<AskAnswer['unknown']> = [];
-      for (const [b, sc] of scope) {
-        if (sc.only !== null || (book !== null && book !== b)) continue;
-        unknown.push(...await this.silentFeeds(sc.identity));
-        const w = await this.ruleWorld(sc.identity);
-        if (!w) continue;
-        const q = rel === 'answered' ? `answered[${SYSTEM_BOOK}](${roflString(b)}, ${args})` : `${rel}[${b}](${args})`;
-        let a;
-        try { this.fault('engine:world-ask'); a = await w.ask(q); } catch (e) {
-          if (this.engine.dead) throw e;       // a death is never an empty answer
-          continue;                            // the relation is not in this world
-        }
-        if (ans.vars.length === 0) ans.vars = a.vars;
-        for (const r of a.rows) {
-          const row = { identity: sc.identity, cells: r.map(decodeCell) };
-          const k = JSON.stringify([row.identity, row.cells]);
-          if (!seen.has(k)) { seen.add(k); ans.rows.push(row); }
-        }
-        if (w.partial) unknown.push({ identity: sc.identity, reason: w.holes.join('; '), budget: this.ruleBudget, unit: 'steps' });
+      if (ans.vars.length === 0) ans.vars = a.vars;
+      for (const r of a.rows) {
+        const row = { identity: sc.identity, cells: r.map(decodeCell) };
+        const k = JSON.stringify([row.identity, row.cells]);
+        if (!seen.has(k)) { seen.add(k); ans.rows.push(row); }
       }
-      unknown.push(...this.forkedUnknowns(scope, book));
-      if (unknown.length) ans.unknown = unknown;
-      sortRows(ans.rows);
-      return ans;
-    }, true);
+      if (w.partial) unknown.push({ identity: sc.identity, reason: w.holes.join('; '), budget: this.ruleBudget, unit: 'steps' });
+    }
+    unknown.push(...this.forkedUnknowns(scope, book));
+    if (unknown.length) ans.unknown = unknown;
+    sortRows(ans.rows);
+    return ans;
   }
 
   /** conf(F, C), persp(F, P), asserted(F, P, C, S), and edge(F, S, R, T)
    *  restricted to a perspective — from the current assertions admission keeps
    *  (src/assertions.ts), within the reader's scope. */
-  private async askAssertions(rel: string, book: string | null, args: string, scope: Map<string, BookScope>, perspective: string | null): Promise<AskAnswer> {
+  private async askAssertions(rel: string, book: string | null, args: string, scope: Map<string, BookScope>, perspective: string | null,
+    undo: Map<string, Map<string, Current | null>> | null = null): Promise<AskAnswer> {
     const a = splitArgs(args);
     const books = [...scope].filter(([b]) => book === null || b === book);
     if (book !== null && books.length === 0) throw new Refusal(404, 'unknown_book', `no visible book ${book}`);
@@ -1044,7 +1102,7 @@ export class RoflenoxNode {
       for (const [b, sc] of books) {
         const r = await this.engine.ask(`edge[${b}](${args})`, new Map([[b, sc]]));
         vars = r.vars;
-        const cur = this.assertions.of(sc.identity);
+        const cur = this.assertions.viewAt(sc.identity, undo?.get(sc.identity));
         const fAt = /^[A-Z_]/.test(a[0]!) && a[0] !== '_' ? r.vars.indexOf(a[0]!) : -1;
         for (const row of r.rows) {
           const F = fAt >= 0 ? String(row.cells[fAt]) : a[0] === '_' ? null : String(JSON.parse(a[0]!));
@@ -1054,7 +1112,7 @@ export class RoflenoxNode {
     } else {
       if (a.length !== (rel === 'asserted' ? 4 : 2)) return { vars, rows: [] };   // the note says the arity (src/empty.ts)
       for (const [, sc] of books) {
-        for (const [F, c] of this.assertions.of(sc.identity)) {
+        for (const [F, c] of this.assertions.viewAt(sc.identity, undo?.get(sc.identity))) {
           if (sc.only !== null && !sc.only.has(F)) continue;
           const m = match(a, assertionCells(rel, F, c));
           if (m) rows.push({ identity: sc.identity, cells: m.cells });
@@ -1070,7 +1128,8 @@ export class RoflenoxNode {
    *  or an edge's attribute), the grant in force — while edge(F, S, R, T)
    *  stays the whole history. Asked of the engine's edges with the
    *  question's constants bound, and filtered by the current assertions. */
-  private async askLive(book: string | null, args: string, scope: Map<string, BookScope>): Promise<AskAnswer> {
+  private async askFacts(rel: 'edge' | 'edge_num', book: string | null, args: string, scope: Map<string, BookScope>,
+    keep: (identity: string, t: [string, string, string, string]) => boolean): Promise<AskAnswer> {
     const a = splitArgs(args);
     const vars = a.filter((x, i) => x === '_' || (/^[A-Z_]/.test(x) && a.indexOf(x) === i));
     if (a.length !== 4) return { vars, rows: [] };                  // the note says the arity (src/empty.ts)
@@ -1080,11 +1139,11 @@ export class RoflenoxNode {
     const probe = a.map((x, i) => (isVar(x) ? `V${i}` : x)).join(', ');
     const rows: AskAnswer['rows'] = [];
     for (const [b, sc] of books) {
-      const r = await this.engine.ask(`edge[${b}](${probe})`, new Map([[b, sc]]));
+      const r = await this.engine.ask(`${rel}[${b}](${probe})`, new Map([[b, sc]]));
       const at = a.map((x, i) => (isVar(x) ? r.vars.indexOf(`V${i}`) : -1));
       for (const row of r.rows) {
         const t = a.map((x, i) => (at[i]! >= 0 ? row.cells[at[i]!]! : decodeCell(x.trim())));
-        if (!this.liveNow(sc.identity, t.map(String) as [string, string, string, string])) continue;
+        if (!keep(sc.identity, t.map(String) as [string, string, string, string])) continue;
         const m = match(a, t);
         if (m) rows.push({ identity: sc.identity, cells: m.cells });
       }
@@ -1095,8 +1154,8 @@ export class RoflenoxNode {
 
   /** Whether a fact of `identity`'s is live now (r_live_view); a grant also
    *  only before its expiry. */
-  private liveNow(identity: string, [F, S, R, T]: [string, string, string, string]): boolean {
-    if (!this.assertions.live(identity, F, S, R)) return false;
+  private liveNow(identity: string, [F, S, R, T]: [string, string, string, string], undo?: Map<string, Current | null>): boolean {
+    if (!this.assertions.live(identity, F, S, R, this.assertions.viewAt(identity, undo))) return false;
     return R !== GRANT || this.now() < Date.parse(T);
   }
 
@@ -1206,7 +1265,7 @@ export class RoflenoxNode {
   }
 
   /** why/whynot live(F, S, R, T): from the current assertions, where ask
-   *  answers it (askLive), so the two agree. */
+   *  answers it (askFacts), so the two agree. */
   private async explainLive(op: 'why' | 'whynot', book: string | null, args: string, scope: Map<string, BookScope>): Promise<Explanation[]> {
     const a = splitArgs(args);
     if (a.length !== 4) throw new Refusal(400, 'bad_query', 'live takes 4 arguments');

@@ -144,6 +144,8 @@ export const QUESTIONS = [
 
 export async function answers(url: string, o: As = {}): Promise<unknown[]> {
   const out: unknown[] = [];
-  for (const q of QUESTIONS) out.push((await post(url, '/ask', { query: q }, o)).body);
+  // (Without the log head an answer names: two nodes holding the same facts
+  // have different logs.)
+  for (const q of QUESTIONS) { const { head: _h, ...b } = (await post(url, '/ask', { query: q }, o)).body; out.push(b); }
   return out;
 }
