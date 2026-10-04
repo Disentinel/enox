@@ -140,3 +140,4 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_retract_node`.
 - `roflenox_core` finished `r_retract_node` at "1fe1bde79dc193101a568488e5f8f832363f5fac".
 - `roflenox_core` takes `r_delete_any_perspective`.
+- `roflenox_core` finished `r_delete_any_perspective` at "691b41576f63a8e164c49b5d0947fb7a29cf3943".
