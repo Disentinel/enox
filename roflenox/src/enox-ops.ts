@@ -375,7 +375,8 @@ export const ENOX_OPS: Op[] = [
           if (!x.source || !x.target || !x.relation) throw new Error('source, target and relation are required');
           const r = addFacts(g, x, agent(ctx), created, self(ctx));
           all.push(...r.facts);
-          return { fact_id: r.result.fact_id, edge_id: r.result.edge_id, source: r.result.source, target: r.result.target, relation: r.result.relation, asserted_by: r.result.asserted_by, claimed_by: r.result.claimed_by, ok: true, created: r.result.created };
+          return { fact_id: r.result.fact_id, edge_id: r.result.edge_id, source: r.result.source, target: r.result.target, relation: r.result.relation, asserted_by: r.result.asserted_by, claimed_by: r.result.claimed_by, ok: true, created: r.result.created,
+            ...(r.result.restored ? { restored: true } : {}) };
         } catch (e) {
           return { fact_id: '', source: x.source, target: x.target, relation: x.relation, ok: false, error: String(e) };
         }
@@ -407,7 +408,8 @@ export const ENOX_OPS: Op[] = [
       facts.push(...r.facts);
       const batch = await write(ctx, facts);
       return { subject: { id: subj!.id, name: subj!.name }, fact: { id: fid, text: truncateAtWordBoundary(fact, 300) }, relation,
-        asserted_by: r.result.asserted_by, claimed_by: r.result.claimed_by, fact_id: r.result.fact_id, edge_id: r.result.edge_id, created: r.result.created, batch };
+        asserted_by: r.result.asserted_by, claimed_by: r.result.claimed_by, fact_id: r.result.fact_id, edge_id: r.result.edge_id, created: r.result.created,
+        ...(r.result.restored ? { restored: true } : {}), batch };
     } },
   { name: 'update_assertion', description: 'Change an assertion\'s confidence/context/author: a new assertion that supersedes.',
     input: obj({ fact_id: s(), confidence: n(), context: s(), asserted_by: s(), proof_depth: ASSERTION.proof_depth! }, ['fact_id']), access: 'operator', text: pretty,
@@ -537,9 +539,13 @@ export const ENOX_OPS: Op[] = [
   // ---- shares: roflenox shares by grant and export; there are no token links ----
   { name: 'list_shares', description: 'Enox share links. A roflenox node has none: it shares by grants and exports.', input: obj({ include_revoked: b() }),
     access: 'anyone', text: pretty, run: async () => ({ count: 0, shares: [] }) },
+  // Enox's token shares do not work here: not in tools/list (r_tool_list_clean),
+  // and a client that calls them anyway is told what to do instead.
   { name: 'create_share', description: 'Not offered: share by a grant to an identity, or an export rule (roflenox:grant / roflenox:export facts).',
+    unlisted: 'a roflenox node shares by grants and exports, not token links',
     input: obj({ name: s(), domains: { type: 'array' }, description: s(), ttl_days: n() }, ['name', 'domains']), access: 'operator', text: plain,
     run: async () => { throw refuseText('Failed to create share: token links are not offered by a roflenox node; publish a roflenox:grant to the reader\'s identity, or a roflenox:export rule, instead.'); } },
-  { name: 'revoke_share', description: 'Not offered: a grant ends at its expiry or with a newer grant.', input: obj({ id: s() }, ['id']), access: 'operator', text: plain,
+  { name: 'revoke_share', description: 'Not offered: a grant ends at its expiry or with a newer grant.', unlisted: 'there are no token links to revoke',
+    input: obj({ id: s() }, ['id']), access: 'operator', text: plain,
     run: async (_c, a) => { throw refuseText(`Share ${a.id} not found — nothing to revoke.`); } },
 ];

@@ -26,7 +26,7 @@ test('the same data directory answers the same over stdio and over HTTP', async 
   const init = await rpc('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 't', version: '0' } });
   assert.equal(init.result.serverInfo.name, 'roflenox');
   const names = ((await rpc('tools/list', {})).result.tools as { name: string }[]).map((t) => t.name).sort();
-  assert.deepEqual(names, OPS.map((o) => o.name).sort(), 'over stdio every row, local ones included');
+  assert.deepEqual(names, OPS.filter((o) => o.unlisted === undefined).map((o) => o.name).sort(), 'over stdio every listed row, local ones included');
   const asserted = await rpc('tools/call', { name: 'assert', arguments: { facts: [
     { source: 'solo', relation: 'wrote', target: 'notes', perspective: 'local', confidence: 0.8 },
     { source: 'solo', relation: 'rule', target: 'x', perspective: 'local', confidence: 1 }] } });
@@ -56,6 +56,6 @@ test('the same data directory answers the same over stdio and over HTTP', async 
     // ...and HTTP offers no local-only row.
     const listed = ((await (await fetch(`${n.url}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
       body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }) })).json()) as any).result.tools.map((t: { name: string }) => t.name);
-    assert.deepEqual(listed.sort(), OPS.filter((o) => !isLocal(o)).map((o) => o.name).sort());
+    assert.deepEqual(listed.sort(), OPS.filter((o) => !isLocal(o) && o.unlisted === undefined).map((o) => o.name).sort());
   } finally { await n.stop(); }
 });

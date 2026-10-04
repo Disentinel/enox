@@ -61,7 +61,8 @@ test('every operation in the table is reachable with the same name and schema ov
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
     })).json() as Promise<{ result?: { tools: { name: string; inputSchema: unknown }[] }; error?: { code: number } }>;
     const tools = (await rpc('tools/list', {})).result!.tools;
-    assert.deepEqual(tools.map((t) => t.name).sort(), network.map((o) => o.name).sort());
+    // (An op the table marks unlisted — it does not work on a node — is not offered, r_tool_list_clean.)
+    assert.deepEqual(tools.map((t) => t.name).sort(), network.filter((o) => o.unlisted === undefined).map((o) => o.name).sort());
     for (const t of tools) assert.deepEqual(t.inputSchema, OPS.find((o) => o.name === t.name)!.input, t.name);
     for (const o of OPS.filter(isLocal)) assert.equal((await rpc('tools/call', { name: o.name, arguments: {} })).error?.code, -32602, o.name);
 

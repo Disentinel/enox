@@ -452,3 +452,39 @@ test('chain pages with a limit, semantic_search cuts descriptions to the cap, an
     assert.deepEqual(theirs.map((e) => e.identity), ['embedder.example.org']);
   } finally { await a.stop(); }
 });
+
+test('tools/list holds no tool described as not offered, and re-adding a deleted edge answers restored', async () => {
+  const a = await start(tmpDir('tool-list'), 'node-a');
+  try {
+    const call = tools(a);
+    const list = await fetch(`${a.url}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${a.node.operatorToken()}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) });
+    const listed = ((await list.json()) as { result: { tools: { name: string; description: string }[] } }).result.tools;
+    assert.deepEqual(listed.filter((t) => /not offered/i.test(t.description)).map((t) => t.name), []);
+    for (const n of ['create_share', 'revoke_share']) assert.ok(!listed.some((t) => t.name === n), n);
+    assert.ok(listed.some((t) => t.name === 'list_shares') && listed.some((t) => t.name === 'retract_node'));
+    // A client that calls one anyway is told what to do instead.
+    const share = await call('create_share', { name: 'x', domains: ['cs'] });
+    assert.equal(share.isError, true);
+    assert.match(share.text, /roflenox:grant/);
+
+    // Re-adding a deleted edge: restored, with its old ids — not created, not updated.
+    type Added = { fact_id: string; edge_id: string; created: boolean; updated: boolean; restored?: boolean };
+    const first = json<Added>(await call('add_assertion', { source: 'Alpha', target: 'Beta', relation: 'uses', proof_depth: 2 }));
+    assert.deepEqual([first.created, first.updated, first.restored], [true, false, undefined]);
+    const again = json<Added>(await call('add_assertion', { source: 'Alpha', target: 'Beta', relation: 'uses' }));
+    assert.deepEqual([again.created, again.updated, again.restored], [false, true, undefined]);
+    assert.equal((await call('delete_assertion', { fact_id: first.fact_id })).isError, false);
+    const back = json<Added>(await call('add_assertion', { source: 'Alpha', target: 'Beta', relation: 'uses' }));
+    assert.deepEqual([back.created, back.updated, back.restored, back.fact_id, back.edge_id], [false, false, true, first.fact_id, first.edge_id]);
+    // It is an edge again, keeping its first created_at and proof_depth.
+    const q = json<{ outgoing: { fact_id: string; created_at: string }[] }>(await call('query_graph', { node_id: json<{ id: string }[]>(await call('query_graph', { query: 'Alpha' }))[0]!.id }));
+    assert.equal(q.outgoing.filter((e) => e.fact_id === first.fact_id).length, 1);
+    assert.equal((await ask(a, `edge(G, ${JSON.stringify(first.edge_id)}, "enox:created_at", T)`)).rows.length, 1, 'created once');
+    assert.deepEqual((await ask(a, `live(G, ${JSON.stringify(first.edge_id)}, "enox:proof_depth", T)`)).rows.map((r) => r.cells[1]), ['2']);
+    // batch_assertions says the same.
+    assert.equal((await call('delete_assertion', { fact_id: first.edge_id })).isError, false);
+    const batch = json<{ results: Added[] }>(await call('batch_assertions', { assertions: [{ source: 'Alpha', target: 'Beta', relation: 'uses' }] }));
+    assert.deepEqual([batch.results[0]!.created, batch.results[0]!.restored], [false, true]);
+  } finally { await a.stop(); }
+});

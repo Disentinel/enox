@@ -56,6 +56,9 @@ export interface Op {
    *  change, a checkpoint): while another process holds the directory, it
    *  refuses instead of signing beside it (r_single_writer). */
   alone?: true;
+  /** Callable, but not offered in tools/list, because it does not work on
+   *  a node (r_tool_list_clean): why. */
+  unlisted?: string;
   /** CLI convenience: properties that may also be given positionally, in order. */
   positional?: string[];
   /** A wire alias. `:x` path segments and GET query parameters become args;

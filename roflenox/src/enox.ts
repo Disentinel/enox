@@ -386,14 +386,19 @@ export function addFacts(g: Graph, a: AddArgs, agent: string, created: Map<strin
   const fid = enoxFactId(sid, a.relation, tid);
   const existing = g.edgeByFactId(fid);
   const F = factId({ source: sid, relation: a.relation, target: tid });
+  // A deleted edge asserted again is RESTORED (r_tool_list_clean): neither
+  // created (it keeps its history and ids) nor updated.
+  const restored = !existing && g.assertion(F)?.confidence === 0;
   const confidence = a.confidence ?? 1;
   const by = (typeof a.asserted_by === 'string' && a.asserted_by.trim()) || agent;     // never empty (r_claimed_author)
   facts.push({ source: sid, relation: a.relation, target: tid, perspective: ENOX_PERSPECTIVE, confidence },
     meta(F, 'asserted_by', by), meta(F, 'fact_id', fid), meta(F, 'updated_at', t));
   if (a.context) facts.push(meta(F, 'context', a.context));
-  if (!existing) facts.push(meta(F, 'created_at', t), meta(F, 'proof_depth', a.proof_depth ?? 0));
+  if (!existing && !restored) facts.push(meta(F, 'created_at', t), meta(F, 'proof_depth', a.proof_depth ?? 0));
+  else if (restored && a.proof_depth !== undefined) facts.push(meta(F, 'proof_depth', a.proof_depth));
   const result = { fact_id: fid, edge_id: F, source: sid, target: tid, relation: a.relation, asserted_by: signer, claimed_by: by, confidence,
-    proof_depth: existing ? existing.proof_depth : a.proof_depth ?? 0, context: a.context ?? '', created: !existing, updated: !!existing };
+    proof_depth: existing ? existing.proof_depth : a.proof_depth ?? 0, context: a.context ?? '', created: !existing && !restored, updated: !!existing,
+    ...(restored ? { restored: true } : {}) };
   return { facts, result, inverse: g.out(tid).find((e) => e.target === sid && e.relation === a.relation) };
 }
 

@@ -805,8 +805,8 @@
    "file": "src/ops.ts",
    "edits": [
     [
-     "needNode(ctx).ask(a.query as string, ctx.caller,",
-     "needNode(ctx).ask(a.query as string, ctx.node?.identity?.name ?? null,"
+     "    const ans = await n.ask(query, ctx.caller, perspective);",
+     "    const ans = await n.ask(query, n.identity?.name ?? null, perspective);"
     ]
    ],
    "red": [
@@ -1078,8 +1078,8 @@
    "file": "src/enox-ops.ts",
    "edits": [
     [
-     "      await write(ctx, [{ source: e.source, relation: e.relation, target: e.target, perspective: ENOX_PERSPECTIVE, confidence: 0 },\n        meta(e.F, 'deleted_at', new Date().toISOString())]);\n",
-     ""
+     "      const batch = await write(ctx, [{ source: f.S, relation: f.R, target: f.T, perspective: f.P, confidence: 0 },\n        meta(f.F, 'deleted_at', new Date().toISOString())]);\n",
+     "      const batch = null;\n"
     ]
    ],
    "red": [
@@ -1477,8 +1477,8 @@
    "file": "src/assertions.ts",
    "edits": [
     [
-     "apply: () => { for (const [F, c] of next) m.set(F, c); } };",
-     "apply: () => {} };"
+     "      for (const [F, c] of next) m.set(F, c);\n      for (const [F, act] of on) m.get(F)!.on = act;\n",
+     ""
     ]
    ],
    "red": [
@@ -2440,8 +2440,8 @@
    "file": "src/assertions.ts",
    "edits": [
     [
-     "      if (acting(was) && !acting(cur)) retract.push(was.ctl);",
-     "      if (false && acting(was) && !acting(cur)) retract.push(was.ctl);"
+     "      if (!act && was) retracts.add(m.get(F)!.ctl!);",
+     "      if (false && !act && was) retracts.add(m.get(F)!.ctl!);"
     ]
    ],
    "red": [
@@ -2454,8 +2454,12 @@
    "file": "src/assertions.ts",
    "edits": [
     [
-     "=> c?.ctl !== undefined && c.C > 0;",
-     "=> c?.ctl !== undefined;"
+     "    for (const [F, cur] of next) if (cur.ctl !== undefined && cur.grantee === undefined) on.set(F, cur.C > 0);",
+     "    for (const [F, cur] of next) if (cur.ctl !== undefined && cur.grantee === undefined) on.set(F, true);"
+    ],
+    [
+     "      for (const F of Fs) on.set(F, F === latest![1] && (next.get(F) ?? m.get(F)!).C > 0);",
+     "      for (const F of Fs) on.set(F, F === latest![1]);"
     ]
    ],
    "red": [
@@ -4335,8 +4339,8 @@
    "file": "src/enox-ops.ts",
    "edits": [
     [
-     "      await write(ctx, [{ source: f.S, relation: f.R, target: f.T, perspective: f.P, confidence: 0 },",
-     "      await write(ctx, [{ source: f.S, relation: f.R, target: f.T, perspective: ENOX_PERSPECTIVE, confidence: 0 },"
+     "      const batch = await write(ctx, [{ source: f.S, relation: f.R, target: f.T, perspective: f.P, confidence: 0 },",
+     "      const batch = await write(ctx, [{ source: f.S, relation: f.R, target: f.T, perspective: ENOX_PERSPECTIVE, confidence: 0 },"
     ]
    ],
    "red": [
@@ -4541,6 +4545,34 @@
    ],
    "red": [
     "chain pages with a limit, semantic_search cuts descriptions to the cap, and why on an Enox edge answers once with the batch and claim of its axiom"
+   ]
+  },
+  {
+   "id": "M333",
+   "title": "r_tool_list_clean: tools/list offers the tools that do not work here",
+   "file": "src/mcp.ts",
+   "edits": [
+    [
+     "  return OPS.filter((o) => (surface === 'local' || !isLocal(o)) && o.unlisted === undefined)",
+     "  return OPS.filter((o) => (surface === 'local' || !isLocal(o)))"
+    ]
+   ],
+   "red": [
+    "tools/list holds no tool described as not offered, and re-adding a deleted edge answers restored"
+   ]
+  },
+  {
+   "id": "M334",
+   "title": "r_tool_list_clean: re-adding a deleted edge answers created",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "  const restored = !existing && g.assertion(F)?.confidence === 0;",
+     "  const restored = false;"
+    ]
+   ],
+   "red": [
+    "tools/list holds no tool described as not offered, and re-adding a deleted edge answers restored"
    ]
   }
  ]

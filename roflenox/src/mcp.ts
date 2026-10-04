@@ -18,7 +18,7 @@ interface Rpc { jsonrpc?: string; id?: string | number | null; method?: string; 
 /** The tools of a surface: the operation table, minus local-only operations
  *  when the transport is the network. Schema = the op's input schema. */
 export function toolsFor(surface: 'network' | 'local') {
-  return OPS.filter((o) => surface === 'local' || !isLocal(o))
+  return OPS.filter((o) => (surface === 'local' || !isLocal(o)) && o.unlisted === undefined)
     .map((o) => ({ name: o.name, description: o.description, inputSchema: o.input }));
 }
 
