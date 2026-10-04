@@ -163,3 +163,6 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_knew_head` at "fa587b8cd203623342364d3cd39117a74fbe66d1".
 - `roflenox_core` takes `r_one_time`.
 - `roflenox_core` finished `r_one_time` at "976f7b1c712bfd9d91db6cc1a7aa182ef0a3488d".
+- `roflenox_core` takes `r_conjunction`.
+- `roflenox_core` is blocked on `r_conjunction` by "it conflicts with the accepted r_query_errors, which says a conjunction gets the refusal that a question is one literal and whose test checks that refusal; waiting for the lead to narrow r_query_errors".
+- `roflenox_core` takes `r_perspective_export`.
