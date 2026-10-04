@@ -49,6 +49,29 @@ export const ARITY: Record<string, number> = {
   edge: 4, edge_num: 4, live: 4, asserted: 4, conf: 2, persp: 2, answered: 3, intent: 4, grant: 2, delegate: 2, export: 2, follows: 2, trusts: 1,
 };
 const BASE_PREDICATES = Object.keys(ARITY);
+/** What each predicate ask answers holds (r_introspect): its arguments, and
+ *  what a row means. */
+export const MEANING: Record<string, { args: string[]; meaning: string }> = {
+  edge: { args: ['F', 'S', 'R', 'T'], meaning: 'every fact ever asserted, the whole history: F its id, S source, R relation, T target (all strings); retired facts stay' },
+  edge_num: { args: ['F', 'S', 'R', 'N'], meaning: 'edge, for a target that is an integer, as a number N (to compare and count)' },
+  live: { args: ['F', 'S', 'R', 'T'], meaning: 'the edges as they stand now: asserted above confidence 0, the latest value of a one-value attribute (enox:label, enox:description, enox:context, ...), the grant in force' },
+  asserted: { args: ['F', 'P', 'C', 'S'], meaning: 'the current assertion of fact F by the book\'s identity: perspective P, confidence C in per mille (0..1000), S the position of its batch in the identity\'s chain' },
+  conf: { args: ['F', 'C'], meaning: 'the current confidence of fact F, in per mille (0..1000; 0 = retired)' },
+  persp: { args: ['F', 'P'], meaning: 'the perspective fact F is currently asserted under' },
+  answered: { args: ['K', 'E', 'V'], meaning: 'an intent K of a book with rules, answered by executor E with value V' },
+  intent: { args: ['K', 'E', 'Kind', 'In'], meaning: 'an intent K addressed to executor E (a follow, a search by meaning, or one a rule derives)' },
+  grant: { args: ['R', 'U'], meaning: 'the grant in force to reader R, until U (Unix seconds)' },
+  delegate: { args: ['A', 'U'], meaning: 'agent A acts for the book\'s identity until U (Unix seconds)' },
+  export: { args: ['Rel', 'A'], meaning: 'facts of relation Rel (or "*") may leave this node to audience A ("public" or an identity)' },
+  follows: { args: ['Name', 'Book'], meaning: 'the book\'s identity follows Name\'s feed; Book is that feed\'s book atom' },
+  trusts: { args: ['Name'], meaning: 'the operator runs the rules of Name here' },
+};
+/** The units of the numbers ask and the Enox tools answer with. */
+export const UNITS = {
+  confidence: 'conf and asserted give confidence in per mille, 0..1000 (1000 = certain, 0 = retired); the Enox tools (add_assertion, explore, recall, ...) give it as 0..1',
+  seq: 'asserted\'s S and an assert answer\'s seq are a batch\'s position in its identity\'s chain, from 0 (chain[seq] is its digest)',
+  time: 'grant and delegate expiries are Unix seconds; enox:created_at and enox:updated_at are RFC 3339 text',
+};
 /** The longest value kept by place for empty-answer notes: a name, an id or
  *  a date, not a description or an embedding. */
 export const VALUE_MAX = 256;
@@ -1181,6 +1204,33 @@ export class RoflenoxNode {
         if (withPerspectives) for (const [F, c] of this.assertions.of(sc.identity)) if (sc.only === null || sc.only.has(F)) perspectives.add(c.P);
       }
       return { predicates, perspectives, whole, partial };
+    }, true);
+  }
+
+  /** What a caller may ask (r_introspect): every predicate ask answers with
+   *  its arity and meaning — the node's own and the heads of the rules in the
+   *  books the caller reads whole — and every perspective present among the
+   *  facts it may see, with how many facts are currently asserted under it. */
+  schema(requester: string | null): Promise<{ predicates: { name: string; arity: number; args: string[]; meaning: string }[]; perspectives: { perspective: string; facts: number }[] }> {
+    return this.serial(async () => {
+      const predicates = Object.entries(MEANING).map(([name, m]) => ({ name, arity: ARITY[name]!, args: m.args, meaning: m.meaning }));
+      const counts = new Map<string, number>();
+      const heads = new Map<string, { arity: number; by: Set<string> }>();
+      for (const [, sc] of await this.scopeFor(requester)) {
+        for (const [F, c] of this.assertions.of(sc.identity)) if (sc.only === null || sc.only.has(F)) counts.set(c.P, (counts.get(c.P) ?? 0) + 1);
+        if (sc.only !== null) continue;
+        for (const r of this.currentRules(sc.identity)) {
+          const m = /^([a-z][A-Za-z0-9_]*)\[[^\]]*\]\(([^)]*)\)/.exec(r);
+          if (!m || ARITY[m[1]!] !== undefined) continue;
+          const h = heads.get(m[1]!) ?? { arity: splitArgs(m[2]!).length, by: new Set<string>() };
+          h.by.add(sc.identity);
+          heads.set(m[1]!, h);
+        }
+      }
+      for (const [name, h] of [...heads].sort((x, y) => (x[0] < y[0] ? -1 : 1))) {
+        predicates.push({ name, arity: h.arity, args: Array.from({ length: h.arity }, (_, i) => `X${i + 1}`), meaning: `derived by the rules of ${[...h.by].sort().join(', ')}` });
+      }
+      return { predicates, perspectives: [...counts].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).map(([perspective, facts]) => ({ perspective, facts })) };
     }, true);
   }
 

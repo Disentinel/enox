@@ -143,3 +143,4 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_delete_any_perspective` at "691b41576f63a8e164c49b5d0947fb7a29cf3943".
 - `roflenox_core` takes `r_assert_receipt`.
 - `roflenox_core` finished `r_assert_receipt` at "a4ff03709c29b4f698f634ae7041af70caaa4d41".
+- `roflenox_core` takes `r_introspect`.

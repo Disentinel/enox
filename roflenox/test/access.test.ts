@@ -291,7 +291,7 @@ test('an anonymous caller of every open endpoint learns the node\'s own name and
         admit_feed: { identity: fake.identityChain(), batches: [{ manifest: b.manifest, jsonl: b.jsonl, salt: b.salt }], checkpoint: fake.checkpoint(b.manifest.digest, iso(a.clock.t)) },
         admit_sealed: seal(b, [{ identity: 'node-a', enc_public_key: a.me.identityDoc().doc.enc.public_key }]),
         query_graph: { query: H }, graph_stats: {}, explore: { entity: H }, traverse: { entity: H }, recall: { query: H }, semantic_search: { query: H },
-        recent_activity: {}, decide: { task: H }, list_artifacts: {}, get_artifact: { id: H }, list_shares: {},
+        recent_activity: {}, decide: { task: H }, schema: {}, list_artifacts: {}, get_artifact: { id: H }, list_shares: {},
         // The operator's own: refused to anyone else, the same way whatever the name.
         assert: { facts: [fact(H, 'x', 'y')] }, add_assertion: { source: H, target: 'y', relation: 'x' }, batch_assertions: { assertions: [] },
         remember: { subject: H, fact: 'x' }, update_assertion: { fact_id: H }, delete_assertion: { fact_id: H }, update_node: { node_id: H }, retract_node: { node_id: H },

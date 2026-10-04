@@ -169,7 +169,7 @@ export const OPS: Op[] = [
   { name: 'identity_chain', description: 'An identity\'s document chain as this node holds it.', input: obj({ identity: str() }, ['identity']),
     access: 'anyone', positional: ['identity'], http: { method: 'GET', path: '/identities/:identity' },
     run: async (ctx, a) => needNode(ctx).readIdentityChain(a.identity as string, ctx.caller) },
-  { name: 'ask', description: `Ask one ROFL literal, e.g. edge(F, S, R, T) or edge(F, S, "supersedes", T): stored values are strings, so a constant is quoted (a bare lowercase word is an atom and matches nothing). Optional perspective restricts edge questions to the facts asserted under it. At most \`limit\` rows (default ${DEFAULT_LIMIT}); a longer answer is marked cut, with a cursor for the next page. An answer with no rows carries a \`note\` when the cause is in the question (r_empty_explains).`,
+  { name: 'ask', description: `Ask one ROFL literal, e.g. edge(F, S, R, T) or edge(F, S, "supersedes", T): stored values are strings, so a constant is quoted (a bare lowercase word is an atom and matches nothing). Optional perspective restricts edge questions to the facts asserted under it. At most \`limit\` rows (default ${DEFAULT_LIMIT}); a longer answer is marked cut, with a cursor for the next page. An answer with no rows carries a \`note\` when the cause is in the question (r_empty_explains). The schema tool lists every predicate with its arity and meaning, the perspectives and the units.`,
     input: obj({ query: str('one ROFL literal; quote constants: edge(F, S, "supersedes", T)'),
       perspective: str('the perspective the facts were asserted under (facts written through the Enox tools and imports are under "enox"); only for edge(F, S, R, T)'),
       limit: { type: 'number' }, cursor: str('from the previous page'),
@@ -182,6 +182,13 @@ export const OPS: Op[] = [
       const ans = await n.ask(query, ctx.caller, perspective);
       const note = ans.rows.length === 0 && !ans.unknown ? await explainEmpty(n, query, ctx.caller, perspective) : undefined;
       return page(ctx, a, note !== undefined ? { ...ans, note } : ans);
+    } },
+  { name: 'schema', description: 'How to ask (r_introspect): every predicate ask answers, with its arity, arguments and meaning; every perspective present with its fact count; and the units (confidence in per mille in conf and asserted, 0..1 in the Enox tools). Read it before asking.',
+    input: obj({}), access: 'anyone',
+    run: async (ctx) => {
+      const { UNITS } = await import('./node.ts');
+      return { ...(await needNode(ctx).schema(ctx.caller)), units: UNITS,
+        asking: 'ask takes ONE literal, e.g. live(F, S, "supersedes", T): a variable starts with an upper-case letter or _, a constant is quoted (stored values are strings), and a book may be named, rel[b_<16 hex>](Args); its perspective argument restricts edge questions to facts asserted under it.' };
     } },
   { name: 'why', description: 'Why a ground literal holds, in the books you may read whole.', input: obj({ literal: str() }, ['literal']),
     access: 'anyone', positional: ['literal'], say: explainSay, run: async (ctx, a) => needNode(ctx).why(await byEdgeId(ctx, a.literal), ctx.caller) },

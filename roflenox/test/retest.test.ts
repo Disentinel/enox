@@ -291,3 +291,49 @@ test('assert returns the batch digest, its chain position and every admitted fac
     assert.match((await call('delete_assertion', { fact_id: added.edge_id })).text, new RegExp(`\\nbatch [0-9a-f]{64} \\(seq ${updated.batch.seq + 1}, 2 facts\\)$`));
   } finally { await a.stop(); }
 });
+
+test('the schema tool lists every predicate ask answers with its arity and every perspective present, and asking each listed predicate with its arity is never refused', async () => {
+  const a = await start(tmpDir('schema'), 'node-a');
+  try {
+    const call = tools(a);
+    json(await call('add_assertion', { source: 'Alpha', target: 'Beta', relation: 'uses' }));
+    json(await call('assert', { facts: [{ source: 'session-7', relation: 'zz_claim', target: 'task-42', perspective: 'zz_coord', confidence: 1 },
+      { source: 'session-7', relation: 'zz_claim', target: 'task-43', perspective: 'zz_coord', confidence: 0 },
+      { source: 'pair(X) :- edge(F, X, "zz_claim", T).', relation: 'roflenox:rule', target: 'pair(X) :- edge(F, X, "zz_claim", T).', perspective: 'rules', confidence: 1 }] }));
+    await publish(a.url, a.me, [grant('reader', iso(T0 + DAY))], () => a.clock.t);
+    type Schema = { predicates: { name: string; arity: number; args: string[]; meaning: string }[]; perspectives: { perspective: string; facts: number }[];
+      units: Record<string, string> };
+    const s = json<Schema>(await call('schema'));
+    const names = s.predicates.map((p) => `${p.name}/${p.arity}`);
+    for (const p of ['edge/4', 'live/4', 'conf/2', 'asserted/4', 'persp/2', 'intent/4', 'answered/3', 'grant/2', 'delegate/2', 'export/2', 'follows/2', 'trusts/1', 'edge_num/4', 'pair/1']) {
+      assert.ok(names.includes(p), `${p} in ${names.join(', ')}`);
+    }
+    for (const p of s.predicates) {
+      assert.equal(p.args.length, p.arity, p.name);
+      assert.ok(p.meaning.length > 10, p.name);
+    }
+    // Every perspective present, with its facts (the ones asserted now, retired ones too).
+    const counts = Object.fromEntries(s.perspectives.map((p) => [p.perspective, p.facts]));
+    assert.deepEqual(Object.keys(counts).sort(), ['enox', 'policy', 'rules', 'zz_coord']);
+    assert.deepEqual([counts.zz_coord, counts.rules, counts.policy], [2, 1, 1]);
+    const total = (await ask(a, 'persp(F, P)')).rows.length;
+    assert.equal(s.perspectives.reduce((n, p) => n + p.facts, 0), total);
+    // The units, and the ask tool points here.
+    assert.match(s.units.confidence!, /per mille/);
+    assert.match(s.units.confidence!, /0\.\.1/);
+    const list = await fetch(`${a.url}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${a.node.operatorToken()}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) });
+    const askTool = ((await list.json()) as { result: { tools: { name: string; description: string }[] } }).result.tools.find((t) => t.name === 'ask')!;
+    assert.match(askTool.description, /schema tool/);
+    // Each listed predicate, asked with its arity, is answered, never refused.
+    for (const p of s.predicates) {
+      const r = await post(a.url, '/ask', { query: `${p.name}(${p.args.join(', ')})` });
+      assert.equal(r.status, 200, `${p.name}/${p.arity}: ${JSON.stringify(r.body)}`);
+      assert.deepEqual((r.body as { vars: string[] }).vars, p.args, p.name);
+    }
+    // A stranger sees only what it may: no perspective of a book it may not read.
+    const anon = (await post(a.url, '/op/schema', {}, { as: null })).body as unknown as Schema;
+    assert.deepEqual(anon.perspectives, []);
+    assert.ok(!anon.predicates.some((p) => p.name === 'pair'), 'no rule head of a book it may not read');
+  } finally { await a.stop(); }
+});
