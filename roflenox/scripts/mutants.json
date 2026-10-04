@@ -4314,6 +4314,34 @@
    "red": [
     "retract_node removes a node and its edges from explore, traverse, query_graph and live in one batch, and they remain in edge with confidence zero"
    ]
+  },
+  {
+   "id": "M317",
+   "title": "r_delete_any_perspective: delete_assertion finds only edges of the Enox view",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "      const f = g.assertion(a.fact_id as string);\n      if (!f || f.confidence === 0)",
+     "      const f = g.edgeByFactId(a.fact_id as string) ? g.assertion(a.fact_id as string) : undefined;\n      if (!f || f.confidence === 0)"
+    ]
+   ],
+   "red": [
+    "delete_assertion retracts a fact asserted through assert under another perspective"
+   ]
+  },
+  {
+   "id": "M318",
+   "title": "r_delete_any_perspective: delete_assertion retracts under the enox perspective whatever the fact's",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "      await write(ctx, [{ source: f.S, relation: f.R, target: f.T, perspective: f.P, confidence: 0 },",
+     "      await write(ctx, [{ source: f.S, relation: f.R, target: f.T, perspective: ENOX_PERSPECTIVE, confidence: 0 },"
+    ]
+   ],
+   "red": [
+    "delete_assertion retracts a fact asserted through assert under another perspective"
+   ]
   }
  ]
 }

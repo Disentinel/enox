@@ -5,9 +5,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { publish } from '../src/client.ts';
 import { bookOf } from '../src/identity.ts';
+import { factId } from '../src/facts.ts';
 import { DAY, grant, identityAt, iso, post, start, T0, tmpDir, vouch, type Running } from './helpers.ts';
 
 type Text = { text: string; isError: boolean };
+const factIdOf = (source: string, relation: string, target: string) => factId({ source, relation, target });
 
 /** Call an MCP tool on `a` as its operator (the owner, through claude.ai). */
 function tools(a: Running) {
@@ -218,5 +220,37 @@ test('retract_node removes a node and its edges from explore, traverse, query_gr
     for (const F of after) assert.deepEqual((await ask(a, `conf(${JSON.stringify(F)}, C)`)).rows.map((x) => x.cells[0]), [0], String(F));
     // A node that is not there is not found.
     assert.equal((await call('retract_node', { node_id: 'enox://example.org/graph/main/cs/nothing' })).isError, true);
+  } finally { await a.stop(); }
+});
+
+test('delete_assertion retracts a fact asserted through assert under another perspective', async () => {
+  const a = await start(tmpDir('del-persp'), 'node-a');
+  try {
+    const call = tools(a);
+    const claim = { source: 'session-7', relation: 'zz_claim', target: 'task-42', perspective: 'zz_coord', confidence: 1 };
+    const kept = { source: 'session-8', relation: 'zz_claim', target: 'task-43', perspective: 'zz_coord', confidence: 1 };
+    assert.equal(json<{ admitted: boolean }>(await call('assert', { facts: [claim, kept] })).admitted, true);
+    const rows = (await ask(a, 'edge(F, "session-7", "zz_claim", T)')).rows;
+    assert.equal(rows.length, 1);
+    const F = rows[0]!.cells[0] as string;
+    assert.equal((await ask(a, 'edge(F, S, "zz_claim", T)', 'zz_coord')).rows.length, 2);
+
+    const d = await call('delete_assertion', { fact_id: F });
+    assert.equal(d.isError, false, d.text);
+    assert.equal(d.text, `Deleted assertion ${F} (edge ${F})`, 'a fact no Enox write named has one id');
+    // Retracted under its own perspective, not re-asserted under "enox".
+    assert.deepEqual((await ask(a, `asserted(${JSON.stringify(F)}, P, C, S)`)).rows.map((r) => r.cells.slice(0, 2)), [['zz_coord', 0]]);
+    assert.deepEqual((await ask(a, 'live(F, S, "zz_claim", T)')).rows.map((r) => r.cells[1]), ['session-8']);
+    assert.equal((await ask(a, 'edge(F, S, "zz_claim", T)')).rows.length, 2, 'the log keeps it');
+    // Deleted once, it is not found again.
+    assert.equal((await call('delete_assertion', { fact_id: F })).isError, true);
+    // A fact between Enox entities asserted under another perspective: by its Enox fact_id too.
+    const ab = json<{ fact_id: string; edge_id: string; source: string; target: string }>(await call('add_assertion', { source: 'Alpha', target: 'Beta', relation: 'uses' }));
+    json(await call('assert', { facts: [{ source: ab.source, relation: 'zz_depends', target: ab.target, perspective: 'zz_coord', confidence: 1 },
+      { source: factIdOf(ab.source, 'zz_depends', ab.target), relation: 'enox:fact_id', target: 'e'.repeat(64), perspective: 'enox', confidence: 1 }] }));
+    const del = await call('delete_assertion', { fact_id: 'e'.repeat(64) });
+    assert.equal(del.text, `Deleted assertion ${'e'.repeat(64)} (edge ${factIdOf(ab.source, 'zz_depends', ab.target)})`);
+    assert.deepEqual((await ask(a, `live(F, S, "zz_depends", T)`)).rows, []);
+    assert.deepEqual((await ask(a, 'live(F, S, "zz_claim", T)')).rows.map((r) => r.cells[1]), ['session-8'], 'the other fact stays');
   } finally { await a.stop(); }
 });

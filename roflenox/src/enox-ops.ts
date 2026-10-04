@@ -415,11 +415,13 @@ export const ENOX_OPS: Op[] = [
     input: obj({ fact_id: s() }, ['fact_id']), access: 'operator', text: plain,
     run: async (ctx, a) => {
       const g = await graph(ctx);
-      const e = g.edgeByFactId(a.fact_id as string);
-      if (!e) throw refuseText(`Assertion ${a.fact_id} not found`);
-      await write(ctx, [{ source: e.source, relation: e.relation, target: e.target, perspective: ENOX_PERSPECTIVE, confidence: 0 },
-        meta(e.F, 'deleted_at', new Date().toISOString())]);
-      return `Deleted assertion ${e.fact_id} (edge ${e.F})`;
+      // Any fact the owner asserted, under its own perspective — not only an
+      // edge of the Enox view (r_delete_any_perspective).
+      const f = g.assertion(a.fact_id as string);
+      if (!f || f.confidence === 0) throw refuseText(`Assertion ${a.fact_id} not found`);
+      await write(ctx, [{ source: f.S, relation: f.R, target: f.T, perspective: f.P, confidence: 0 },
+        meta(f.F, 'deleted_at', new Date().toISOString())]);
+      return `Deleted assertion ${f.fact_id} (edge ${f.F})`;
     } },
   { name: 'update_node', description: 'Change an entity\'s name, description or aliases: new attribute facts that supersede.',
     input: obj({ node_id: s(), name: s(), description: s(), aliases: { type: 'array' } }, ['node_id']), access: 'operator', text: pretty,

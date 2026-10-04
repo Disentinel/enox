@@ -297,7 +297,8 @@ export class Graph {
     if (F === undefined) return undefined;
     const a = this.raw.get(F)!;
     return { F, S: a.S, R: a.R, T: a.T, P: this.persp.get(F) ?? ENOX_PERSPECTIVE, confidence: (this.conf.get(F) ?? 0) / 1000,
-      fact_id: e?.fact_id ?? this.attr(F, 'fact_id') ?? enoxFactId(a.S, a.R, a.T) };
+      // A fact outside the Enox view that no Enox write named has one id: F.
+      fact_id: e?.fact_id ?? this.attr(F, 'fact_id') ?? F };
   }
 
   /** Every fact of `signer`'s about an entity — its attributes — and every
