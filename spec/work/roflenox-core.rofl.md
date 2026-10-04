@@ -176,3 +176,4 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_heap_headroom`.
 - `roflenox_core` finished `r_heap_headroom` at "6447fbfb7bfbf5660449586c3dc1675e3a708481".
 - `roflenox_core` takes `r_session_identity`.
+- `roflenox_core` finished `r_session_identity` at "bbf8ba17ec77d293bb095bb0985007d4506c8888".
