@@ -458,6 +458,11 @@ Declared as facts:
 - `r_perspective_export` says "the owner can export the live facts of one perspective as a deterministic sorted dump, byte-identical for the same state, fit for keeping in git".
 - `r_perspective_export` is stated in "owner 2026-10-04: coordination of parallel sessions, part B in full".
 - `r_perspective_export` is to be checked by "two exports of one perspective at the same head are byte-identical, and an export after a retraction no longer holds the retracted fact".
+- `r_attribute_delete_explains` is about `hybrid`.
+- `r_attribute_delete_explains` binds as `should`.
+- `r_attribute_delete_explains` says "delete_assertion given the id of a node's attribute fact (its label, description, type, domain) says what that fact is and which tool changes or retracts it, instead of answering not found".
+- `r_attribute_delete_explains` is stated in "lead's verification of r_delete_any_perspective, 2026-10-04: deleting an enox:label fact by its id answered 'not found' although the fact exists".
+- `r_attribute_delete_explains` is to be checked by "delete_assertion with an attribute fact's id names the node and attribute and points to update_node or retract_node".
 - `r_typed` says "every requirement is of exactly one kind from the closed list".
 - `r_typed` is stated in "owner 2026-09-26".
 - `r_typed` is to be checked by "a requirement with an unknown kind fails typing".
@@ -861,6 +866,7 @@ Kinds of the requirements:
 - `r_session_identity` is of `security`.
 - `r_session_identity` resists "a session that claims, in its writes, to be the owner or another session; or a stolen session token used to write as any other session".
 - `r_perspective_export` is of `feature`.
+- `r_attribute_delete_explains` is of `feature`.
 - `r_oauth_lockout` resists "a stranger who sends wrong secrets to the authorize page to keep the owner from approving, or forges a forwarded address to spend someone else's allowance".
 - `r_mcp_oauth` resists "anyone on the internet who registers a client and lures the owner to approve it, guesses the owner's secret on the authorize page, steals or replays a code or a refresh token, or presents a token minted for another server".
 - `r_compat_parity` is of `feature`.
@@ -965,6 +971,7 @@ The queue:
 - `r_owner_rules` is queued at 110.
 - `r_session_identity` is queued at 111.
 - `r_perspective_export` is queued at 112.
+- `r_attribute_delete_explains` is queued at 113.
 - `r_mutation_gate` is queued at 73.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 - `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
@@ -1031,6 +1038,16 @@ Accepted after verification:
 - `r_stats_bounded` is accepted at "33c9cc5018f71e79599f6cf86188ac80886d62a7".
 - `r_empty_explains` is rejected at "8d4df0e50f16fa1e49e689bf532aa3e1276489d4".
 - `r_empty_explains` is accepted at "85914c7991c44b87b6ba087d49683bcd9ce9a2ed".
+- `r_one_fact_id` is accepted at "807ae9bbc2aeb791517e1dc1545b48d1d6e40f79".
+- `r_live_view` is accepted at "131272141dfeddd6a8a21893511166ed4570b4ab".
+- `r_edge_context_stays` is accepted at "6828402262c51180879e0b54d6cfb52cd96dc2d3".
+- `r_retract_node` is accepted at "1fe1bde79dc193101a568488e5f8f832363f5fac".
+- `r_delete_any_perspective` is accepted at "691b41576f63a8e164c49b5d0947fb7a29cf3943".
+- `r_assert_receipt` is accepted at "a4ff03709c29b4f698f634ae7041af70caaa4d41".
+- `r_introspect` is accepted at "2493dc0de5a52db3c3a7e718182533387a4d3ee9".
+- `r_query_errors` is accepted at "263739daf0fc4258d3a6b6ac7093b82cb825f7fc".
+- `r_bounded_reads` is accepted at "0670a04ca5f5297ba59d1004c0de8b19c413be03".
+- `r_tool_list_clean` is accepted at "259149f0acb8e962b4469dda6a8da6906cd0d8a1".
 
 > Решение 2026-09-27 по замерам на 200000 фактах: rofl-serve пересчитывает
 > все выведенные факты при каждом evaluate (Eval::run → clear_derived), форк
@@ -1389,6 +1406,30 @@ The checks that exist:
 - "ask whose question is well formed but matches nothing answers no rows and no note" lives in "roflenox/test/empty.test.ts".
 - "on an owner-sized book a misspelt relation and an unknown constant are answered with their note within one second" guards `r_empty_explains`.
 - "on an owner-sized book a misspelt relation and an unknown constant are answered with their note within one second" lives in "roflenox/test/perf/empty.test.ts".
+- "update_assertion, delete_assertion and why accept either the Enox fact_id or the fact id ask returns, and add_assertion returns both" guards `r_one_fact_id`.
+- "update_assertion, delete_assertion and why accept either the Enox fact_id or the fact id ask returns, and add_assertion returns both" lives in "roflenox/test/retest.test.ts".
+- "after delete_assertion the edge is gone from live and still in edge with confidence zero" guards `r_live_view`.
+- "after delete_assertion the edge is gone from live and still in edge with confidence zero" lives in "roflenox/test/retest.test.ts".
+- "after update_node only the new description holds in live while the old one stays in edge" guards `r_live_view`.
+- "after update_node only the new description holds in live while the old one stays in edge" lives in "roflenox/test/retest.test.ts".
+- "a grant replaced by a newer grant to the same grantee leaves exactly one grant in live" guards `r_live_view`.
+- "a grant replaced by a newer grant to the same grantee leaves exactly one grant in live" lives in "roflenox/test/retest.test.ts".
+- "add_assertion that creates its target node leaves that node without a description and keeps the context on the edge" guards `r_edge_context_stays`.
+- "add_assertion that creates its target node leaves that node without a description and keeps the context on the edge" lives in "roflenox/test/retest.test.ts".
+- "retract_node removes a node and its edges from explore, traverse, query_graph and live in one batch, and they remain in edge with confidence zero" guards `r_retract_node`.
+- "retract_node removes a node and its edges from explore, traverse, query_graph and live in one batch, and they remain in edge with confidence zero" lives in "roflenox/test/retest.test.ts".
+- "delete_assertion retracts a fact asserted through assert under another perspective" guards `r_delete_any_perspective`.
+- "delete_assertion retracts a fact asserted through assert under another perspective" lives in "roflenox/test/retest.test.ts".
+- "assert returns the batch digest, its chain position and every admitted fact id, and they match chain and ask" guards `r_assert_receipt`.
+- "assert returns the batch digest, its chain position and every admitted fact id, and they match chain and ask" lives in "roflenox/test/retest.test.ts".
+- "the schema tool lists every predicate ask answers with its arity and every perspective present, and asking each listed predicate with its arity is never refused" guards `r_introspect`.
+- "the schema tool lists every predicate ask answers with its arity and every perspective present, and asking each listed predicate with its arity is never refused" lives in "roflenox/test/retest.test.ts".
+- "wrong arity, a conjunction, a negation and a fact held only under another perspective each get one consistent explanation without engine internals" guards `r_query_errors`.
+- "wrong arity, a conjunction, a negation and a fact held only under another perspective each get one consistent explanation without engine internals" lives in "roflenox/test/retest.test.ts".
+- "chain pages with a limit, semantic_search cuts descriptions to the cap, and why on an Enox edge answers once with the batch and claim of its axiom" guards `r_bounded_reads`.
+- "chain pages with a limit, semantic_search cuts descriptions to the cap, and why on an Enox edge answers once with the batch and claim of its axiom" lives in "roflenox/test/retest.test.ts".
+- "tools/list holds no tool described as not offered, and re-adding a deleted edge answers restored" guards `r_tool_list_clean`.
+- "tools/list holds no tool described as not offered, and re-adding a deleted edge answers restored" lives in "roflenox/test/retest.test.ts".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" lives in "personal-node/src/mcp/main-graph.test.ts".
 
 ## Что выводится
