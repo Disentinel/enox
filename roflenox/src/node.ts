@@ -1589,7 +1589,7 @@ export class RoflenoxNode {
    *  (the `assert` op) instead of signing. `salt` derives the salt from the
    *  batch (an import's, so a re-import is recognised); a batch already in
    *  the chain is then not signed again. Returns the signed body too (seal). */
-  signAsSelf(facts: Fact[], o: { salt?: (jsonl: string) => string;
+  signAsSelf(facts: Fact[], o: { salt?: (jsonl: string) => string; /** The head its author had read (r_knew_head). */ knew?: string;
     /** A question answered right after this batch, before any other batch
      *  is admitted, as `asker` (r_assert_then_ask). */
     ask?: { query: string; asker: string | null; perspective: string | null; options: AskOptions } } = {}): Promise<{ receipt: Receipt; body: BatchBody & { manifest: Manifest; jsonl: string; salt: string }; held: boolean;
@@ -1610,7 +1610,7 @@ export class RoflenoxNode {
         }
       }
       // The later of the clock and the chain's last claim (r_rotation).
-      const manifest = me.signBatch(jsonl, this.head(me.name), new Date(Math.max(this.now(), this.lastClaimed.get(me.name) ?? -Infinity)).toISOString(), salt);
+      const manifest = me.signBatch(jsonl, this.head(me.name), new Date(Math.max(this.now(), this.lastClaimed.get(me.name) ?? -Infinity)).toISOString(), salt, o.knew);
       const body = { manifest, jsonl, salt, identity: me.identityChain() };
       const receipt = await this.admitNow(body, 'post', new Date(this.now()).toISOString(), [], me.name);
       // Still inside this one serial slot: no other batch can land before the answer.

@@ -236,7 +236,8 @@ export const OPS: Op[] = [
     input: obj({ facts: { type: 'array', items: FACT_ITEMS },
       import: { type: 'boolean', description: 'an import batch: its salt derives from its content, and a batch already held is not signed again' },
       seal_to: { type: 'array', items: { type: 'string' }, description: 'also seal the signed batch to these identities, and answer the envelope' },
-      ask: { type: 'object', description: 'a question {query, perspective?, order?} the node answers right after this batch, before any other batch is admitted: claim and learn whether you won in one call' } }, ['facts']), access: 'operator',
+      ask: { type: 'object', description: 'a question {query, perspective?, order?} the node answers right after this batch, before any other batch is admitted: claim and learn whether you won in one call' },
+      knew: str('the log head you had read when writing these facts (an answer\'s head): signed with the batch, kept through mirroring') }, ['facts']), access: 'operator',
     run: async (ctx, a) => {
       const facts = (a.facts as unknown[]).map((f, i) => checkFact(f, i + 1));
       const n = needNode(ctx);
@@ -247,12 +248,14 @@ export const OPS: Op[] = [
       }
       const ask = q ? { query: await byEdgeId(ctx, q.query), asker: ctx.caller, perspective: (q.perspective as string | undefined) ?? null,
         options: q.order === 'admission' ? { order: 'admission' as const } : {} } : undefined;
-      const r = await n.signAsSelf(facts, { ...(a.import === true ? { salt: (jsonl: string) => importSalt(n.identity!, jsonl) } : {}), ...(ask ? { ask } : {}) });
+      if (a.knew !== undefined && !/^[0-9a-f]{64}$/.test(a.knew as string)) throw new Refusal(400, 'bad_args', 'knew is a log head: 64 hex');
+      const r = await n.signAsSelf(facts, { ...(a.import === true ? { salt: (jsonl: string) => importSalt(n.identity!, jsonl) } : {}), ...(ask ? { ask } : {}),
+        ...(a.knew !== undefined ? { knew: a.knew as string } : {}) });
       // What it wrote (r_assert_receipt): the batch's digest, its position in
       // the identity's chain (chain[seq] = digest; asserted's S column), and
       // each fact's id (ask's F).
       const out: Record<string, unknown> = { admitted: !r.held, identity: r.receipt.identity, facts: facts.length, ...(r.held ? { held: true } : {}),
-        digest: r.receipt.digest, seq: r.seq, fact_ids: facts.map((f) => factId(f)),
+        digest: r.receipt.digest, seq: r.seq, fact_ids: facts.map((f) => factId(f)), ...(r.body.manifest.knew !== undefined ? { knew: r.body.manifest.knew } : {}),
         // The question's answer, at the head right after this batch (r_assert_then_ask).
         ...(r.answer ? { admission: r.admission, answer: r.answer } : {}) };
       if (a.seal_to !== undefined) {

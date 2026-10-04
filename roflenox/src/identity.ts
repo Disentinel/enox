@@ -144,6 +144,10 @@ export interface Manifest {
   claimed_at: string;
   count: number;
   digest: string;
+  /** The log head its author had read when writing it (r_knew_head):
+   *  signed with the batch, so work done offline merges knowing what its
+   *  author knew. Optional; a manifest without it is as before. */
+  knew?: string;
   sig: string;
 }
 
@@ -369,7 +373,7 @@ export class LocalIdentity {
   }
 
   /** Sign a batch. `jsonl` must already be canonical (see facts.toJsonl). */
-  signBatch(jsonl: string, prev: string | null, claimedAt: string, salt: string): Manifest {
+  signBatch(jsonl: string, prev: string | null, claimedAt: string, salt: string, knew?: string): Manifest {
     const unsigned = {
       identity: this.name,
       key_id: this.keyId,
@@ -377,6 +381,7 @@ export class LocalIdentity {
       claimed_at: claimedAt,
       count: jsonl.split('\n').length - 1,
       digest: batchDigest(salt, jsonl),
+      ...(knew !== undefined ? { knew } : {}),
     };
     const sig = crypto.sign(null, Buffer.from(BATCH_CONTEXT + canonicalize(unsigned)), this.key).toString('base64url');
     return { ...unsigned, sig };
@@ -430,7 +435,9 @@ export function checkManifest(m: unknown): Manifest {
   if (!m || typeof m !== 'object' || Array.isArray(m)) throw bad('a manifest is a JSON object');
   const x = m as Record<string, unknown>;
   const want = ['claimed_at', 'count', 'digest', 'identity', 'key_id', 'prev', 'sig'];
-  if (Object.keys(x).sort().join(',') !== want.join(',')) throw bad(`a manifest has exactly ${want.join(', ')}`);
+  const keys = Object.keys(x).filter((k) => k !== 'knew').sort().join(',');
+  if (keys !== want.join(',')) throw bad(`a manifest has exactly ${want.join(', ')}, and may name the head its author knew (knew)`);
+  if (x.knew !== undefined && (typeof x.knew !== 'string' || !HEX64.test(x.knew))) throw bad('knew is a log head: 64 hex');
   if (typeof x.identity !== 'string') throw bad('identity is a string');
   checkCanonical(x.identity, 'the manifest\'s identity');
   if (typeof x.key_id !== 'string' || !HEX64.test(x.key_id)) throw bad('key_id is 64 hex');

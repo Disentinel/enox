@@ -159,3 +159,4 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_admission_order` at "8f0ac5b910e3433b8ec5f870e5190cb019899077".
 - `roflenox_core` takes `r_assert_then_ask`.
 - `roflenox_core` finished `r_assert_then_ask` at "8c99d1358167d2c72b7752ae3098da627efe10e7".
+- `roflenox_core` takes `r_knew_head`.

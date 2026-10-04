@@ -7,7 +7,7 @@ import { publish } from '../src/client.ts';
 import { bookOf } from '../src/identity.ts';
 import { factId } from '../src/facts.ts';
 import { searchKey } from '../src/node.ts';
-import { DAY, grant, identityAt, iso, post, start, T0, tmpDir, vouch, type Running } from './helpers.ts';
+import { batch, DAY, get, grant, identityAt, invitation, iso, post, pull, start, T0, tmpDir, vouch, type Running } from './helpers.ts';
 
 type Text = { text: string; isError: boolean };
 const factIdOf = (source: string, relation: string, target: string) => factId({ source, relation, target });
@@ -640,4 +640,48 @@ test('two sessions that claim the same task at once each get an answer naming th
     assert.equal((await call('assert', { facts: [{ source: 's', relation: 'zz_note', target: 'y', perspective: 'zz', confidence: 1 }], ask: { query: 1 } })).isError, true);
     assert.equal(json<{ total: number }>(await call('chain', { identity: 'node-a', limit: 1 })).total, before);
   } finally { await a.stop(); }
+});
+
+test('a batch that names the head its author knew keeps it through admission, mirroring and a restart, and a forged head breaks the signature', async () => {
+  const a = await start(tmpDir('knew-a'), 'node-a');
+  const b = await start(tmpDir('knew-b'), 'node-b');
+  try {
+    const call = tools(a);
+    const note = (s: string) => ({ source: s, relation: 'zz_note', target: 'x', perspective: 'zz', confidence: 1 });
+    json(await call('assert', { facts: [note('first')] }));
+    const knew = ((await post(a.url, '/ask', { query: 'conf(F, C)' })).body as unknown as { head: string }).head;
+    json(await call('assert', { facts: [note('meanwhile')] }));                       // the log moves on
+    const w = json<{ digest: string; knew: string }>(await call('assert', { facts: [note('offline work')], knew }));
+    assert.equal(w.knew, knew);
+    const manifestOf = async (url: string, as = a.me) => ((await get(url, '/feeds/node-a', { as })).body.batches as { manifest: { digest: string; knew?: string } }[])
+      .find((x) => x.manifest.digest === w.digest)?.manifest;
+    assert.equal((await manifestOf(a.url))!.knew, knew, 'kept through admission');
+    // Mirrored into another node: kept, and verified there.
+    await vouch(a, b.me);
+    await publish(a.url, a.me, [grant('node-b', iso(T0 + DAY))], () => a.clock.t);
+    await pull(b, invitation(a), 'node-a', b.me);
+    assert.equal((await manifestOf(b.url, b.me))!.knew, knew, 'kept through mirroring');
+    // A restart re-verifies the log, knew included.
+    await a.node.close();
+    const { RoflenoxNode } = await import('../src/node.ts');
+    const n = await RoflenoxNode.open({ dataDir: a.dir, now: () => a.clock.t });
+    try {
+      const f = await n.feed('node-a', null, null, 'node-a');
+      assert.equal(f.batches.find((x) => x.manifest.digest === w.digest)!.manifest.knew, knew, 'kept through a restart');
+    } finally { await n.close(); }
+    // A batch signed by another identity, naming its knew: admitted; with the knew changed after signing: refused.
+    const c = identityAt(tmpDir('knew-c'), 'node-c');
+    await vouch(b, c);
+    const signed = batch(c, [note('c work')], null, iso(b.clock.t));
+    const jsonl = signed.jsonl;
+    const m = c.signBatch(jsonl, null, iso(b.clock.t), signed.salt, knew);
+    const forged = { ...signed, manifest: { ...m, knew: 'ef'.repeat(32) } };
+    const refused = await post(b.url, '/batches', forged);
+    assert.equal(refused.status, 422);
+    assert.equal(refused.body.error, 'bad_signature');
+    const ok = await post(b.url, '/batches', { ...signed, manifest: m });
+    assert.equal(ok.status, 201, JSON.stringify(ok.body));
+    // A knew that is not a head is refused before signing.
+    assert.equal((await call('assert', { facts: [note('x')], knew: 'not a head' })).isError, true);
+  } finally { await a.stop().catch(() => {}); await b.stop(); }
 });

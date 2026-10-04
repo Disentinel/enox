@@ -4714,6 +4714,42 @@
    "red": [
     "two sessions that claim the same task at once each get an answer naming the same single winner, and no batch lands between a claim and its answer"
    ]
+  },
+  {
+   "id": "M345",
+   "title": "r_knew_head: knew is not signed with the batch",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "  const { sig, ...unsigned } = m;\n  try {\n    return crypto.verify(null, Buffer.from(BATCH_CONTEXT",
+     "  const { sig, knew: _knew, ...unsigned } = m;\n  try {\n    return crypto.verify(null, Buffer.from(BATCH_CONTEXT"
+    ],
+    [
+     "      ...(knew !== undefined ? { knew } : {}),\n    };",
+     "    };"
+    ],
+    [
+     "    return { ...unsigned, sig };\n  }\n}",
+     "    return { ...unsigned, ...(knew !== undefined ? { knew } : {}), sig };\n  }\n}"
+    ]
+   ],
+   "red": [
+    "a batch that names the head its author knew keeps it through admission, mirroring and a restart, and a forged head breaks the signature"
+   ]
+  },
+  {
+   "id": "M346",
+   "title": "r_knew_head: assert drops the head its author knew",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "toISOString(), salt, o.knew);",
+     "toISOString(), salt);"
+    ]
+   ],
+   "red": [
+    "a batch that names the head its author knew keeps it through admission, mirroring and a restart, and a forged head breaks the signature"
+   ]
   }
  ]
 }
