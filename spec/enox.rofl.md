@@ -406,6 +406,58 @@ Declared as facts:
 - `r_tool_list_clean` says "tools/list offers only tools that work on this node, and re-adding a deleted edge answers that it was restored".
 - `r_tool_list_clean` is stated in "owner's claude.ai retest of rofl.enox.dev, 2026-10-04".
 - `r_tool_list_clean` is to be checked by "tools/list holds no tool described as not offered, and re-adding a deleted edge answers restored".
+- `r_ask_at_revision` is about `hybrid`.
+- `r_ask_at_revision` binds as `must`.
+- `r_ask_at_revision` says "ask takes a log head digest and answers exactly as the node would have answered when that head was its latest, so several questions read one state; a head the node no longer can answer at is refused with the oldest head it can".
+- `r_ask_at_revision` is stated in "owner 2026-10-04: coordination of parallel sessions, part B in full".
+- `r_ask_at_revision` is to be checked by "two asks at the same head answer the same rows while writes land between them, and an ask at a head older than the node keeps is refused naming the oldest it keeps".
+- `r_ask_since` is about `hybrid`.
+- `r_ask_since` binds as `must`.
+- `r_ask_since` says "a caller can ask what is new: ask takes a batch digest and answers only the rows from facts admitted after that batch, in one perspective if one is named, at the cost of the new facts and not of the whole log".
+- `r_ask_since` is stated in "owner 2026-10-04: coordination of parallel sessions, part B in full".
+- `r_ask_since` is to be checked by "ask since a digest answers only the facts admitted after it, and its cost on an owner-sized book grows with the new facts, not the log".
+- `r_admission_order` is about `hybrid`.
+- `r_admission_order` binds as `must`.
+- `r_admission_order` says "every row ask answers can carry the admission number of the batch that made it true, and rows can be ordered by it; the admission number is the node's documented order of writes, the same on every read and after a restart".
+- `r_admission_order` is stated in "owner 2026-10-04: coordination of parallel sessions, part B in full".
+- `r_admission_order` is to be checked by "ask ordered by admission lists rows in the order their batches were admitted, the same after a restart".
+- `r_assert_then_ask` is about `hybrid`.
+- `r_assert_then_ask` binds as `must`.
+- `r_assert_then_ask` says "a write can carry a question that the node answers at the head right after that write's batch, before any other batch is admitted, so a session claims and learns whether it won in one call".
+- `r_assert_then_ask` is stated in "owner 2026-10-04: coordination of parallel sessions, part B in full".
+- `r_assert_then_ask` is to be checked by "two sessions that claim the same task at once each get an answer naming the same single winner, and no batch lands between a claim and its answer".
+- `r_knew_head` is about `hybrid`.
+- `r_knew_head` binds as `should`.
+- `r_knew_head` says "a batch may name the log head its author had read when writing it, signed with the batch, so work done offline can be merged knowing what its author knew".
+- `r_knew_head` is stated in "owner 2026-10-04: coordination of parallel sessions, part B in full".
+- `r_knew_head` is to be checked by "a batch that names the head its author knew keeps it through admission, mirroring and a restart, and a forged head breaks the signature".
+- `r_one_time` is about `hybrid`.
+- `r_one_time` binds as `must`.
+- `r_one_time` says "every time a tool shows is one form, ISO 8601 in UTC with milliseconds; and each batch carries the node's own admission time as a fact, so a lease is measured by the log and not by a writer's clock".
+- `r_one_time` is stated in "owner 2026-10-04: coordination of parallel sessions, part B in full".
+- `r_one_time` is to be checked by "every tool shows times in one form, and a lease that expires by the node's admission times expires whatever time its writer claimed".
+- `r_conjunction` is about `hybrid`.
+- `r_conjunction` binds as `must`.
+- `r_conjunction` says "ask answers a conjunction of literals, and the negation of a literal whose variables the rest binds, within the same budget as every question, with each row a binding of all named variables".
+- `r_conjunction` is stated in "owner 2026-10-04: coordination of parallel sessions, part B in full".
+- `r_conjunction` is to be checked by "ask answers a conjunction joining edge and conf, refuses an unbound negation with a note, and stops at the budget with the budget named".
+- `r_owner_rules` is about `hybrid`.
+- `r_owner_rules` binds as `must`.
+- `r_owner_rules` says "rules in the owner's own book run on the node: ask and why answer their derived predicates, why names the rules and facts a derivation used, and rules from any other book still run only where r_foreign_rules_opt_in lets them".
+- `r_owner_rules` says "a rule never concludes a built-in predicate, runs inside the rule budget, and a rule that breaks either is refused at admission with the reason, so derived answers can never change what is stored or who may read it".
+- `r_owner_rules` is stated in "owner 2026-10-04: coordination of parallel sessions, part B in full".
+- `r_owner_rules` is to be checked by "a rule in the owner's book derives a predicate that ask answers and why explains with that rule".
+- `r_owner_rules` is to be checked by "a rule that concludes a built-in predicate or exceeds the budget is refused at admission and stored facts and grants are unchanged".
+- `r_session_identity` is about `hybrid`.
+- `r_session_identity` binds as `must`.
+- `r_session_identity` says "each session the owner approves over OAuth writes as its own identity, delegated by the owner's identity and named after its grant, so the signer of a write says which session made it; revoking the grant ends that identity's delegation".
+- `r_session_identity` is stated in "owner 2026-10-04: coordination of parallel sessions, part B in full".
+- `r_session_identity` is to be checked by "two OAuth sessions write as two distinct identities delegated by the owner, neither can sign as the other or as the owner, and a revoked session can no longer write".
+- `r_perspective_export` is about `hybrid`.
+- `r_perspective_export` binds as `should`.
+- `r_perspective_export` says "the owner can export the live facts of one perspective as a deterministic sorted dump, byte-identical for the same state, fit for keeping in git".
+- `r_perspective_export` is stated in "owner 2026-10-04: coordination of parallel sessions, part B in full".
+- `r_perspective_export` is to be checked by "two exports of one perspective at the same head are byte-identical, and an export after a retraction no longer holds the retracted fact".
 - `r_typed` says "every requirement is of exactly one kind from the closed list".
 - `r_typed` is stated in "owner 2026-09-26".
 - `r_typed` is to be checked by "a requirement with an unknown kind fails typing".
@@ -797,6 +849,18 @@ Kinds of the requirements:
 - `r_query_errors` is of `feature`.
 - `r_bounded_reads` is of `feature`.
 - `r_tool_list_clean` is of `feature`.
+- `r_ask_at_revision` is of `feature`.
+- `r_ask_since` is of `feature`.
+- `r_admission_order` is of `feature`.
+- `r_assert_then_ask` is of `feature`.
+- `r_knew_head` is of `feature`.
+- `r_one_time` is of `feature`.
+- `r_conjunction` is of `feature`.
+- `r_owner_rules` is of `security`.
+- `r_owner_rules` resists "a session holding the owner's grant that writes a rule which loops, floods the engine, or concludes a built-in predicate (edge, conf, grant, delegate, export, asserted) to fake access, liveness or history".
+- `r_session_identity` is of `security`.
+- `r_session_identity` resists "a session that claims, in its writes, to be the owner or another session; or a stolen session token used to write as any other session".
+- `r_perspective_export` is of `feature`.
 - `r_oauth_lockout` resists "a stranger who sends wrong secrets to the authorize page to keep the owner from approving, or forges a forwarded address to spend someone else's allowance".
 - `r_mcp_oauth` resists "anyone on the internet who registers a client and lures the owner to approve it, guesses the owner's secret on the authorize page, steals or replays a code or a refresh token, or presents a token minted for another server".
 - `r_compat_parity` is of `feature`.
@@ -891,6 +955,16 @@ The queue:
 - `r_query_errors` is queued at 100.
 - `r_bounded_reads` is queued at 101.
 - `r_tool_list_clean` is queued at 102.
+- `r_ask_at_revision` is queued at 103.
+- `r_ask_since` is queued at 104.
+- `r_admission_order` is queued at 105.
+- `r_assert_then_ask` is queued at 106.
+- `r_knew_head` is queued at 107.
+- `r_one_time` is queued at 108.
+- `r_conjunction` is queued at 109.
+- `r_owner_rules` is queued at 110.
+- `r_session_identity` is queued at 111.
+- `r_perspective_export` is queued at 112.
 - `r_mutation_gate` is queued at 73.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 - `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
