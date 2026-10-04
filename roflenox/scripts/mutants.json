@@ -357,7 +357,7 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "if (s.jsonl === null || !parseJsonl(s.jsonl).every((f) => allowed(factId(f)))) {",
+     "if (s.jsonl === null || (sc?.only !== null && !parseJsonl(s.jsonl).every((f) => allowed(factId(f))))) {",
      "if (s.jsonl === null) {"
     ]
    ],
@@ -384,7 +384,7 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "if (s.jsonl === null || !parseJsonl(s.jsonl).every((f) => allowed(factId(f)))) {",
+     "if (s.jsonl === null || (sc?.only !== null && !parseJsonl(s.jsonl).every((f) => allowed(factId(f))))) {",
      "if (s.jsonl === null) {"
     ],
     [
@@ -819,8 +819,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "          if (F !== null && cur.get(F)?.P === perspective) rows.push(row);",
-     "          if (F !== null) rows.push(row);"
+     "(id, t) => this.assertions.viewAt(id, undo?.get(id)).get(t[0])?.P === perspective, o.window)",
+     "() => true, o.window)"
     ]
    ],
    "red": [
@@ -1107,8 +1107,8 @@
    "file": "src/enox-ops.ts",
    "edits": [
     [
-     "  if (ctx.caller === null || ctx.caller !== own) return Graph.load(n, ctx.caller);",
-     "  if (ctx.caller === null || ctx.caller !== own) return Graph.load(n, own ?? null);"
+     "  if (ctx.caller === null || ctx.caller !== own) return oneAtATime(() => Graph.load(n, ctx.caller));",
+     "  if (ctx.caller === null || ctx.caller !== own) return oneAtATime(() => Graph.load(n, own ?? null));"
     ]
    ],
    "red": [
@@ -1360,8 +1360,8 @@
    "file": "src/ops.ts",
    "edits": [
     [
-     "    if (c.h === head) offset = c.o;",
-     "    if (true) offset = c.o;"
+     "  if (c && c.h !== head) {",
+     "  if (false) {"
     ]
    ],
    "red": [
@@ -1561,8 +1561,8 @@
    "file": "src/enox-ops.ts",
    "edits": [
     [
-     "  if (ctx.caller === null || ctx.caller !== own) return Graph.load(n, ctx.caller);",
-     "  if (ctx.caller === null || ctx.caller !== own) { const g = await Graph.load(n, ctx.caller); if (ctx.caller) perCaller.set(ctx.caller, g); return g; }"
+     "  if (ctx.caller === null || ctx.caller !== own) return oneAtATime(() => Graph.load(n, ctx.caller));",
+     "  if (ctx.caller === null || ctx.caller !== own) { const g = await oneAtATime(() => Graph.load(n, ctx.caller)); if (ctx.caller) perCaller.set(ctx.caller, g); return g; }"
     ],
     [
      "let kept: { node: RoflenoxNode; owner: string; g: Graph; version: number } | null = null;",
@@ -1579,8 +1579,8 @@
    "file": "src/enox-ops.ts",
    "edits": [
     [
-     "  if (ctx.caller === null || ctx.caller !== own) return Graph.load(n, ctx.caller);",
-     "  if (ctx.caller === null || ctx.caller !== own) { const g = await Graph.load(n, ctx.caller); if (ctx.caller) others.push(g); return g; }"
+     "  if (ctx.caller === null || ctx.caller !== own) return oneAtATime(() => Graph.load(n, ctx.caller));",
+     "  if (ctx.caller === null || ctx.caller !== own) { const g = await oneAtATime(() => Graph.load(n, ctx.caller)); if (ctx.caller) others.push(g); return g; }"
     ],
     [
      "let kept: { node: RoflenoxNode; owner: string; g: Graph; version: number } | null = null;",
@@ -1634,8 +1634,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "    while (this.recentFacts > this.recentLimit) this.recentFacts -= this.recent.shift()!.facts.length;",
-     "    while (this.recent.length > 1000) this.recentFacts -= this.recent.shift()!.facts.length;"
+     "    while (this.recent.length && (this.recentFacts > this.recentLimit || this.recentBytes > this.recentBytesLimit)) {",
+     "    while (this.recent.length > 1000) {"
     ]
    ],
    "red": [
@@ -2384,7 +2384,7 @@
    "file": "src/enox.ts",
    "edits": [
     [
-     "asserted_by: [...(this.by.get(F) ?? [])].sort().join(', ') || null,",
+     "asserted_by: (Array.isArray(a.by) ? [...a.by].sort().join(', ') : a.by) || null,",
      "asserted_by: attr('asserted_by') ?? null,"
     ]
    ],
@@ -2412,8 +2412,8 @@
    "file": "src/enox.ts",
    "edits": [
     [
-     "g.signedBy(F!, identity); }",
-     "g.signedBy(F!, caller ?? ''); }"
+     "      g.hold(F, S, R, T, identity);",
+     "      g.hold(F, S, R, T, caller ?? '');"
     ]
    ],
    "red": [
@@ -2766,8 +2766,12 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "    unknown.push(...this.forkedUnknowns(scope, book));\n",
-     ""
+     "      unknown.push(...this.forkedUnknowns(scope, book));\n      if (unknown.length) a.unknown = unknown;",
+     "      if (unknown.length) a.unknown = unknown;"
+    ],
+    [
+     "    unknown.push(...this.forkedUnknowns(scope, book));\n    if (unknown.length) ans.unknown = unknown;",
+     "    if (unknown.length) ans.unknown = unknown;"
     ]
    ],
    "red": [
@@ -3739,8 +3743,8 @@
    "file": "src/ops.ts",
    "edits": [
     [
-     "    else if (a.resume === true && typeof c.k === 'string') {",
-     "    else if (false) {"
+     "    if (a.resume === true && typeof c.k === 'string' && a.order === undefined) resumed = true;",
+     "    if (false) resumed = true;"
     ]
    ],
    "red": [
@@ -3991,8 +3995,8 @@
    "file": "src/enox.ts",
    "edits": [
     [
-     "      this.wrote(F, identity, seq);\n      this.hold",
-     "      this.hold"
+     "    r.written = Math.max(r.written, this.orderOf(identity, seq));\n",
+     ""
     ]
    ],
    "red": [
@@ -4241,8 +4245,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "await this.askFacts('edge', book, args, scope, (id, t) => this.liveNow(id, t, undo?.get(id)))",
-     "await this.askFacts('edge', book, args, scope, () => true)"
+     "(id, t) => this.liveNow(id, t, undo?.get(id)), o.window)",
+     "() => true, o.window)"
     ]
    ],
    "red": [
@@ -4427,8 +4431,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "      if (a.length !== (rel === 'asserted' ? 4 : 2)) return { vars, rows: [] };   // the note says the arity (src/empty.ts)",
-     "      if (a.length !== (rel === 'asserted' ? 4 : 2)) throw new Refusal(400, 'bad_query', 'arity');"
+     "    if (a.length !== (rel === 'asserted' ? 4 : 2)) return { vars, rows: [] };   // the note says the arity (src/empty.ts)",
+     "    if (a.length !== (rel === 'asserted' ? 4 : 2)) throw new Refusal(400, 'bad_query', 'arity');"
     ]
    ],
    "red": [
@@ -4609,8 +4613,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "          ? await this.askFacts(rel, book, args, scope, (id, t) => this.assertions.viewAt(id, undo.get(id)).get(t[0]) !== undefined)",
-     "          ? await this.askFacts(rel, book, args, scope, () => true)"
+     "(id, t) => this.assertions.viewAt(id, undo.get(id)).get(t[0]) !== undefined, o.window)",
+     "() => true, o.window)"
     ]
    ],
    "red": [
@@ -4999,6 +5003,43 @@
    ],
    "red": [
     "a rule in the owner's book derives a predicate that ask answers and why explains with that rule"
+   ]
+  },
+  {
+   "id": "M369",
+   "title": "r_heap_headroom: every caller who finds no view builds its own, at once",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "  if (rebuild && rebuild.node === n) return (await rebuild.p, graph(ctx));\n  const p = oneAtATime(async () => {",
+     "  const p = (async () => {"
+    ],
+    [
+     "    kept = { node: n, owner: own, g, version };\n    return g;\n  });",
+     "    kept = { node: n, owner: own, g, version };\n    return g;\n  })();"
+    ],
+    [
+     "  if (ctx.caller === null || ctx.caller !== own) return oneAtATime(() => Graph.load(n, ctx.caller));",
+     "  if (ctx.caller === null || ctx.caller !== own) return Graph.load(n, ctx.caller);"
+    ]
+   ],
+   "red": [
+    "on an owner-sized book under a 1 GB heap, ten concurrent graph_stats, recall and ask calls while an embedder polls leave the node alive and answering, and graph_stats answers within 200 ms"
+   ],
+   "survivor": "Defence in depth, measured: with the slim view (one record per fact, no roflenox:* facts, about 150 MB on the owner-sized book) and the node's serial queue building views one after another, even unshared builds do not overrun the 1 GB heap under ten concurrent calls (run 2026-10-04: survived). It stays because a view build for a granted reader is still a book's worth, and two at once are not needed. The perf test is red on 976f7b1 itself (SIGABRT, heap out of memory)."
+  },
+  {
+   "id": "M370",
+   "title": "r_heap_headroom: a windowed answer starts at the beginning whatever the cursor",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "    if (this.w.after !== undefined && k <= this.w.after) return;\n",
+     ""
+    ]
+   ],
+   "red": [
+    "an answer longer than the limit is marked cut and the rest is fetched page by page to the same total"
    ]
   }
  ]

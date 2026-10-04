@@ -30,10 +30,21 @@ function node(ctx: Ctx): RoflenoxNode {
  *  Any other caller's view depends on its grants and exports and is built for
  *  the call and dropped: the node keeps no state per client (r_session_eviction). */
 let kept: { node: RoflenoxNode; owner: string; g: Graph; version: number } | null = null;
+/** Building a view holds a book's worth of facts while it runs: one build at
+ *  a time, and callers who need the kept view while it is being built wait
+ *  for that one build instead of starting their own (r_heap_headroom). */
+let building: Promise<unknown> = Promise.resolve();
+let rebuild: { node: RoflenoxNode; p: Promise<Graph> } | null = null;
+function oneAtATime<T>(f: () => Promise<T>): Promise<T> {
+  const run = building.then(f, f);
+  building = run.catch(() => undefined);
+  return run;
+}
+
 async function graph(ctx: Ctx): Promise<Graph> {
   const n = node(ctx);
   const own = n.identity?.name;
-  if (ctx.caller === null || ctx.caller !== own) return Graph.load(n, ctx.caller);
+  if (ctx.caller === null || ctx.caller !== own) return oneAtATime(() => Graph.load(n, ctx.caller));
   // The kept view is of ONE node: another node in this process (a test, an
   // embedding host) with an operator of the same name never reads it.
   if (kept && kept.node === n && kept.owner === own) {
@@ -45,9 +56,16 @@ async function graph(ctx: Ctx): Promise<Graph> {
       return kept.g.ensure();
     }
   }
-  const g = await Graph.load(n, own);
-  kept = { node: n, owner: own, g, version: n.logVersion() };
-  return g;
+  if (rebuild && rebuild.node === n) return (await rebuild.p, graph(ctx));
+  const p = oneAtATime(async () => {
+    const version = n.logVersion();
+    const g = await Graph.load(n, own);
+    kept = { node: n, owner: own, g, version };
+    return g;
+  });
+  rebuild = { node: n, p };
+  try { await p; } finally { if (rebuild?.p === p) rebuild = null; }
+  return graph(ctx);
 }
 
 /** How many Enox views are held in memory (at most one: the node's own). */
@@ -138,22 +156,18 @@ export const ENOX_OPS: Op[] = [
     input: obj({ full: b('every domain/type bucket, as Enox gave them') }), access: 'anyone',
     text: (r) => ((r as { full?: unknown }).full === undefined ? pretty(r) : JSON.stringify(r)),
     run: async (ctx, a) => {
-      const g = await graph(ctx);
-      const dt = new Map<string, { domain: string; type: string; cnt: number }>();
-      for (const x of g.nodes.values()) {
-        const k = `${x.domain}\u0000${x.type}`;
-        dt.set(k, { domain: x.domain, type: x.type, cnt: (dt.get(k)?.cnt ?? 0) + 1 });
-      }
-      const rel = new Map<string, number>();
-      for (const e of g.edges) rel.set(e.relation, (rel.get(e.relation) ?? 0) + 1);
+      // From the counts the view keeps (r_heap_headroom): no walk of the book.
+      const st = (await graph(ctx)).stats();
+      const dt = new Map(st.buckets.map((b) => [`${b.domain}\u0000${b.type}`, b]));
+      const rel = new Map(st.relations);
       if (a.full === true) {
-        return { total_nodes: g.nodes.size, total_edges: g.edges.length, by_domain: [...dt.values()],
+        return { total_nodes: st.nodes, total_edges: st.edges, by_domain: [...dt.values()],
           by_relation: [...rel].map(([relation, cnt]) => ({ relation, cnt })) };
       }
       const bySize = <T>(xs: T[], n: (x: T) => number, k: (x: T) => string) => xs.sort((x, y) => n(y) - n(x) || (k(x) < k(y) ? -1 : k(x) > k(y) ? 1 : 0));
       const buckets = bySize([...dt.values()], (x) => x.cnt, (x) => `${x.domain}\u0000${x.type}`);
       const rest = buckets.slice(STATS_TOP);
-      return { total_nodes: g.nodes.size, total_edges: g.edges.length,
+      return { total_nodes: st.nodes, total_edges: st.edges,
         by_relation: Object.fromEntries(bySize([...rel], ([, c]) => c, ([r]) => r)),
         by_domain: buckets.slice(0, STATS_TOP), by_domain_rest: { buckets: rest.length, nodes: rest.reduce((t, x) => t + x.cnt, 0) },
         full: rest.length ? `the ${STATS_TOP} largest of ${buckets.length} domain/type buckets; full: true gives them all` : `all ${buckets.length} domain/type buckets` };

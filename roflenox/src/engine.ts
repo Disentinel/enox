@@ -71,10 +71,48 @@ export interface AskRow { identity: string; cells: (string | number)[];
  *  last_report) — never an empty answer that reads like an all-clear. */
 export interface Unknown { identity: string; reason: string; budget?: number; unit?: string; window?: number; last_report?: string | null; proof?: unknown[] }
 export interface AskAnswer { vars: string[]; rows: AskRow[]; unknown?: Unknown[]; /** Why there are no rows, when the cause is in the question (src/empty.ts). */ note?: string;
-  /** The log head the answer is of (r_ask_at_revision). */ head?: string }
+  /** The log head the answer is of (r_ask_at_revision). */ head?: string;
+  /** When the asker asked for a window: how many rows the whole answer has,
+   *  and how many come after the window's start (r_heap_headroom). */
+  window?: { total: number; after: number } }
 export interface AskOptions { /** A log head: answer as the node would have when it was the latest. */ at?: string;
   /** A batch digest: answer only from the facts admitted after that batch (r_ask_since). */ since?: string;
-  /** 'admission': each row carries the admission number of the batch that made it true, and rows come in that order (r_admission_order). */ order?: 'admission' }
+  /** 'admission': each row carries the admission number of the batch that made it true, and rows come in that order (r_admission_order). */ order?: 'admission';
+  /** At most `limit` rows, the first after the row key `after`, in the fixed
+   *  order: the answer is never held whole (r_heap_headroom). */
+  window?: { after?: string; limit: number } }
+
+/** A row's place in the one fixed order. */
+export const rowKey = (r: { identity: string; cells: unknown[] }) => JSON.stringify([r.identity, r.cells]);
+
+/** Rows as they are found, kept in the fixed order: all of them — or, with a
+ *  window, only the `limit` first after its start, while the rest are only
+ *  counted (r_heap_headroom). */
+export class Collect {
+  private readonly buf: { k: string; r: AskRow }[] = [];
+  private readonly all: AskRow[] = [];
+  total = 0;
+  after = 0;
+  private readonly w?: { after?: string; limit: number };
+  constructor(w?: { after?: string; limit: number }) { this.w = w; }
+  push(r: AskRow): void {
+    this.total++;
+    if (!this.w) { this.all.push(r); return; }
+    const k = rowKey(r);
+    if (this.w.after !== undefined && k <= this.w.after) return;
+    this.after++;
+    const b = this.buf;
+    if (b.length >= this.w.limit && k >= b[b.length - 1]!.k) return;
+    let lo = 0, hi = b.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (b[mid]!.k < k) lo = mid + 1; else hi = mid; }
+    b.splice(lo, 0, { k, r });
+    if (b.length > this.w.limit) b.pop();
+  }
+  answer(vars: string[]): AskAnswer {
+    if (!this.w) return { vars, rows: sortRows(this.all) };
+    return { vars, rows: this.buf.map((x) => x.r), window: { total: this.total, after: this.after } };
+  }
+}
 export interface Explanation { identity: string; holds: boolean; text: string; unknown?: { reason: string; budget: number; unit: string } }
 
 export class Engine {
@@ -155,7 +193,7 @@ export class Engine {
   /** REPLAY: load already-verified batches straight into the world, in log
    *  order, and evaluate once at the end. No fork per batch — the log was
    *  verified before this runs, and a replay that fails refuses the start. */
-  async replay(entries: { rofl: string; who: string; rules: string | null }[]): Promise<void> {
+  async replay(entries: Iterable<{ rofl: string; who: string; rules: string | null }>): Promise<void> {
     for (const e of entries) {
       if (e.rules) await this.session.load(e.rules, SYSTEM_WHO);
       await this.session.load(e.rofl, e.who);

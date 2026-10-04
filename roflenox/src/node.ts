@@ -18,6 +18,9 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as v8 from 'node:v8';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
+import * as zlib from 'node:zlib';
 import { canonicalize } from './jcs.ts';
 import { batchDigest, decodeCell, EMBEDDER, factId, GRANT, isSalt, newSalt, parseJsonl, Refusal, roflString, SEARCH, sha256hex, toJsonl, toRofl, type Fact } from './facts.ts';
 import {
@@ -27,7 +30,7 @@ import {
 } from './identity.ts';
 import { Log, writeFileAtomic, type Fault, type Receipt } from './log.ts';
 import {
-  answeredRule, bookRules, DEFAULT_ROFL_BIN, Engine, mayReadRules, parseLiteral, parseQuery, resultRule, sortRows, splitArgs, SYSTEM_BOOK,
+  answeredRule, bookRules, Collect, DEFAULT_ROFL_BIN, Engine, mayReadRules, parseLiteral, parseQuery, resultRule, sortRows, splitArgs, SYSTEM_BOOK,
   type AskAnswer, type AskOptions, type BookScope, type Explanation, type QueryLiteral, type Unknown, type World,
 } from './engine.ts';
 import { DomainVouch, type DomainTransport } from './domain.ts';
@@ -145,9 +148,21 @@ export interface NodeOptions {
   /** How many recently admitted facts are remembered (default RECENT_FACTS):
    *  the window of earlier heads ask answers at (r_ask_at_revision). */
   recentFacts?: number;
+  /** ...and at most about this many bytes of them (default RECENT_BYTES): a
+   *  window sized by what it costs the heap, not by a count (r_heap_headroom). */
+  recentBytes?: number;
 }
 
 export const DEFAULT_SILENCE_SEC = 3600;
+
+/** A long answer gives way to other callers every so many rows: the serial
+ *  queue still orders the engine's work, but reads that need no slot of it
+ *  (graph_stats from its counts) are not held behind a 250 000-row loop
+ *  (r_heap_headroom). */
+const YIELD_EVERY = 4096;
+const loopDelay = monitorEventLoopDelay({ resolution: 10 });
+loopDelay.enable();
+const breathe = () => new Promise<void>((r) => setImmediate(r));
 
 export const DEFAULT_CHECKPOINT_WINDOW_SEC = 24 * 3600;
 
@@ -203,6 +218,11 @@ export const DEFAULT_RULE_BUDGET = 50_000;
  *  would hold two million facts in memory (r_bounded_memory). A view further
  *  behind than this rebuilds. */
 export const RECENT_FACTS = 50_000;
+/** The heap the remembered recent admissions may take, about: 16 MiB. */
+export const RECENT_BYTES = 16 * 2 ** 20;
+/** What one remembered fact costs beyond its strings: the object, its fact
+ *  id, the assertion before it (estimated). */
+const RECENT_OVERHEAD = 320;
 
 /** What a stranger's failed admission may say about a held identity:
  *  exactly what it would say about an unknown one (RoflenoxNode.asStranger). */
@@ -242,7 +262,10 @@ export class RoflenoxNode {
   // rule that never terminates exhausts only its author's budget; its answers
   // come back unknown, naming the budget; nobody else's admission waits on it.
   private readonly ruleBudget: number;
-  private readonly programs = new Map<string, string[]>();      // identity → its batches' fact programs
+  /** identity → its batches' fact programs, deflated: they are read back only
+   *  to rebuild an engine or a rule world, and as text they were the largest
+   *  thing the node held (r_heap_headroom). Buffers live outside the JS heap. */
+  private readonly programs = new Map<string, Buffer[]>();
   private readonly results = new Map<string, string[]>();       // identity → its roflenox:result fact lines
   /** Proven forks, per identity: the two signed successors of one batch. */
   private readonly forks = new Map<string, { prev: string | null; proof: [Manifest, Manifest] }[]>();
@@ -257,7 +280,8 @@ export class RoflenoxNode {
   private readonly recent: { version: number; identity: string; facts: Fact[]; seq: number;
     /** Its receipt's place in the log, and what each fact it changed was
      *  before it — so an ask can be answered at an earlier head (r_ask_at_revision). */
-    at: number; before: Map<string, Current | null> }[] = [];
+    at: number; before: Map<string, Current | null>;
+    /** What remembering it costs, about (r_heap_headroom). */ bytes: number }[] = [];
   /** The newest claimed_at of each identity's batches (ms): when it last spoke. */
   private readonly lastClaimed = new Map<string, number>();
   /** The values each identity's edges hold, by place — sources, relations,
@@ -268,6 +292,8 @@ export class RoflenoxNode {
   private readonly silenceSec: number;
   private readonly domainVouch: DomainVouch | null;
   private recentFacts = 0;
+  private recentBytes = 0;
+  private readonly recentBytesLimit: number;
   private readonly recentLimit: number;
   /** RFC 9421 nonces seen on signed requests: nonce → expiry (ms). */
   private readonly requestNonces = new Map<string, number>();
@@ -284,6 +310,7 @@ export class RoflenoxNode {
     this.warnings.push(...this.oauth.warnings);
     this.ruleBudget = o.ruleBudget ?? DEFAULT_RULE_BUDGET;
     this.recentLimit = o.recentFacts ?? RECENT_FACTS;
+    this.recentBytesLimit = o.recentBytes ?? RECENT_BYTES;
     this.silenceSec = o.silenceSec ?? DEFAULT_SILENCE_SEC;
     this.domainVouch = o.domainVouch ? new DomainVouch(o.domainVouch === true ? {} : o.domainVouch, () => this.now()) : null;
     this.checkpointWindowMs = (o.checkpointWindowSec ?? DEFAULT_CHECKPOINT_WINDOW_SEC) * 1000;
@@ -313,7 +340,6 @@ export class RoflenoxNode {
   /** Re-verify the log into the fresh engine (open's body). */
   private async load(): Promise<void> {
     const n = this;
-    const batches: { v: Verified; rules: string | null; seq: number }[] = [];
     const receipts = n.log.receipts;
     for (const [ri, r] of receipts.entries()) {
       if (r.kind === 'fork') { n.noteFork(n.log.read(r).manifest); continue; }
@@ -336,10 +362,7 @@ export class RoflenoxNode {
       } catch (e) {
         throw new Error(`log batch ${r.identity}/${r.digest} no longer verifies (${(e as Error).message}); refusing to start`);
       }
-      const rules = n.chains.has(r.identity) ? null : bookRules(bookOf(r.identity), r.identity);
-      const seq = n.chains.get(r.identity)?.length ?? 0;
       n.record(v, ri, r.via !== undefined);
-      batches.push({ v, rules, seq });
     }
     if (n.identity && n.idDocs.has(n.identity.name)) {
       // The key file's chain may be ahead of the log (a rotation or recovery
@@ -354,8 +377,9 @@ export class RoflenoxNode {
         throw new Error(`the key file for ${n.identity.name} is not a key this identity has published under; refusing to start`);
       }
     }
-    await n.engine.replay([...batches.map(({ v, rules, seq }) => ({ rofl: programOf(v, seq), who: v.manifest.identity, rules })),
-      ...[...n.chains.keys()].map((id) => ({ rofl: n.assertions.lines(id, bookOf(id)), who: id, rules: null }))]);
+    // From the programs record() kept, a batch at a time: the verified
+    // batches are not all held until the end (r_heap_headroom).
+    await n.engine.replay(n.held());
     await n.checkUriPrefix();
   }
 
@@ -588,7 +612,9 @@ export class RoflenoxNode {
       vals.R.add(f.relation);
       if (f.target.length <= VALUE_MAX) vals.T.add(f.target);
     }
-    this.programs.set(id, [...(this.programs.get(id) ?? []), programOf(v, seq)]);
+    const progs = this.programs.get(id) ?? [];
+    progs.push(zlib.deflateRawSync(programOf(v, seq)));
+    this.programs.set(id, progs);
     const res = v.facts.filter((f) => f.relation === RESULT);
     if (res.length) this.results.set(id, [...(this.results.get(id) ?? []), toRofl(res, bookOf(id), seq)]);
     for (const r of v.rules) {
@@ -600,9 +626,15 @@ export class RoflenoxNode {
     this.version++;
     const claimed = Date.parse(v.manifest.claimed_at);
     if (claimed > (this.lastClaimed.get(id) ?? -Infinity)) this.lastClaimed.set(id, claimed);
-    this.recent.push({ version: this.version, identity: id, facts: v.facts, seq, at, before: plan.before });
+    const bytes = v.facts.reduce((t, f) => t + 2 * (f.source.length + f.relation.length + f.target.length + f.perspective.length) + RECENT_OVERHEAD, 0);
+    this.recent.push({ version: this.version, identity: id, facts: v.facts, seq, at, before: plan.before, bytes });
     this.recentFacts += v.facts.length;
-    while (this.recentFacts > this.recentLimit) this.recentFacts -= this.recent.shift()!.facts.length;
+    this.recentBytes += bytes;
+    while (this.recent.length && (this.recentFacts > this.recentLimit || this.recentBytes > this.recentBytesLimit)) {
+      const e = this.recent.shift()!;
+      this.recentFacts -= e.facts.length;
+      this.recentBytes -= e.bytes;
+    }
     if (v.pin) this.idDocs.set(id, [v.pin]);
     const chain = this.chains.get(id) ?? [];
     chain.push(v.manifest.digest);
@@ -941,15 +973,19 @@ export class RoflenoxNode {
    *  that replay from the log gives. Rule worlds lived in the dead process and
    *  are rebuilt lazily. The log was never touched by the crash: an admission
    *  commits to the log only after the engine has taken the batch. */
+  /** What the engine is built from: every batch program, inflated one at a
+   *  time as the engine takes it, then each identity's current assertions. */
+  private *held(): Generator<{ rofl: string; who: string; rules: string | null }> {
+    for (const [id, packed] of this.programs) {
+      for (const [i, b] of packed.entries()) yield { rofl: zlib.inflateRawSync(b).toString('utf8'), who: id, rules: i === 0 ? bookRules(bookOf(id), id) : null };
+      yield { rofl: this.assertions.lines(id, bookOf(id)), who: id, rules: null };
+    }
+  }
+
   private async rebuildEngine(): Promise<void> {
     this.worlds.clear();
     const e = await Engine.fresh(this.bin);
-    const entries: Parameters<Engine['replay']>[0] = [];
-    for (const [id, progs] of this.programs) {
-      progs.forEach((rofl, i) => entries.push({ rofl, who: id, rules: i === 0 ? bookRules(bookOf(id), id) : null }));
-      entries.push({ rofl: this.assertions.lines(id, bookOf(id)), who: id, rules: null });
-    }
-    await e.replay(entries);
+    await e.replay(this.held());
     // A stale engine is alive (an aborted admission left it holding what the
     // log does not): it is stopped, or every abort would leave a whole engine
     // process behind (r_bounded_memory).
@@ -1162,7 +1198,8 @@ export class RoflenoxNode {
   /** ask since a batch (r_ask_since): the rows of the facts admitted after
    *  it — in any book the reader may see, as they stand now — found by
    *  walking only the batches after it, never the whole relation. */
-  private async askSince(digest: string, rel: string, book: string | null, args: string, scope: Map<string, BookScope>, perspective: string | null): Promise<AskAnswer> {
+  private async askSince(digest: string, rel: string, book: string | null, args: string, scope: Map<string, BookScope>, perspective: string | null,
+    window?: AskOptions['window']): Promise<AskAnswer> {
     if (!RoflenoxNode.AT_REVISION.has(rel)) {
       throw new Refusal(400, 'not_since', `since answers ${[...RoflenoxNode.AT_REVISION].join(', ')}; ${rel} is derived by the engine`);
     }
@@ -1175,7 +1212,7 @@ export class RoflenoxNode {
     const kept = new Map(this.recent.map((e) => [e.at, e.facts]));
     const rs = this.log.receipts;
     const seen = new Set<string>();
-    const rows: AskAnswer['rows'] = [];
+    const rows = new Collect(window);
     for (let i = from + 1; i < rs.length; i++) {
       const r = rs[i]!;
       if (r.kind !== undefined || r.withheld) continue;
@@ -1199,8 +1236,7 @@ export class RoflenoxNode {
         if (m) rows.push({ identity: r.identity, cells: m.cells });
       }
     }
-    sortRows(rows);
-    return { vars, rows };
+    return rows.answer(vars);
   }
 
   /** The live facts of one perspective in the node's own book, as a
@@ -1297,19 +1333,31 @@ export class RoflenoxNode {
     const { rel, book, args } = parseLiteral(query);
     if (o.since !== undefined) {
       if (o.at !== undefined) throw new Refusal(400, 'bad_args', 'ask takes since or at, not both');
-      return this.askSince(o.since, rel, book, args, scope, perspective);
+      return this.askSince(o.since, rel, book, args, scope, perspective, o.window);
     }
     const undo = o.at !== undefined ? this.undoSince(o.at) : null;
     if (undo && !RoflenoxNode.AT_REVISION.has(rel)) {
       throw new Refusal(400, 'not_at_revision', `at an earlier head ask answers ${[...RoflenoxNode.AT_REVISION].join(', ')}; ${rel} is derived by the engine, which holds only the latest state`);
     }
     if (perspective !== null || rel === 'conf' || rel === 'persp' || rel === 'asserted' || rel === 'admitted_at' || rel === 'live' || undo) {
-      const a = rel === 'live' && perspective === null ? await this.askFacts('edge', book, args, scope, (id, t) => this.liveNow(id, t, undo?.get(id)))
+      const a = rel === 'live' && perspective === null ? await this.askFacts('edge', book, args, scope, (id, t) => this.liveNow(id, t, undo?.get(id)), o.window)
         : undo && perspective === null && (rel === 'edge' || rel === 'edge_num')
-          ? await this.askFacts(rel, book, args, scope, (id, t) => this.assertions.viewAt(id, undo.get(id)).get(t[0]) !== undefined)
-          : await this.askAssertions(rel, book, args, scope, perspective, undo);
+          ? await this.askFacts(rel, book, args, scope, (id, t) => this.assertions.viewAt(id, undo.get(id)).get(t[0]) !== undefined, o.window)
+          : perspective !== null && rel === 'edge'
+            ? await this.askFacts('edge', book, args, scope, (id, t) => this.assertions.viewAt(id, undo?.get(id)).get(t[0])?.P === perspective, o.window)
+            : await this.askAssertions(rel, book, args, scope, perspective, undo, o.window);
       const forked = this.forkedUnknowns(scope, book);
       if (forked.length) a.unknown = [...(a.unknown ?? []), ...forked];
+      return a;
+    }
+    // A question about facts is answered a book and a relation at a time,
+    // into the asker's window: never held whole (r_heap_headroom).
+    if (rel === 'edge' || rel === 'edge_num') {
+      const a = await this.askFacts(rel, book, args, scope, () => true, o.window);
+      const unknown: NonNullable<AskAnswer['unknown']> = [];
+      for (const [b, sc] of scope) if (sc.only === null && (book === null || book === b)) unknown.push(...await this.silentFeeds(sc.identity));
+      unknown.push(...this.forkedUnknowns(scope, book));
+      if (unknown.length) a.unknown = unknown;
       return a;
     }
     // answered is a rule world's; with none, it still names its variables.
@@ -1347,37 +1395,45 @@ export class RoflenoxNode {
    *  restricted to a perspective — from the current assertions admission keeps
    *  (src/assertions.ts), within the reader's scope. */
   private async askAssertions(rel: string, book: string | null, args: string, scope: Map<string, BookScope>, perspective: string | null,
-    undo: Map<string, Map<string, Current | null>> | null = null): Promise<AskAnswer> {
+    undo: Map<string, Map<string, Current | null>> | null = null, window?: AskOptions['window']): Promise<AskAnswer> {
     const a = splitArgs(args);
     const books = [...scope].filter(([b]) => book === null || b === book);
     if (book !== null && books.length === 0) throw new Refusal(404, 'unknown_book', `no visible book ${book}`);
-    const rows: AskAnswer['rows'] = [];
-    let vars = a.filter((x, i) => x === '_' || (/^[A-Z_]/.test(x) && a.indexOf(x) === i));
-    if (perspective !== null) {
-      if (rel !== 'edge') throw new Refusal(400, 'bad_query', 'a perspective restricts edge(F, S, R, T) questions');
-      if (a.length !== 4) return { vars, rows: [] };               // the note says the arity (src/empty.ts)
-      for (const [b, sc] of books) {
-        const r = await this.engine.ask(`edge[${b}](${args})`, new Map([[b, sc]]));
-        vars = r.vars;
-        const cur = this.assertions.viewAt(sc.identity, undo?.get(sc.identity));
-        const fAt = /^[A-Z_]/.test(a[0]!) && a[0] !== '_' ? r.vars.indexOf(a[0]!) : -1;
-        for (const row of r.rows) {
-          const F = fAt >= 0 ? String(row.cells[fAt]) : a[0] === '_' ? null : String(JSON.parse(a[0]!));
-          if (F !== null && cur.get(F)?.P === perspective) rows.push(row);
-        }
-      }
-    } else {
-      if (a.length !== (rel === 'asserted' ? 4 : 2)) return { vars, rows: [] };   // the note says the arity (src/empty.ts)
-      for (const [, sc] of books) {
-        for (const [F, c] of this.assertions.viewAt(sc.identity, undo?.get(sc.identity))) {
-          if (sc.only !== null && !sc.only.has(F)) continue;
-          const m = match(a, rel === 'admitted_at' ? [F, this.admittedAt(sc.identity, c.S)] : assertionCells(rel, F, c));
-          if (m) rows.push({ identity: sc.identity, cells: m.cells });
-        }
+    const vars = a.filter((x, i) => x === '_' || (/^[A-Z_]/.test(x) && a.indexOf(x) === i));
+    // (An edge question under a perspective is askFacts'; any other is not one.)
+    if (perspective !== null) throw new Refusal(400, 'bad_query', 'a perspective restricts edge(F, S, R, T) questions');
+    if (a.length !== (rel === 'asserted' ? 4 : 2)) return { vars, rows: [] };   // the note says the arity (src/empty.ts)
+    const out = new Collect(window);
+    let j = 0;
+    for (const [, sc] of books) {
+      for (const [F, c] of this.assertions.viewAt(sc.identity, undo?.get(sc.identity))) {
+        if (++j % YIELD_EVERY === 0) await breathe();
+        if (sc.only !== null && !sc.only.has(F)) continue;
+        const m = match(a, rel === 'admitted_at' ? [F, this.admittedAt(sc.identity, c.S)] : assertionCells(rel, F, c));
+        if (m) out.push({ identity: sc.identity, cells: m.cells });
       }
     }
-    sortRows(rows);
-    return { vars, rows };
+    return out.answer(vars);
+  }
+
+  /** Every fact `caller` may see whose relation `want` takes, handed to
+   *  `each` with its current assertion — asked of the engine one book and one
+   *  relation at a time, so no answer holds a whole book (r_heap_headroom). */
+  eachFact(caller: string | null, want: (R: string) => boolean,
+    each: (identity: string, F: string, S: string, R: string, T: string, cur: Current | undefined) => void): Promise<void> {
+    return this.serial(async () => {
+      for (const [b, sc] of await this.scopeFor(caller)) {
+        const cur = this.assertions.of(sc.identity);
+        const one = new Map([[b, sc]]);
+        for (const R of [...(this.values.get(sc.identity)?.R ?? [])].filter(want).sort()) {
+          const r = await this.engine.ask(`edge[${b}](F, S, ${roflString(R)}, T)`, one);
+          for (const row of r.rows) {
+            const [F, S, T] = row.cells.map(String) as [string, string, string];
+            each(sc.identity, F, S, R, T, cur.get(F));
+          }
+        }
+      }
+    }, true);
   }
 
   /** live(F, S, R, T) (r_live_view): the edges as they stand now — asserted
@@ -1386,27 +1442,32 @@ export class RoflenoxNode {
    *  stays the whole history. Asked of the engine's edges with the
    *  question's constants bound, and filtered by the current assertions. */
   private async askFacts(rel: 'edge' | 'edge_num', book: string | null, args: string, scope: Map<string, BookScope>,
-    keep: (identity: string, t: [string, string, string, string]) => boolean): Promise<AskAnswer> {
+    keep: (identity: string, t: [string, string, string, string]) => boolean, window?: AskOptions['window']): Promise<AskAnswer> {
     const a = splitArgs(args);
     const vars = a.filter((x, i) => x === '_' || (/^[A-Z_]/.test(x) && a.indexOf(x) === i));
     if (a.length !== 4) return { vars, rows: [] };                  // the note says the arity (src/empty.ts)
     const books = [...scope].filter(([b]) => book === null || b === book);
     if (book !== null && books.length === 0) throw new Refusal(404, 'unknown_book', `no visible book ${book}`);
     const isVar = (x: string) => /^[A-Z_]/.test(x);
-    const probe = a.map((x, i) => (isVar(x) ? `V${i}` : x)).join(', ');
-    const rows: AskAnswer['rows'] = [];
+    const out = new Collect(window);
     for (const [b, sc] of books) {
-      const r = await this.engine.ask(`${rel}[${b}](${probe})`, new Map([[b, sc]]));
-      const at = a.map((x, i) => (isVar(x) ? r.vars.indexOf(`V${i}`) : -1));
-      for (const row of r.rows) {
-        const t = a.map((x, i) => (at[i]! >= 0 ? row.cells[at[i]!]! : decodeCell(x.trim())));
-        if (!keep(sc.identity, t.map(String) as [string, string, string, string])) continue;
-        const m = match(a, t);
-        if (m) rows.push({ identity: sc.identity, cells: m.cells });
+      // One relation at a time when the question leaves it open: no engine
+      // answer holds a whole book (r_heap_headroom).
+      const rels = isVar(a[2]!) ? [...(this.values.get(sc.identity)?.R ?? [])].sort().map((R) => roflString(R)) : [a[2]!];
+      for (const R of rels) {
+        const probe = a.map((x, i) => (i === 2 ? R : isVar(x) ? `V${i}` : x)).join(', ');
+        const r = await this.engine.ask(`${rel}[${b}](${probe})`, new Map([[b, sc]]));
+        const at = a.map((x, i) => (i !== 2 && isVar(x) ? r.vars.indexOf(`V${i}`) : -1));
+        for (const [j, row] of r.rows.entries()) {
+          if (j % YIELD_EVERY === YIELD_EVERY - 1) await breathe();
+          const t = a.map((x, i) => (at[i]! >= 0 ? row.cells[at[i]!]! : decodeCell(i === 2 ? R : x.trim())));
+          if (!keep(sc.identity, t.map(String) as [string, string, string, string])) continue;
+          const m = match(a, t);
+          if (m) out.push({ identity: sc.identity, cells: m.cells });
+        }
       }
     }
-    sortRows(rows);
-    return { vars, rows };
+    return out.answer(vars);
   }
 
   /** Whether a fact of `identity`'s is live now (r_live_view); a grant also
@@ -1735,7 +1796,7 @@ export class RoflenoxNode {
     for (const b of [own, ...foreign]) {
       const id = owners.get(b);
       if (!id) continue;
-      const text = (this.programs.get(id) ?? []).join('') + this.assertions.lines(id, b, true) + (b === own ? extra : '');
+      const text = (this.programs.get(id) ?? []).map((p) => zlib.inflateRawSync(p).toString('utf8')).join('') + this.assertions.lines(id, b, true) + (b === own ? extra : '');
       if (text) await w.session.load(text, id);
       if (b !== own || ranging) await w.session.load(mayReadRules(b, id), 'roflenox');
     }
@@ -2026,7 +2087,8 @@ export class RoflenoxNode {
       const batches = chain.slice(from, limit !== null ? from + Math.max(1, Math.floor(limit)) : undefined).map((d): FeedEntry => {
         const s = this.log.read(byDigest.get(d)!);
         const extra = s.receipt.reattest ? { reattest: s.receipt.reattest } : {};
-        if (s.jsonl === null || !parseJsonl(s.jsonl).every((f) => allowed(factId(f)))) {
+        // (A reader who may read the book whole gets every batch: nothing to parse.)
+        if (s.jsonl === null || (sc?.only !== null && !parseJsonl(s.jsonl).every((f) => allowed(factId(f))))) {
           return { manifest: s.manifest, withheld: true, ...extra };
         }
         return { manifest: s.manifest, jsonl: s.jsonl, salt: s.salt!, ...extra };
@@ -2086,6 +2148,14 @@ export class RoflenoxNode {
       recovered: this.log.recovered,
       challenges_remembered: this.consumed.size,
       recent_facts_remembered: this.recentFacts,
+      // What the node holds of its heap, and the heap it may grow to (r_heap_headroom).
+      memory: (() => {
+        const m = process.memoryUsage();
+        const stall = Math.round(loopDelay.max / 1e6);
+        loopDelay.reset();
+        return { heap_used_mb: Math.round(m.heapUsed / 2 ** 20), heap_limit_mb: Math.round(v8.getHeapStatistics().heap_size_limit / 2 ** 20), rss_mb: Math.round(m.rss / 2 ** 20),
+          /** The longest the event loop was held since the last health (ms). */ stall_ms: stall };
+      })(),
     };
   }
 

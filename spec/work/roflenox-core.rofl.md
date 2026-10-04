@@ -173,3 +173,4 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_conjunction` at "f02869996dd4d43be58de1ba4022a4d3519af3ca".
 - `roflenox_core` takes `r_owner_rules`.
 - `roflenox_core` finished `r_owner_rules` at "aea8212bb8277f91d91ecc01fdfc8554628cf6ac".
+- `roflenox_core` takes `r_heap_headroom`.

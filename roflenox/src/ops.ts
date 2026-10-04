@@ -23,7 +23,7 @@ import { LocalIdentity } from './identity.ts';
 import type { RoflenoxNode } from './node.ts';
 import { edgeIdOf, ENOX_OPS } from './enox-ops.ts';
 import { explainEmpty } from './empty.ts';
-import { parseQuery } from './engine.ts';
+import { parseQuery, rowKey, type AskAnswer } from './engine.ts';
 
 /** A property; no `type` means any JSON value. */
 export type Prop = { type?: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object'; description?: string; items?: unknown };
@@ -122,29 +122,46 @@ export const DEFAULT_LIMIT = 1000;
 export const CHAIN_LIMIT = 100;
 export const MAX_LIMIT = 10_000;
 
-function page(ctx: Ctx, a: Record<string, unknown>, ans: { vars: string[]; rows: unknown[]; unknown?: unknown; head?: string }) {
-  const limit = Math.min(MAX_LIMIT, Math.max(1, Math.floor((a.limit as number | undefined) ?? DEFAULT_LIMIT)));
+type Cursor = { q: string; o: number; h: string; k: string };
+const limitOf = (a: Record<string, unknown>) => Math.min(MAX_LIMIT, Math.max(1, Math.floor((a.limit as number | undefined) ?? DEFAULT_LIMIT)));
+const questionOf = (ctx: Ctx, a: Record<string, unknown>) => createHash('sha256').update(JSON.stringify([a.query, a.perspective ?? null, ctx.caller])).digest('hex').slice(0, 16);
+
+/** The cursor an asker brought, checked to be for this question and asker. */
+function cursorOf(ctx: Ctx, a: Record<string, unknown>): Cursor | undefined {
+  if (a.cursor === undefined) return undefined;
+  let c: Cursor;
+  try { c = JSON.parse(Buffer.from(a.cursor as string, 'base64url').toString('utf8')); } catch { throw new Refusal(400, 'bad_cursor', 'not a cursor'); }
+  if (c.q !== questionOf(ctx, a)) throw new Refusal(400, 'bad_cursor', 'this cursor belongs to another question or asker');
+  return c;
+}
+
+/** One page of an answer. A page starts after the cursor's last row, in the
+ *  one fixed order; the node answered a question about facts into exactly
+ *  that window (`window`), anything else whole, and it is cut here. In
+ *  admission order a page starts at the cursor's offset. */
+function page(ctx: Ctx, a: Record<string, unknown>, ans: AskAnswer, c: Cursor | undefined) {
+  const limit = limitOf(a);
   const head = ans.head ?? (ctx.node!.health() as { log_head: string }).log_head;
-  const q = createHash('sha256').update(JSON.stringify([a.query, a.perspective ?? null, ctx.caller])).digest('hex').slice(0, 16);
-  const key = (r: unknown) => { const x = r as { identity: string; cells: unknown[] }; return JSON.stringify([x.identity, x.cells]); };
-  let offset = 0;
+  const q = questionOf(ctx, a);
   let resumed = false;
-  if (a.cursor !== undefined) {
-    let c: { q: string; o: number; h: string; k: string };
-    try { c = JSON.parse(Buffer.from(a.cursor as string, 'base64url').toString('utf8')); } catch { throw new Refusal(400, 'bad_cursor', 'not a cursor'); }
-    if (c.q !== q) throw new Refusal(400, 'bad_cursor', 'this cursor belongs to another question or asker');
-    if (c.h === head) offset = c.o;
-    else if (a.resume === true && typeof c.k === 'string') {
-      offset = ans.rows.findIndex((r) => key(r) > c.k);
-      if (offset < 0) offset = ans.rows.length;
-      resumed = true;
-    } else throw new Refusal(409, 'cursor_stale', 'the log has changed since the first page; ask again from the start (or ask with resume to continue after the last row)');
+  if (c && c.h !== head) {
+    if (a.resume === true && typeof c.k === 'string' && a.order === undefined) resumed = true;
+    else throw new Refusal(409, 'cursor_stale', 'the log has changed since the first page; ask again from the start (or ask with resume to continue after the last row)');
   }
-  const rows = ans.rows.slice(offset, offset + limit);
-  const more = offset + limit < ans.rows.length;
-  return { ...ans, rows, ...(resumed ? { resumed: true } : {}),
-    ...(more ? { cut: true, cursor: Buffer.from(JSON.stringify({ q, o: offset + limit, h: head, k: key(rows[rows.length - 1]) })).toString('base64url'),
-      total: ans.rows.length } : {}) };
+  let rows: AskAnswer['rows'], more: boolean, total: number, offset = 0;
+  const { window, ...rest } = ans;
+  if (window) {
+    rows = ans.rows; more = window.after > rows.length; total = window.total;
+  } else if (a.order !== undefined) {
+    offset = c?.o ?? 0;
+    rows = ans.rows.slice(offset, offset + limit); more = offset + limit < ans.rows.length; total = ans.rows.length;
+  } else {
+    const start = c ? ans.rows.findIndex((r) => rowKey(r) > c.k) : 0;
+    const from = start < 0 ? ans.rows.length : start;
+    rows = ans.rows.slice(from, from + limit); more = from + limit < ans.rows.length; total = ans.rows.length;
+  }
+  return { ...rest, rows, ...(resumed ? { resumed: true } : {}),
+    ...(more ? { cut: true, cursor: Buffer.from(JSON.stringify({ q, o: offset + limit, h: head, k: rowKey(rows[rows.length - 1]!) })).toString('base64url'), total } : {}) };
 }
 
 /** The predicates whose first argument is a fact. */
@@ -191,12 +208,15 @@ export const OPS: Op[] = [
       const at = a.at as string | undefined, since = a.since as string | undefined;
       if (a.order !== undefined && a.order !== 'admission') throw new Refusal(400, 'bad_args', 'order is "admission"');
       if (a.order !== undefined && a.resume === true) throw new Refusal(400, 'bad_args', 'a page in admission order is not resumed after a change; ask again at the head');
-      const ans = await n.ask(query, ctx.caller, perspective, { at, since, ...(a.order === 'admission' ? { order: 'admission' as const } : {}) });
+      const c = cursorOf(ctx, a);
+      // A page of a question about facts is answered into its window, never held whole (r_heap_headroom).
+      const ans = await n.ask(query, ctx.caller, perspective, { at, since,
+        ...(a.order === 'admission' ? { order: 'admission' as const } : { window: { ...(c ? { after: c.k } : {}), limit: limitOf(a) } }) });
       // (A note looks at the whole latest state; an answer at an earlier head, or since a batch, gets none.)
       const one = parseQuery(query);
       const note = ans.rows.length === 0 && !ans.unknown && at === undefined && since === undefined && one.length === 1 && !one[0]!.neg
         ? await explainEmpty(n, query, ctx.caller, perspective) : undefined;
-      return page(ctx, a, note !== undefined ? { ...ans, note } : ans);
+      return page(ctx, a, note !== undefined ? { ...ans, note } : ans, c);
     } },
   { name: 'schema', description: 'How to ask (r_introspect): every predicate ask answers, with its arity, arguments and meaning; every perspective present with its fact count; and the units (confidence in per mille in conf and asserted, 0..1 in the Enox tools). Read it before asking.',
     input: obj({}), access: 'anyone',

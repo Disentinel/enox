@@ -65,6 +65,10 @@ export interface Edge { /** The fact id ask returns: F of edge(F, S, R, T). */ F
    *  the assertion or a fact about it (RoflenoxNode.writtenAt). */
   written: number }
 
+/** What the view holds of one fact. `by`: who signed it — one name, or
+ *  several when more than one book holds the fact. */
+interface Fact1 { S: string; R: string; T: string; C: number; seq: number; written: number; rank: number; P: string; by: string | string[] }
+
 /** The Enox graph as `caller` may see it, built from asks. */
 export class Graph {
   nodes = new Map<string, Node>();
@@ -74,16 +78,19 @@ export class Graph {
   // 8.3 s at 200 000 facts. And applied INCREMENTALLY (r_compat_parity): a
   // write re-derives only the entities and assertions it touches — a full
   // re-derivation took ~1.5 s per write at 200 000 facts.
-  private readonly raw = new Map<string, { S: string; R: string; T: string }>();
-  private readonly conf = new Map<string, number>();
-  private readonly seq = new Map<string, number>();
-  /** Where in the log each fact was last asserted (r_recent_order). */
-  private readonly written = new Map<string, number>();
+  //
+  // ONE record per fact (r_heap_headroom): its triple, current confidence
+  // (permille), chain position, where in the log it was last asserted
+  // (r_recent_order), first-seen rank, perspective and signers — one map
+  // entry and one key per fact, where seven maps each held their own. The
+  // node's own relations (roflenox:*: embeddings, searches, grants, ...) are
+  // no part of the Enox view and are not held at all.
+  private readonly facts = new Map<string, Fact1>();
   private orderOf: (identity: string, seq: number) => number = () => -1;
-  /** Who signed each fact: the identities whose books hold it. */
-  private readonly by = new Map<string, Set<string>>();
-  /** First-seen order of each fact: the order a full derivation walks them. */
-  private readonly rank = new Map<string, number>();
+  /** Counts kept as the view changes (r_heap_headroom): graph_stats reads
+   *  these instead of walking every entity and edge. */
+  private readonly buckets = new Map<string, { domain: string; type: string; cnt: number }>();
+  private readonly relCount = new Map<string, number>();
   /** subject → attribute → the facts that set it (in first-seen order), and
    *  subject → its alias facts. Retired ones are skipped when resolving. */
   private readonly attrFacts = new Map<string, Map<string, string[]>>();
@@ -100,7 +107,6 @@ export class Graph {
   private readonly namedBy = new Map<string, Set<string>>();
   /** The perspective of each assertion's current assertion, where it is not
    *  "enox" (most are: kept only for the others). */
-  private readonly persp = new Map<string, string>();
   private edgeList: Edge[] | null = null;
   /** Subjects and assertions to re-derive at the next ensure(). */
   private readonly dirtySubjects = new Set<string>();
@@ -108,42 +114,43 @@ export class Graph {
   private readonly nodeRank = new Map<string, number>();
   private lastNodeRank = -1;
 
+  /** The view as `caller` may see it: the node hands over the facts of each
+   *  book it may read, one relation at a time, with their current assertions
+   *  (RoflenoxNode.eachFact) — never the whole book as one answer. */
   static async load(node: RoflenoxNode, caller: string | null): Promise<Graph> {
     const g = new Graph();
     g.orderOf = (identity, seq) => node.writtenAt(identity, seq);
-    const facts = (await node.ask('edge(F, S, R, T)', caller)).rows as { identity: string; cells: string[] }[];
-    const seqRows = await node.ask('asserted(F, P, C, S)', caller).catch((e: unknown) => {
-      if (e instanceof Refusal && e.reason === 'engine_down') throw e;     // never a plain answer from a dead engine
-      return { rows: [] };
+    await node.eachFact(caller, (R) => !R.startsWith('roflenox:'), (identity, F, S, R, T, cur) => {
+      g.hold(F, S, R, T, identity);
+      if (cur) g.assertedAs(F, identity, cur.P, cur.C, cur.S);
     });
-    for (const r of seqRows.rows as { identity: string; cells: [string, string, number, number] }[]) {
-      if ((g.seq.get(r.cells[0]) ?? -1) <= r.cells[3]) g.perspective(r.cells[0], r.cells[1]);
-      g.seq.set(r.cells[0], Math.max(g.seq.get(r.cells[0]) ?? -1, r.cells[3]));
-      g.wrote(r.cells[0], r.identity, r.cells[3]);
-    }
-    for (const r of (await node.ask('conf(F, C)', caller)).rows as { cells: [string, number] }[]) g.conf.set(r.cells[0], r.cells[1]);
-    for (const { identity, cells: [F, S, R, T] } of facts) { g.hold(F!, S!, R!, T!); g.signedBy(F!, identity); }
     g.ensure();
     return g;
   }
 
-  private perspective(F: string, P: string): void {
-    if (P === ENOX_PERSPECTIVE) this.persp.delete(F); else this.persp.set(F, P);
+  /** A fact's current assertion by `identity`: the latest in chain position wins. */
+  private assertedAs(F: string, identity: string, P: string, C: number, seq: number): void {
+    const r = this.facts.get(F)!;
+    if (seq >= r.seq) { r.seq = seq; r.P = P === ENOX_PERSPECTIVE ? ENOX_PERSPECTIVE : P; r.C = C; }
+    r.written = Math.max(r.written, this.orderOf(identity, seq));
   }
 
-  private wrote(F: string, identity: string, seq: number): void {
-    this.written.set(F, Math.max(this.written.get(F) ?? -1, this.orderOf(identity, seq)));
+  private signedBy(r: Fact1, identity: string): void {
+    if (r.by === identity || (Array.isArray(r.by) && r.by.includes(identity))) return;
+    r.by = r.by === '' ? identity : [...(Array.isArray(r.by) ? r.by : [r.by]), identity];
   }
 
-  private signedBy(F: string, identity: string): void {
-    const s = this.by.get(F);
-    if (s) s.add(identity); else this.by.set(F, new Set([identity]));
+  private conf(F: string): number | undefined {
+    return this.facts.get(F)?.C;
   }
 
   /** Hold a fact in the raw state and mark what it changes. */
-  private hold(F: string, S: string, R: string, T: string): void {
-    if (!this.raw.has(F)) {
-      this.rank.set(F, this.rank.size);
+  private hold(F: string, S: string, R: string, T: string, identity: string): void {
+    if (R.startsWith('roflenox:')) return;
+    let rec = this.facts.get(F);
+    if (!rec) {
+      rec = { S, R, T, C: 1000, seq: -1, written: -1, rank: this.facts.size, P: ENOX_PERSPECTIVE, by: '' };
+      this.facts.set(F, rec);
       if (R.startsWith('enox:')) {
         const a = R.slice(5);
         const m = this.attrFacts.get(S) ?? new Map<string, string[]>();
@@ -153,7 +160,7 @@ export class Graph {
           const n = this.namedBy.get(T);
           if (n) n.add(S); else this.namedBy.set(T, new Set([S]));
         }
-      } else if (!R.startsWith('roflenox:')) {
+      } else {
         this.assertionIds.add(F);
         for (const x of [S, T]) {
           const t = this.touching.get(x);
@@ -161,21 +168,18 @@ export class Graph {
         }
       }
     }
-    this.raw.set(F, { S, R, T });
+    this.signedBy(rec, identity);
     if (R.startsWith('enox:')) this.dirtySubjects.add(S);
-    else if (!R.startsWith('roflenox:')) this.dirtyEdges.add(F);
+    else this.dirtyEdges.add(F);
   }
 
   /** Apply an admitted batch (its facts, at its chain position, signed by `identity`). */
-  apply(facts: { source: string; relation: string; target: string; confidence: number }[], seq: number, identity: string): void {
+  apply(facts: { source: string; relation: string; target: string; confidence: number; perspective: string }[], seq: number, identity: string): void {
     for (const f of facts) {
+      if (f.relation.startsWith('roflenox:')) continue;
       const F = factId(f);
-      this.conf.set(F, Math.round(f.confidence * 1000));
-      this.seq.set(F, seq);
-      this.perspective(F, f.perspective);
-      this.wrote(F, identity, seq);
-      this.hold(F, f.source, f.relation, f.target);
-      this.signedBy(F, identity);
+      this.hold(F, f.source, f.relation, f.target, identity);
+      this.assertedAs(F, identity, f.perspective, Math.round(f.confidence * 1000), seq);
     }
   }
 
@@ -185,8 +189,11 @@ export class Graph {
     this.dirtySubjects.clear();
     let reorder = false;
     for (const id of subjects) {
-      const had = this.nodes.has(id);
+      const old = this.nodes.get(id);
+      const had = old !== undefined;
       const n = this.nodeOf(id);
+      if (old) this.count(old, -1);
+      if (n) this.count(n, 1);
       const at = n ? this.firstAttr(id) : undefined;
       // A new entity later than every other one lands in place at the end.
       const appended = !had && n !== null && at! > this.lastNodeRank;
@@ -217,8 +224,8 @@ export class Graph {
     for (const [a, Fs] of this.attrFacts.get(s) ?? []) {
       if (a === 'alias') continue;
       for (const F of Fs) {
-        if ((this.conf.get(F) ?? 1) === 0) continue;
-        const r = this.rank.get(F)!;
+        if ((this.conf(F) ?? 1) === 0) continue;
+        const r = this.facts.get(F)!.rank;
         if (min === undefined || r < min) min = r;
         break;                                                        // Fs is in first-seen order
       }
@@ -231,9 +238,9 @@ export class Graph {
   private attr(s: string, a: string): string | undefined {
     let best: [number, string] | undefined;
     for (const F of this.attrFacts.get(s)?.get(a) ?? []) {
-      if ((this.conf.get(F) ?? 1) === 0) continue;                    // retired (confidence 0)
-      const sq = this.seq.get(F) ?? 0;
-      if (!best || sq >= best[0]) best = [sq, this.raw.get(F)!.T];
+      const r = this.facts.get(F)!;
+      if (r.C === 0) continue;                                        // retired (confidence 0)
+      if (!best || r.seq >= best[0]) best = [r.seq, r.T];
     }
     return best?.[1];
   }
@@ -242,7 +249,7 @@ export class Graph {
     const attr = (a: string) => this.attr(id, a);
     if (attr('label') === undefined && attr('type') === undefined) return null;
     const listed = attr('aliases');
-    const aliases = (this.attrFacts.get(id)?.get('alias') ?? []).filter((F) => (this.conf.get(F) ?? 1) !== 0).map((F) => this.raw.get(F)!.T);
+    const aliases = (this.attrFacts.get(id)?.get('alias') ?? []).filter((F) => (this.conf(F) ?? 1) !== 0).map((F) => this.facts.get(F)!.T);
     return {
       id, type: attr('type') ?? 'concept', domain: attr('domain') ?? '', name: attr('label') ?? '',
       description: attr('description') ?? '', aliases: listed !== undefined ? JSON.parse(listed) as string[] : [...new Set(aliases)].sort(),
@@ -254,34 +261,49 @@ export class Graph {
   private deriveEdge(F: string): void {
     const old = this.edgeOf.get(F);
     if (old) {
+      this.relCount.set(old.relation, this.relCount.get(old.relation)! - 1);
+      if (this.relCount.get(old.relation) === 0) this.relCount.delete(old.relation);
       this.edgeOf.delete(F);
       this.outOf.get(old.source)?.delete(F);
       this.inOf.get(old.target)?.delete(F);
       this.byFactId.get(old.fact_id)?.delete(F);
     }
-    const a = this.raw.get(F)!;
-    const c = this.conf.get(F);
+    const a = this.facts.get(F)!;
+    const c = a.C;
     if (c === undefined || c === 0) return;                           // deleted (or not visible)
     if (!this.nodes.has(a.S) || !this.nodes.has(a.T)) return;
     const attr = (x: string) => this.attr(F, x);
-    let written = this.written.get(F) ?? -1;
+    let written = a.written;
     for (const Fs of this.attrFacts.get(F)?.values() ?? []) {
-      for (const G of Fs) if ((this.conf.get(G) ?? 1) !== 0) written = Math.max(written, this.written.get(G) ?? -1);
+      for (const G of Fs) { const g = this.facts.get(G)!; if (g.C !== 0) written = Math.max(written, g.written); }
     }
     const e: Edge = {
       F, fact_id: attr('fact_id') ?? enoxFactId(a.S, a.R, a.T), source: a.S, target: a.T, relation: a.R,
-      confidence: c / 1000, asserted_by: [...(this.by.get(F) ?? [])].sort().join(', ') || null, claimed_by: attr('asserted_by') ?? null, context: attr('context') ?? '',
+      confidence: c / 1000, asserted_by: (Array.isArray(a.by) ? [...a.by].sort().join(', ') : a.by) || null, claimed_by: attr('asserted_by') ?? null, context: attr('context') ?? '',
       proof_depth: Number(attr('proof_depth') ?? 0), created_at: oneTime(attr('created_at')), updated_at: oneTime(attr('updated_at')), written,
     };
     this.edgeOf.set(F, e);
+    this.relCount.set(e.relation, (this.relCount.get(e.relation) ?? 0) + 1);
     for (const [m, k] of [[this.outOf, e.source], [this.inOf, e.target], [this.byFactId, e.fact_id]] as const) {
       const set = m.get(k);
       if (set) set.add(F); else m.set(k, new Set([F]));
     }
   }
 
+  private count(n: Node, d: number): void {
+    const k = `${n.domain}\u0000${n.type}`;
+    const b = this.buckets.get(k) ?? { domain: n.domain, type: n.type, cnt: 0 };
+    b.cnt += d;
+    if (b.cnt === 0) this.buckets.delete(k); else this.buckets.set(k, b);
+  }
+
+  /** The counts graph_stats answers (r_heap_headroom), kept as the view changes. */
+  stats(): { nodes: number; edges: number; buckets: { domain: string; type: string; cnt: number }[]; relations: [string, number][] } {
+    return { nodes: this.nodes.size, edges: this.edgeOf.size, buckets: [...this.buckets.values()].map((b) => ({ ...b })), relations: [...this.relCount] };
+  }
+
   private inOrder(Fs: Iterable<string> | undefined): Edge[] {
-    return [...(Fs ?? [])].sort((x, y) => this.rank.get(x)! - this.rank.get(y)!).map((F) => this.edgeOf.get(F)!);
+    return [...(Fs ?? [])].sort((x, y) => this.facts.get(x)!.rank - this.facts.get(y)!.rank).map((F) => this.edgeOf.get(F)!);
   }
 
   /** Every edge, in the order the facts were first seen. */
@@ -302,10 +324,10 @@ export class Graph {
   assertion(id: string): { F: string; S: string; R: string; T: string; P: string; confidence: number; fact_id: string } | undefined {
     const e = this.edgeByFactId(id);
     const F = e?.F ?? (this.assertionIds.has(id) ? id : [...(this.namedBy.get(id) ?? [])].filter((G) => this.assertionIds.has(G))
-      .sort((x, y) => this.rank.get(x)! - this.rank.get(y)!)[0]);
+      .sort((x, y) => this.facts.get(x)!.rank - this.facts.get(y)!.rank)[0]);
     if (F === undefined) return undefined;
-    const a = this.raw.get(F)!;
-    return { F, S: a.S, R: a.R, T: a.T, P: this.persp.get(F) ?? ENOX_PERSPECTIVE, confidence: (this.conf.get(F) ?? 0) / 1000,
+    const a = this.facts.get(F)!;
+    return { F, S: a.S, R: a.R, T: a.T, P: a.P, confidence: a.C / 1000,
       // A fact outside the Enox view that no Enox write named has one id: F.
       fact_id: e?.fact_id ?? this.attr(F, 'fact_id') ?? F };
   }
@@ -313,7 +335,7 @@ export class Graph {
   /** An entity's attribute fact by its id (its label, description, ...),
    *  for a tool that was given one where it wanted an edge. */
   attributeOf(F: string): { node: string; attribute: string; value: string } | undefined {
-    const a = this.raw.get(F);
+    const a = this.facts.get(F);
     if (!a || !a.R.startsWith('enox:') || this.assertionIds.has(a.S)) return undefined;
     return { node: a.S, attribute: a.R.slice(5), value: a.T };
   }
@@ -326,11 +348,11 @@ export class Graph {
     const Fs = new Set<string>();
     for (const xs of this.attrFacts.get(id)?.values() ?? []) for (const F of xs) Fs.add(F);
     for (const F of this.touching.get(id) ?? []) Fs.add(F);
-    const held = [...Fs].filter((F) => (this.conf.get(F) ?? 0) > 0).sort((x, y) => this.rank.get(x)! - this.rank.get(y)!);
-    const mine = held.filter((F) => this.by.get(F)?.has(signer));
+    const held = [...Fs].filter((F) => (this.conf(F) ?? 0) > 0).sort((x, y) => this.facts.get(x)!.rank - this.facts.get(y)!.rank);
+    const mine = held.filter((F) => { const b = this.facts.get(F)!.by; return b === signer || (Array.isArray(b) && b.includes(signer)); });
     return { others: held.length - mine.length, facts: mine.map((F) => {
-      const a = this.raw.get(F)!;
-      return { F, S: a.S, R: a.R, T: a.T, P: this.persp.get(F) ?? ENOX_PERSPECTIVE, edge: this.assertionIds.has(F) };
+      const a = this.facts.get(F)!;
+      return { F, S: a.S, R: a.R, T: a.T, P: a.P, edge: this.assertionIds.has(F) };
     }) };
   }
 

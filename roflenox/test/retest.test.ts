@@ -381,7 +381,7 @@ test('wrong arity, a conjunction, a negation and a fact held only under another 
     }
     // Malformed inside one literal — an open quote, a missing comma the engine
     // itself rejects: no engine wording either.
-    for (const q of ['edge(F, "unterminated, R, T)', 'edge(F, S R, T)', 'edge(F, S, R, T), edge(G, S R, T)']) {
+    for (const q of ['edge(F, "unterminated, R, T)', 'edge(F, "a" "b", R, T)', 'edge(F, S, R, T), edge(G, "a" "b", R2, T2)']) {
       const bad = await asked(q);
       assert.equal(bad.status, 400, q);
       assert.equal(bad.body.error, 'bad_query', q);
