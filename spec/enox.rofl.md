@@ -469,6 +469,12 @@ Declared as facts:
 - `r_attribute_delete_explains` says "delete_assertion given the id of a node's attribute fact (its label, description, type, domain) says what that fact is and which tool changes or retracts it, instead of answering not found".
 - `r_attribute_delete_explains` is stated in "lead's verification of r_delete_any_perspective, 2026-10-04: deleting an enox:label fact by its id answered 'not found' although the fact exists".
 - `r_attribute_delete_explains` is to be checked by "delete_assertion with an attribute fact's id names the node and attribute and points to update_node or retract_node".
+- `r_heap_headroom` is about `hybrid`.
+- `r_heap_headroom` binds as `must`.
+- `r_heap_headroom` says "on the owner's book the node stays inside the heap its unit gives it with room to spare, while hosted sessions and the embedder call it at once: no single read costs memory in proportion to the whole book, and reads that would together exceed the heap wait their turn instead of crashing the node".
+- `r_heap_headroom` says "graph_stats answers from counts the node keeps as facts are admitted, so a call costs milliseconds and no memory that grows with the book".
+- `r_heap_headroom` is stated in "deploy of 976f7b1 to rofl.enox.dev, 2026-10-04: three concurrent graph_stats on a copy of the owner's book exhaust a 1 GB heap (each call ~11 s and ~150 MB); prod crashed with Reached heap limit while the embedder polled and one graph_stats ran".
+- `r_heap_headroom` is to be checked by "on an owner-sized book under a 1 GB heap, ten concurrent graph_stats, recall and ask calls while an embedder polls leave the node alive and answering, and graph_stats answers within 200 ms".
 - `r_typed` says "every requirement is of exactly one kind from the closed list".
 - `r_typed` is stated in "owner 2026-09-26".
 - `r_typed` is to be checked by "a requirement with an unknown kind fails typing".
@@ -873,6 +879,7 @@ Kinds of the requirements:
 - `r_session_identity` resists "a session that claims, in its writes, to be the owner or another session; or a stolen session token used to write as any other session".
 - `r_perspective_export` is of `feature`.
 - `r_attribute_delete_explains` is of `feature`.
+- `r_heap_headroom` is of `reliability`.
 - `r_oauth_lockout` resists "a stranger who sends wrong secrets to the authorize page to keep the owner from approving, or forges a forwarded address to spend someone else's allowance".
 - `r_mcp_oauth` resists "anyone on the internet who registers a client and lures the owner to approve it, guesses the owner's secret on the authorize page, steals or replays a code or a refresh token, or presents a token minted for another server".
 - `r_compat_parity` is of `feature`.
@@ -978,6 +985,7 @@ The queue:
 - `r_session_identity` is queued at 111.
 - `r_perspective_export` is queued at 112.
 - `r_attribute_delete_explains` is queued at 113.
+- `r_heap_headroom` is queued at 108.
 - `r_mutation_gate` is queued at 73.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 - `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
