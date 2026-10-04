@@ -137,3 +137,4 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_live_view` at "131272141dfeddd6a8a21893511166ed4570b4ab".
 - `roflenox_core` takes `r_edge_context_stays`.
 - `roflenox_core` finished `r_edge_context_stays` at "6828402262c51180879e0b54d6cfb52cd96dc2d3".
+- `roflenox_core` takes `r_retract_node`.

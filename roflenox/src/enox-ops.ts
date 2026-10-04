@@ -437,6 +437,22 @@ export const ENOX_OPS: Op[] = [
       return { id: x.id, type: x.type, name: (a.name as string | undefined) ?? x.name, description: (a.description as string | undefined) ?? x.description,
         aliases: (a.aliases as string[] | undefined) ?? x.aliases, updated_at: t };
     } },
+  // One call retracts an entity (r_retract_node): its facts and the edges
+  // touching it, re-asserted at confidence 0 in one signed batch. An edge
+  // goes with either of its ends; the other end stays.
+  { name: 'retract_node', description: 'Retract an entity: every fact about it and every edge touching it, re-asserted at confidence 0 in one signed batch. It leaves every read and live(F, S, R, T); the log and edge(F, S, R, T) keep it as history.',
+    input: obj({ node_id: s('the entity\'s id, as query_graph or recall gives it') }, ['node_id']), access: 'operator', text: pretty,
+    run: async (ctx, a) => {
+      const g = await graph(ctx);
+      const id = a.node_id as string;
+      const x = g.nodes.get(id);
+      const { facts, others } = g.about(id, self(ctx));
+      if (!x && facts.length === 0) throw refuseText(`Node ${id} not found`);
+      await write(ctx, facts.map((f) => ({ source: f.S, relation: f.R, target: f.T, perspective: f.P, confidence: 0 })));
+      const edges = facts.filter((f) => f.edge);
+      return { node_id: id, name: x?.name ?? null, retracted: facts.length, attributes: facts.length - edges.length, edges: edges.length,
+        edge_ids: edges.map((f) => f.F), ...(others ? { kept: `${others} facts about it are signed by other identities, and stay theirs` } : {}) };
+    } },
   // ---- artifacts: an artifact is an entity whose body is one of its facts ----
   { name: 'create_artifact', description: 'Store a document as an entity (body as a fact), deduplicated by content hash, with optional links.',
     input: obj({ title: s(), domain: s(), content_type: s(), body: s(), encoding: s(), filename: s(), parse_okf: b(), links: { type: 'array' } },

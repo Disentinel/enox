@@ -300,6 +300,22 @@ export class Graph {
       fact_id: e?.fact_id ?? this.attr(F, 'fact_id') ?? enoxFactId(a.S, a.R, a.T) };
   }
 
+  /** Every fact of `signer`'s about an entity — its attributes — and every
+   *  edge touching it, held above confidence 0 now, in first-seen order
+   *  (r_retract_node). Facts another identity signed are not `signer`'s to
+   *  retract, and are counted apart. */
+  about(id: string, signer: string): { facts: { F: string; S: string; R: string; T: string; P: string; edge: boolean }[]; others: number } {
+    const Fs = new Set<string>();
+    for (const xs of this.attrFacts.get(id)?.values() ?? []) for (const F of xs) Fs.add(F);
+    for (const F of this.touching.get(id) ?? []) Fs.add(F);
+    const held = [...Fs].filter((F) => (this.conf.get(F) ?? 0) > 0).sort((x, y) => this.rank.get(x)! - this.rank.get(y)!);
+    const mine = held.filter((F) => this.by.get(F)?.has(signer));
+    return { others: held.length - mine.length, facts: mine.map((F) => {
+      const a = this.raw.get(F)!;
+      return { F, S: a.S, R: a.R, T: a.T, P: this.persp.get(F) ?? ENOX_PERSPECTIVE, edge: this.assertionIds.has(F) };
+    }) };
+  }
+
   record(n: Node) {
     return { id: n.id, type: n.type, domain: n.domain, name: n.name, description: n.description, aliases: n.aliases, source_ref: n.source_ref,
       created_at: n.created_at, updated_at: n.updated_at };

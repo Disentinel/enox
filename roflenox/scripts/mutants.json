@@ -4286,6 +4286,34 @@
    "red": [
     "add_assertion that creates its target node leaves that node without a description and keeps the context on the edge"
    ]
+  },
+  {
+   "id": "M315",
+   "title": "r_retract_node: the edges touching the node are left standing",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "    for (const F of this.touching.get(id) ?? []) Fs.add(F);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "retract_node removes a node and its edges from explore, traverse, query_graph and live in one batch, and they remain in edge with confidence zero"
+   ]
+  },
+  {
+   "id": "M316",
+   "title": "r_retract_node: the node's own facts are left standing",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "    for (const xs of this.attrFacts.get(id)?.values() ?? []) for (const F of xs) Fs.add(F);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "retract_node removes a node and its edges from explore, traverse, query_graph and live in one batch, and they remain in edge with confidence zero"
+   ]
   }
  ]
 }

@@ -179,3 +179,44 @@ test('add_assertion that creates its target node leaves that node without a desc
     assert.deepEqual(gamma.map((x) => x.description), ['']);
   } finally { await a.stop(); }
 });
+
+test('retract_node removes a node and its edges from explore, traverse, query_graph and live in one batch, and they remain in edge with confidence zero', async () => {
+  const a = await start(tmpDir('retract-node'), 'node-a');
+  try {
+    const call = tools(a);
+    const ab = json<{ source: string; target: string }>(await call('add_assertion', { source: 'Alpha', target: 'Beta', relation: 'uses', context: 'why Alpha uses Beta' }));
+    json(await call('add_assertion', { source: 'Gamma', target: 'Beta', relation: 'cites' }));
+    json(await call('add_assertion', { source: 'Beta', target: 'Delta', relation: 'part_of' }));
+    json(await call('add_assertion', { source: 'Alpha', target: 'Delta', relation: 'uses' }));
+    json(await call('update_node', { node_id: ab.target, description: 'Beta, described', aliases: ['B'] }));
+    const beta = JSON.stringify(ab.target);
+    const touching = [`edge(F, ${beta}, R, T)`, `edge(F, S, R, ${beta})`];
+    const held = (await Promise.all(touching.map((q) => ask(a, q)))).flatMap((r) => r.rows.map((x) => x.cells[0]));
+    assert.ok(held.length >= 9, `facts about Beta: ${held.length}`);
+    const batches = async () => (await post(a.url, '/op/health', {})).body.batches as number;
+    const before = await batches();
+
+    const r = json<{ node_id: string; retracted: number; edges: number; edge_ids: string[] }>(await call('retract_node', { node_id: ab.target }));
+    assert.equal(await batches(), before + 1, 'one batch');
+    assert.deepEqual([r.node_id, r.edges, r.retracted], [ab.target, 3, held.length]);
+
+    // Gone from every Enox read …
+    assert.equal((await call('explore', { entity: ab.target })).isError, true);
+    assert.deepEqual(json<unknown[]>(await call('query_graph', { query: 'Beta' })), []);
+    assert.equal(json<{ node: unknown }>(await call('query_graph', { node_id: ab.target })).node, null);
+    const alpha = json<{ outgoing: { target: string }[] }>(await call('query_graph', { node_id: ab.source }));
+    assert.deepEqual(alpha.outgoing.map((e) => e.target).filter((t) => t === ab.target), []);
+    assert.doesNotMatch((await call('traverse', { entity: 'Alpha', max_depth: 3 })).text, /Beta/);
+    assert.doesNotMatch((await call('explore', { entity: 'Gamma' })).text, /Beta/);
+    // … and from live; the other ends stay.
+    for (const q of touching) assert.deepEqual((await ask(a, q.replace(/^edge/, 'live'))).rows, [], q);
+    for (const name of ['Alpha', 'Gamma', 'Delta']) assert.equal((await call('explore', { entity: name })).isError, false, name);
+    assert.match((await call('explore', { entity: 'Alpha' })).text, /Alpha --\[uses\]--> Delta/);
+    // History: every fact is still in edge, at confidence 0.
+    const after = (await Promise.all(touching.map((q) => ask(a, q)))).flatMap((x) => x.rows.map((y) => y.cells[0]));
+    assert.deepEqual(after.sort(), [...held].sort());
+    for (const F of after) assert.deepEqual((await ask(a, `conf(${JSON.stringify(F)}, C)`)).rows.map((x) => x.cells[0]), [0], String(F));
+    // A node that is not there is not found.
+    assert.equal((await call('retract_node', { node_id: 'enox://example.org/graph/main/cs/nothing' })).isError, true);
+  } finally { await a.stop(); }
+});
