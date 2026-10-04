@@ -1054,6 +1054,12 @@ Accepted after verification:
 - `r_query_errors` is accepted at "263739daf0fc4258d3a6b6ac7093b82cb825f7fc".
 - `r_bounded_reads` is accepted at "0670a04ca5f5297ba59d1004c0de8b19c413be03".
 - `r_tool_list_clean` is accepted at "259149f0acb8e962b4469dda6a8da6906cd0d8a1".
+- `r_ask_at_revision` is accepted at "04d3cc543cb308c15665f94fc437228847ac9129".
+- `r_ask_since` is accepted at "f1d51d1178102392bc716c123a704dcb9ff84e52".
+- `r_admission_order` is accepted at "8f0ac5b910e3433b8ec5f870e5190cb019899077".
+- `r_assert_then_ask` is accepted at "8c99d1358167d2c72b7752ae3098da627efe10e7".
+- `r_knew_head` is accepted at "fa587b8cd203623342364d3cd39117a74fbe66d1".
+- `r_one_time` is accepted at "976f7b1c712bfd9d91db6cc1a7aa182ef0a3488d".
 
 > Решение 2026-09-27 по замерам на 200000 фактах: rofl-serve пересчитывает
 > все выведенные факты при каждом evaluate (Eval::run → clear_derived), форк
@@ -1436,6 +1442,18 @@ The checks that exist:
 - "chain pages with a limit, semantic_search cuts descriptions to the cap, and why on an Enox edge answers once with the batch and claim of its axiom" lives in "roflenox/test/retest.test.ts".
 - "tools/list holds no tool described as not offered, and re-adding a deleted edge answers restored" guards `r_tool_list_clean`.
 - "tools/list holds no tool described as not offered, and re-adding a deleted edge answers restored" lives in "roflenox/test/retest.test.ts".
+- "two asks at the same head answer the same rows while writes land between them, and an ask at a head older than the node keeps is refused naming the oldest it keeps" guards `r_ask_at_revision`.
+- "two asks at the same head answer the same rows while writes land between them, and an ask at a head older than the node keeps is refused naming the oldest it keeps" lives in "roflenox/test/retest.test.ts".
+- "ask since a digest answers only the facts admitted after it, and its cost on an owner-sized book grows with the new facts, not the log" guards `r_ask_since`.
+- "ask since a digest answers only the facts admitted after it, and its cost on an owner-sized book grows with the new facts, not the log" lives in "roflenox/test/perf/since.test.ts".
+- "ask ordered by admission lists rows in the order their batches were admitted, the same after a restart" guards `r_admission_order`.
+- "ask ordered by admission lists rows in the order their batches were admitted, the same after a restart" lives in "roflenox/test/retest.test.ts".
+- "two sessions that claim the same task at once each get an answer naming the same single winner, and no batch lands between a claim and its answer" guards `r_assert_then_ask`.
+- "two sessions that claim the same task at once each get an answer naming the same single winner, and no batch lands between a claim and its answer" lives in "roflenox/test/retest.test.ts".
+- "a batch that names the head its author knew keeps it through admission, mirroring and a restart, and a forged head breaks the signature" guards `r_knew_head`.
+- "a batch that names the head its author knew keeps it through admission, mirroring and a restart, and a forged head breaks the signature" lives in "roflenox/test/retest.test.ts".
+- "every tool shows times in one form, and a lease that expires by the node's admission times expires whatever time its writer claimed" guards `r_one_time`.
+- "every tool shows times in one form, and a lease that expires by the node's admission times expires whatever time its writer claimed" lives in "roflenox/test/retest.test.ts".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" lives in "personal-node/src/mcp/main-graph.test.ts".
 
 ## Что выводится
