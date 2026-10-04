@@ -55,6 +55,16 @@ export function heldViews(): number {
   return kept ? 1 : 0;
 }
 
+/** The fact id ask returns (F of edge(F, S, R, T)) for an Enox fact_id, as
+ *  `ctx.caller` may see it (r_one_fact_id); null when `id` names no
+ *  assertion by its Enox fact_id (it may be an F already). */
+export async function edgeIdOf(ctx: Ctx, id: string): Promise<string | null> {
+  const n = node(ctx);
+  if (ctx.caller !== null && ctx.caller === n.identity?.name) return (await graph(ctx)).assertion(id)?.F ?? null;
+  const r = await n.ask(`edge(G, X, "enox:fact_id", ${JSON.stringify(id)})`, ctx.caller);
+  return r.rows.length ? String(r.rows[0]!.cells[1]) : null;
+}
+
 /** Who an Enox write claims when it names no asserted_by: the OAuth client
  *  the owner approved, else the operator — never empty (r_claimed_author). */
 const agent = (ctx: Ctx) => ctx.agent?.trim() || 'operator';
@@ -246,7 +256,7 @@ export const ENOX_OPS: Op[] = [
         const cost = `${sn} --[${e.relation}]--> ${tn}`.length + e.context.length;
         if (used + cost > chars) continue;
         used += cost;
-        edges.push({ source: sn, relation: e.relation, target: tn, ...(e.asserted_by ? { asserted_by: e.asserted_by } : {}), ...(e.claimed_by ? { claimed_by: e.claimed_by } : {}), confidence: e.confidence, context: e.context });
+        edges.push({ fact_id: e.fact_id, edge_id: e.F, source: sn, relation: e.relation, target: tn, ...(e.asserted_by ? { asserted_by: e.asserted_by } : {}), ...(e.claimed_by ? { claimed_by: e.claimed_by } : {}), confidence: e.confidence, context: e.context });
       }
       return { nodes, edges, seeds: hits.slice(0, 5).map((h) => h.x.name), budget_used: Math.ceil(used / 4), budget_total: budget };
     } },
@@ -288,7 +298,7 @@ export const ENOX_OPS: Op[] = [
       return g.edges.filter((e) => since === undefined || (e.updated_at ?? '') >= since)
         .sort((x, y) => y.written - x.written || cmpDesc(x.updated_at ?? '', y.updated_at ?? '') || (x.F < y.F ? -1 : x.F > y.F ? 1 : 0))
         .slice(0, (a.limit as number | undefined) ?? 20)
-        .map((e) => ({ source_name: g.nodes.get(e.source)!.name, source_id: e.source, relation: e.relation, target_name: g.nodes.get(e.target)!.name,
+        .map((e) => ({ fact_id: e.fact_id, edge_id: e.F, source_name: g.nodes.get(e.source)!.name, source_id: e.source, relation: e.relation, target_name: g.nodes.get(e.target)!.name,
           target_id: e.target, asserted_by: e.asserted_by, claimed_by: e.claimed_by, confidence: e.confidence, context: e.context,
           created_at: e.created_at, updated_at: e.updated_at }));
     } },
@@ -350,7 +360,7 @@ export const ENOX_OPS: Op[] = [
           if (!x.source || !x.target || !x.relation) throw new Error('source, target and relation are required');
           const r = addFacts(g, x, agent(ctx), created, self(ctx));
           all.push(...r.facts);
-          return { fact_id: r.result.fact_id, source: r.result.source, target: r.result.target, relation: r.result.relation, asserted_by: r.result.asserted_by, claimed_by: r.result.claimed_by, ok: true, created: r.result.created };
+          return { fact_id: r.result.fact_id, edge_id: r.result.edge_id, source: r.result.source, target: r.result.target, relation: r.result.relation, asserted_by: r.result.asserted_by, claimed_by: r.result.claimed_by, ok: true, created: r.result.created };
         } catch (e) {
           return { fact_id: '', source: x.source, target: x.target, relation: x.relation, ok: false, error: String(e) };
         }
@@ -382,7 +392,7 @@ export const ENOX_OPS: Op[] = [
       facts.push(...r.facts);
       await write(ctx, facts);
       return { subject: { id: subj!.id, name: subj!.name }, fact: { id: fid, text: truncateAtWordBoundary(fact, 300) }, relation,
-        asserted_by: r.result.asserted_by, claimed_by: r.result.claimed_by, fact_id: r.result.fact_id, created: r.result.created };
+        asserted_by: r.result.asserted_by, claimed_by: r.result.claimed_by, fact_id: r.result.fact_id, edge_id: r.result.edge_id, created: r.result.created };
     } },
   { name: 'update_assertion', description: 'Change an assertion\'s confidence/context/author: a new assertion that supersedes.',
     input: obj({ fact_id: s(), confidence: n(), context: s(), asserted_by: s(), proof_depth: ASSERTION.proof_depth! }, ['fact_id']), access: 'operator', text: pretty,
@@ -398,7 +408,7 @@ export const ENOX_OPS: Op[] = [
       if (claim) facts.push(meta(e.F, 'asserted_by', claim));
       if (a.proof_depth !== undefined) facts.push(meta(e.F, 'proof_depth', a.proof_depth as number));
       await write(ctx, facts);
-      return { fact_id: e.fact_id, source: e.source, target: e.target, relation: e.relation, asserted_by: self(ctx), claimed_by: claim || e.claimed_by,
+      return { fact_id: e.fact_id, edge_id: e.F, source: e.source, target: e.target, relation: e.relation, asserted_by: self(ctx), claimed_by: claim || e.claimed_by,
         confidence, proof_depth: (a.proof_depth as number | undefined) ?? e.proof_depth, context: (a.context as string | undefined) ?? e.context, updated_at: t };
     } },
   { name: 'delete_assertion', description: 'Retire an assertion: re-asserted with confidence 0 (the log keeps its history).',
@@ -409,7 +419,7 @@ export const ENOX_OPS: Op[] = [
       if (!e) throw refuseText(`Assertion ${a.fact_id} not found`);
       await write(ctx, [{ source: e.source, relation: e.relation, target: e.target, perspective: ENOX_PERSPECTIVE, confidence: 0 },
         meta(e.F, 'deleted_at', new Date().toISOString())]);
-      return `Deleted assertion ${a.fact_id}`;
+      return `Deleted assertion ${e.fact_id} (edge ${e.F})`;
     } },
   { name: 'update_node', description: 'Change an entity\'s name, description or aliases: new attribute facts that supersede.',
     input: obj({ node_id: s(), name: s(), description: s(), aliases: { type: 'array' } }, ['node_id']), access: 'operator', text: pretty,
@@ -485,9 +495,9 @@ export const ENOX_OPS: Op[] = [
       const textLike = /^text\//.test(ct) || /^application\/(json|xml|yaml|javascript|typescript)/.test(ct.split(';')[0]!);
       return { id: a.id, entity_id: x.id, content_type: ct, title: x.name, domain: x.domain, filename: x.attrs.get('filename') ?? null,
         size: Number(x.attrs.get('size') ?? 0), sha256: x.attrs.get('sha256'), created_at: x.created_at, updated_at: x.updated_at,
-        links: g.out(x.id).map((e) => ({ fact_id: e.fact_id, source: e.source, target: e.target, target_name: g.nodes.get(e.target)!.name, relation: e.relation,
+        links: g.out(x.id).map((e) => ({ fact_id: e.fact_id, edge_id: e.F, source: e.source, target: e.target, target_name: g.nodes.get(e.target)!.name, relation: e.relation,
           confidence: e.confidence, context: e.context, asserted_by: e.asserted_by, claimed_by: e.claimed_by })),
-        incoming: g.in(x.id).map((e) => ({ fact_id: e.fact_id, source: e.source, source_name: g.nodes.get(e.source)!.name, target: e.target, relation: e.relation,
+        incoming: g.in(x.id).map((e) => ({ fact_id: e.fact_id, edge_id: e.F, source: e.source, source_name: g.nodes.get(e.source)!.name, target: e.target, relation: e.relation,
           confidence: e.confidence, context: e.context, asserted_by: e.asserted_by, claimed_by: e.claimed_by })),
         ...((a.include_body ?? true) && textLike ? { body: x.attrs.get('body') ?? '' } : {}) };
     } },

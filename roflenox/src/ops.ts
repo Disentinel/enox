@@ -21,7 +21,7 @@ import { createHash } from 'node:crypto';
 import { checkFact, Refusal, type Fact } from './facts.ts';
 import { LocalIdentity } from './identity.ts';
 import type { RoflenoxNode } from './node.ts';
-import { ENOX_OPS } from './enox-ops.ts';
+import { edgeIdOf, ENOX_OPS } from './enox-ops.ts';
 import { explainEmpty } from './empty.ts';
 
 /** A property; no `type` means any JSON value. */
@@ -141,6 +141,18 @@ function page(ctx: Ctx, a: Record<string, unknown>, ans: { vars: string[]; rows:
       total: ans.rows.length } : {}) };
 }
 
+/** The predicates whose first argument is a fact. */
+const FACT_FIRST = new Set(['edge', 'edge_num', 'conf', 'persp', 'asserted', 'live']);
+/** One name for an edge everywhere (r_one_fact_id): a literal whose fact is
+ *  given by its Enox fact_id is asked with the fact id ask returns instead. */
+async function byEdgeId(ctx: Ctx, query: unknown): Promise<string> {
+  if (typeof query !== 'string') return query as string;
+  const m = /^(\s*([a-z][A-Za-z0-9_]*)\s*(?:\[[^\]]*\])?\s*\(\s*)"([0-9a-f]{64})"/.exec(query);
+  if (!m || !FACT_FIRST.has(m[2]!)) return query;
+  const F = await edgeIdOf(ctx, m[3]!);
+  return F === null || F === m[3] ? query : `${m[1]}${JSON.stringify(F)}${query.slice(m[0].length)}`;
+}
+
 const FACT_ITEMS = { type: 'object', required: ['source', 'relation', 'target', 'perspective', 'confidence'] };
 
 export const OPS: Op[] = [
@@ -166,14 +178,15 @@ export const OPS: Op[] = [
     run: async (ctx, a) => {
       const n = needNode(ctx);
       const perspective = (a.perspective as string | undefined) ?? null;
-      const ans = await n.ask(a.query as string, ctx.caller, perspective);
-      const note = ans.rows.length === 0 && !ans.unknown ? await explainEmpty(n, a.query as string, ctx.caller, perspective) : undefined;
+      const query = await byEdgeId(ctx, a.query);
+      const ans = await n.ask(query, ctx.caller, perspective);
+      const note = ans.rows.length === 0 && !ans.unknown ? await explainEmpty(n, query, ctx.caller, perspective) : undefined;
       return page(ctx, a, note !== undefined ? { ...ans, note } : ans);
     } },
   { name: 'why', description: 'Why a ground literal holds, in the books you may read whole.', input: obj({ literal: str() }, ['literal']),
-    access: 'anyone', positional: ['literal'], say: explainSay, run: async (ctx, a) => needNode(ctx).why(a.literal as string, ctx.caller) },
+    access: 'anyone', positional: ['literal'], say: explainSay, run: async (ctx, a) => needNode(ctx).why(await byEdgeId(ctx, a.literal), ctx.caller) },
   { name: 'whynot', description: 'Why a ground literal does not hold, in the books you may read whole.', input: obj({ literal: str() }, ['literal']),
-    access: 'anyone', positional: ['literal'], say: explainSay, run: async (ctx, a) => needNode(ctx).whynot(a.literal as string, ctx.caller) },
+    access: 'anyone', positional: ['literal'], say: explainSay, run: async (ctx, a) => needNode(ctx).whynot(await byEdgeId(ctx, a.literal), ctx.caller) },
   { name: 'chain', description: 'The digests of an identity\'s batches, in chain order (what any feed shows of it).',
     input: obj({ identity: str() }, ['identity']), access: 'anyone', positional: ['identity'],
     run: async (ctx, a) => ({ identity: a.identity, ...(await needNode(ctx).readChain(a.identity as string, ctx.caller)) }) },

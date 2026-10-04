@@ -51,7 +51,7 @@ export function deriveDescription(text: string, max = 240): string {
 const enoxFactId = (s: string, r: string, t: string) => createHash('sha256').update(`${s}|${r}|${t}`).digest('hex');
 
 export interface Node { id: string; type: string; domain: string; name: string; description: string; aliases: string[]; source_ref: string; created_at: string | null; updated_at: string | null; attrs: Map<string, string> }
-export interface Edge { F: string; fact_id: string; source: string; target: string; relation: string; confidence: number; asserted_by: string | null; claimed_by: string | null; context: string; proof_depth: number; created_at: string | null; updated_at: string | null;
+export interface Edge { /** The fact id ask returns: F of edge(F, S, R, T). */ F: string; /** The Enox fact_id. */ fact_id: string; source: string; target: string; relation: string; confidence: number; asserted_by: string | null; claimed_by: string | null; context: string; proof_depth: number; created_at: string | null; updated_at: string | null;
   /** When it was last written: the log position of the latest batch holding
    *  the assertion or a fact about it (RoflenoxNode.writtenAt). */
   written: number }
@@ -86,6 +86,12 @@ export class Graph {
   private readonly outOf = new Map<string, Set<string>>();
   private readonly inOf = new Map<string, Set<string>>();
   private readonly byFactId = new Map<string, Set<string>>();
+  /** Every Enox fact_id a fact about an assertion names (enox:fact_id), live
+   *  or deleted → the assertions it names (r_one_fact_id). */
+  private readonly namedBy = new Map<string, Set<string>>();
+  /** The perspective of each assertion's current assertion, where it is not
+   *  "enox" (most are: kept only for the others). */
+  private readonly persp = new Map<string, string>();
   private edgeList: Edge[] | null = null;
   /** Subjects and assertions to re-derive at the next ensure(). */
   private readonly dirtySubjects = new Set<string>();
@@ -102,6 +108,7 @@ export class Graph {
       return { rows: [] };
     });
     for (const r of seqRows.rows as { identity: string; cells: [string, string, number, number] }[]) {
+      if ((g.seq.get(r.cells[0]) ?? -1) <= r.cells[3]) g.perspective(r.cells[0], r.cells[1]);
       g.seq.set(r.cells[0], Math.max(g.seq.get(r.cells[0]) ?? -1, r.cells[3]));
       g.wrote(r.cells[0], r.identity, r.cells[3]);
     }
@@ -109,6 +116,10 @@ export class Graph {
     for (const { identity, cells: [F, S, R, T] } of facts) { g.hold(F!, S!, R!, T!); g.signedBy(F!, identity); }
     g.ensure();
     return g;
+  }
+
+  private perspective(F: string, P: string): void {
+    if (P === ENOX_PERSPECTIVE) this.persp.delete(F); else this.persp.set(F, P);
   }
 
   private wrote(F: string, identity: string, seq: number): void {
@@ -129,6 +140,10 @@ export class Graph {
         const m = this.attrFacts.get(S) ?? new Map<string, string[]>();
         m.set(a, [...(m.get(a) ?? []), F]);
         this.attrFacts.set(S, m);
+        if (a === 'fact_id') {
+          const n = this.namedBy.get(T);
+          if (n) n.add(S); else this.namedBy.set(T, new Set([S]));
+        }
       } else if (!R.startsWith('roflenox:')) {
         this.assertionIds.add(F);
         for (const x of [S, T]) {
@@ -148,6 +163,7 @@ export class Graph {
       const F = factId(f);
       this.conf.set(F, Math.round(f.confidence * 1000));
       this.seq.set(F, seq);
+      this.perspective(F, f.perspective);
       this.wrote(F, identity, seq);
       this.hold(F, f.source, f.relation, f.target);
       this.signedBy(F, identity);
@@ -265,9 +281,23 @@ export class Graph {
     return this.edgeList;
   }
 
-  /** The edge an Enox fact_id names (the first seen, if several do). */
+  /** The edge an id names (r_one_fact_id): the fact id ask returns (F), or
+   *  an Enox fact_id (the first seen, if several edges carry it). */
   edgeByFactId(id: string): Edge | undefined {
-    return this.inOrder(this.byFactId.get(id))[0];
+    return this.edgeOf.get(id) ?? this.inOrder(this.byFactId.get(id))[0];
+  }
+
+  /** The assertion an id names, whether or not it is an edge of the view —
+   *  deleted (confidence 0), or between values that are not entities, under
+   *  any perspective: its F, its triple, and its current assertion. */
+  assertion(id: string): { F: string; S: string; R: string; T: string; P: string; confidence: number; fact_id: string } | undefined {
+    const e = this.edgeByFactId(id);
+    const F = e?.F ?? (this.assertionIds.has(id) ? id : [...(this.namedBy.get(id) ?? [])].filter((G) => this.assertionIds.has(G))
+      .sort((x, y) => this.rank.get(x)! - this.rank.get(y)!)[0]);
+    if (F === undefined) return undefined;
+    const a = this.raw.get(F)!;
+    return { F, S: a.S, R: a.R, T: a.T, P: this.persp.get(F) ?? ENOX_PERSPECTIVE, confidence: (this.conf.get(F) ?? 0) / 1000,
+      fact_id: e?.fact_id ?? this.attr(F, 'fact_id') ?? enoxFactId(a.S, a.R, a.T) };
   }
 
   record(n: Node) {
@@ -277,7 +307,7 @@ export class Graph {
 
   row(e: Edge) {
     const s = this.nodes.get(e.source)!, t = this.nodes.get(e.target)!;
-    return { fact_id: e.fact_id, source: e.source, source_name: s.name, source_type: s.type, target: e.target, target_name: t.name, target_type: t.type,
+    return { fact_id: e.fact_id, edge_id: e.F, source: e.source, source_name: s.name, source_type: s.type, target: e.target, target_name: t.name, target_type: t.type,
       relation: e.relation, asserted_by: e.asserted_by, claimed_by: e.claimed_by, confidence: e.confidence, context: e.context, created_at: e.created_at, updated_at: e.updated_at };
   }
 
@@ -344,7 +374,7 @@ export function addFacts(g: Graph, a: AddArgs, agent: string, created: Map<strin
     meta(F, 'asserted_by', by), meta(F, 'fact_id', fid), meta(F, 'updated_at', t));
   if (a.context) facts.push(meta(F, 'context', a.context));
   if (!existing) facts.push(meta(F, 'created_at', t), meta(F, 'proof_depth', a.proof_depth ?? 0));
-  const result = { fact_id: fid, source: sid, target: tid, relation: a.relation, asserted_by: signer, claimed_by: by, confidence,
+  const result = { fact_id: fid, edge_id: F, source: sid, target: tid, relation: a.relation, asserted_by: signer, claimed_by: by, confidence,
     proof_depth: existing ? existing.proof_depth : a.proof_depth ?? 0, context: a.context ?? '', created: !existing, updated: !!existing };
   return { facts, result, inverse: g.out(tid).find((e) => e.target === sid && e.relation === a.relation) };
 }

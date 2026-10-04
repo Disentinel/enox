@@ -4174,6 +4174,48 @@
    "red": [
     "an ask answers within one second while an executor saturates its CPU budget"
    ]
+  },
+  {
+   "id": "M307",
+   "title": "r_one_fact_id: ask, why and whynot take the Enox fact_id literally",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "  if (!m || !FACT_FIRST.has(m[2]!)) return query;",
+     "  if (true || !m || !FACT_FIRST.has(m[2]!)) return query;"
+    ]
+   ],
+   "red": [
+    "update_assertion, delete_assertion and why accept either the Enox fact_id or the fact id ask returns, and add_assertion returns both"
+   ]
+  },
+  {
+   "id": "M308",
+   "title": "r_one_fact_id: update and delete find an edge by its Enox fact_id only",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "    return this.edgeOf.get(id) ?? this.inOrder(this.byFactId.get(id))[0];",
+     "    return this.inOrder(this.byFactId.get(id))[0];"
+    ]
+   ],
+   "red": [
+    "update_assertion, delete_assertion and why accept either the Enox fact_id or the fact id ask returns, and add_assertion returns both"
+   ]
+  },
+  {
+   "id": "M309",
+   "title": "r_one_fact_id: a reader's Enox fact_id is not resolved (only the operator's view resolves it)",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "  return r.rows.length ? String(r.rows[0]!.cells[1]) : null;",
+     "  return r.rows.length ? null : null;"
+    ]
+   ],
+   "red": [
+    "update_assertion, delete_assertion and why accept either the Enox fact_id or the fact id ask returns, and add_assertion returns both"
+   ]
   }
  ]
 }
