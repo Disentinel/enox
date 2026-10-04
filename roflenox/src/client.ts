@@ -59,8 +59,10 @@ export async function headOf(node: string | OpCaller, identity: string): Promise
  *  know it yet (its first batch is its introduction). */
 async function ownHead(node: OpCaller, me: LocalIdentity): Promise<{ prev: string | null; last: number }> {
   try {
-    const c = (await node('chain', { identity: me.name })) as { digests: string[]; last_claimed_at: string | null };
-    return { prev: c.digests.length ? c.digests[c.digests.length - 1]! : null, last: c.last_claimed_at ? Date.parse(c.last_claimed_at) : -Infinity };
+    const c = (await node('chain', { identity: me.name })) as { digests: string[]; head?: string | null; last_claimed_at: string | null };
+    // A paged chain names its head; a node that answers the whole chain does not.
+    const prev = c.head !== undefined ? c.head : c.digests.length ? c.digests[c.digests.length - 1]! : null;
+    return { prev, last: c.last_claimed_at ? Date.parse(c.last_claimed_at) : -Infinity };
   } catch (e) {
     if (e instanceof RemoteRefusal && e.status === 401) return { prev: null, last: -Infinity };
     throw e;

@@ -103,7 +103,14 @@ export async function importEnox(node: OpCaller, me: LocalIdentity, text: string
     }
     return { entities, assertions, facts: facts.length, collapsed, batches, admitted, skipped };
   }
-  const held = new Set<string>(((await node('chain', { identity: me.name })) as { digests: string[] }).digests);
+  // Every page of the chain (r_bounded_reads pages it).
+  const held = new Set<string>();
+  for (let cursor: string | undefined; ;) {
+    const c = (await node('chain', { identity: me.name, ...(cursor !== undefined ? { cursor, limit: 10_000 } : { limit: 10_000 }) })) as { digests: string[]; cut?: boolean; cursor?: string };
+    for (const d of c.digests) held.add(d);
+    if (!c.cut) break;
+    cursor = c.cursor;
+  }
   let head = ((await node('health', {})) as { heads: Record<string, string> }).heads[me.name] ?? null;
   let admitted = 0, skipped = 0, batches = 0;
   for (let i = 0; i < facts.length; i += size) {

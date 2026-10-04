@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { publish } from '../src/client.ts';
 import { bookOf } from '../src/identity.ts';
 import { factId } from '../src/facts.ts';
+import { searchKey } from '../src/node.ts';
 import { DAY, grant, identityAt, iso, post, start, T0, tmpDir, vouch, type Running } from './helpers.ts';
 
 type Text = { text: string; isError: boolean };
@@ -384,5 +385,70 @@ test('wrong arity, a conjunction, a negation and a fact held only under another 
     assert.equal(hash.body.note, `no edge has "${'ab'.repeat(32)}" as its source`);
     // Control: a misspelt word still gets its nearest names.
     assert.match(String((await asked('edge(F, S, "usez", T)')).body.note), /the nearest that do: "uses"/);
+  } finally { await a.stop(); }
+});
+
+test('chain pages with a limit, semantic_search cuts descriptions to the cap, and why on an Enox edge answers once with the batch and claim of its axiom', async () => {
+  const a = await start(tmpDir('bounded'), 'node-a');
+  try {
+    const call = tools(a);
+    // A chain longer than a page.
+    for (let k = 0; k < 104; k++) json(await call('assert', { facts: [{ source: `s${k}`, relation: 'zz_step', target: `t${k}`, perspective: 'zz', confidence: 1 }] }));
+    type Chain = { digests: string[]; total: number; head: string; cut?: boolean; cursor?: string };
+    const first = json<Chain>(await call('chain', { identity: 'node-a' }));
+    assert.equal(first.digests.length, 100, 'a default page');
+    assert.equal(first.total, 104);
+    assert.equal(first.cut, true);
+    const pages: string[] = [];
+    for (let cursor: string | undefined; ;) {
+      const p = json<Chain>(await call('chain', { identity: 'node-a', limit: 30, ...(cursor ? { cursor } : {}) }));
+      assert.ok(p.digests.length <= 30);
+      pages.push(...p.digests);
+      if (!p.cut) break;
+      cursor = p.cursor;
+    }
+    assert.equal(pages.length, 104);
+    assert.equal(new Set(pages).size, 104);
+    assert.equal(pages.at(-1), first.head);
+    const health = (await post(a.url, '/op/health', {})).body as { heads: Record<string, string> };
+    assert.equal(first.head, health.heads['node-a']);
+    // A client that publishes reads the head from the page, past the first page.
+    await publish(a.url, a.me, [{ source: 'x', relation: 'zz_after', target: 'y', perspective: 'zz', confidence: 1 }], () => a.clock.t);
+    assert.equal(json<Chain>(await call('chain', { identity: 'node-a', limit: 1 })).total, 105);
+
+    // semantic_search: an embedder's answer, with a description longer than the cap.
+    const emb = identityAt(tmpDir('bounded-emb'), 'embedder.example.org');
+    await vouch(a, emb);
+    const long = `${'A long abstract about polynomial tables and engines. '.repeat(20)}End.`;
+    const ab = json<{ source: string; target: string; edge_id: string }>(await call('add_assertion', { source: 'Alpha', target: 'Beta', relation: 'uses', context: long, asserted_by: 'agent:test' }));
+    json(await call('update_node', { node_id: ab.source, description: long }));
+    await publish(a.url, a.me, [{ source: 'embedder.example.org', relation: 'roflenox:embedder', target: 'search', perspective: 'policy', confidence: 1 }], () => a.clock.t);
+    const Q = 'polynomial engines';
+    await publish(a.url, emb, [{ source: searchKey(Q), relation: 'roflenox:result', perspective: 'search', confidence: 1,
+      target: JSON.stringify({ hits: [{ kind: 'node', id: ab.source, score: 0.9 }, { kind: 'fact', id: ab.edge_id, score: 0.8 }] }) },
+    { source: 'n:x', relation: 'roflenox:embedding', target: '[0.1]', perspective: 'search', confidence: 1 }], () => a.clock.t);
+    type Found = { nodes: { description: string }[]; edges: { context: string }[] };
+    const found = json<Found>(await call('semantic_search', { query: Q, include_edges: true }));
+    assert.equal(found.nodes.length, 1);
+    assert.ok(found.nodes[0]!.description.length <= 300 && found.nodes[0]!.description.endsWith('…'), `${found.nodes[0]!.description.length}`);
+    assert.ok(found.edges[0]!.context.length <= 300, `${found.edges[0]!.context.length}`);
+    const capped = json<Found>(await call('semantic_search', { query: Q, include_edges: true, max_description: 40 }));
+    assert.ok(capped.nodes[0]!.description.length <= 40, capped.nodes[0]!.description);
+    assert.equal(json<Found>(await call('semantic_search', { query: Q, max_description: 0 })).nodes[0]!.description, long, '0: whole');
+
+    // why on an Enox edge: once — not once per book (the embedder's book is there too) — and
+    // its axiom names its batch, the admission number and the claim.
+    const lit = `edge(${JSON.stringify(ab.edge_id)}, ${JSON.stringify(ab.source)}, "uses", ${JSON.stringify(ab.target)})`;
+    const why = json<{ identity: string; holds: boolean; text: string }[]>(await call('why', { literal: lit }));
+    assert.deepEqual(why.map((e) => [e.identity, e.holds]), [['node-a', true]]);
+    const chain = json<Chain>(await call('chain', { identity: 'node-a', limit: 1000 }));
+    const seq = (await ask(a, `asserted(${JSON.stringify(ab.edge_id)}, P, C, S)`)).rows[0]!.cells[2] as number;
+    assert.match(why[0]!.text, new RegExp(`\\[axiom\\] batch ${chain.digests[seq]} \\(admission \\d+, node-a's batch ${seq}, claimed_at [0-9T:.-]+Z\\), claimed_by "agent:test"$`));
+    // whynot of a fact no book holds answers once too.
+    const whynot = json<{ identity: string }[]>(await call('whynot', { literal: lit.replace('"uses"', '"usez"') }));
+    assert.deepEqual(whynot.map((e) => e.identity), ['node-a']);
+    // A question about the embedder's facts is answered from its book alone.
+    const theirs = json<{ identity: string }[]>(await call('why', { literal: `edge(G, "n:x", "roflenox:embedding", "[0.1]")`.replace('G', JSON.stringify(factIdOf('n:x', 'roflenox:embedding', '[0.1]'))) }));
+    assert.deepEqual(theirs.map((e) => e.identity), ['embedder.example.org']);
   } finally { await a.stop(); }
 });

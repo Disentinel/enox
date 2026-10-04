@@ -147,3 +147,4 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_introspect` at "2493dc0de5a52db3c3a7e718182533387a4d3ee9".
 - `roflenox_core` takes `r_query_errors`.
 - `roflenox_core` finished `r_query_errors` at "263739daf0fc4258d3a6b6ac7093b82cb825f7fc".
+- `roflenox_core` takes `r_bounded_reads`.

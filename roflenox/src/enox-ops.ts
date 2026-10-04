@@ -91,6 +91,8 @@ function staleness<T extends { domain: string; updated_at: string | null }>(row:
   return { ...row, age_days, stale: age_days > (STALE_TTL[row.domain || 'default'] ?? STALE_TTL_DEFAULT) };
 }
 const STALE_TTL_DEFAULT = 365;
+/** How long a description semantic_search answers by default (r_bounded_reads). */
+export const DESCRIPTION_MAX = 300;
 /** How many domain/type buckets graph_stats names by default (r_stats_bounded). */
 export const STATS_TOP = 20;
 
@@ -269,7 +271,8 @@ export const ENOX_OPS: Op[] = [
       return { nodes, edges, seeds: hits.slice(0, 5).map((h) => h.x.name), budget_used: Math.ceil(used / 4), budget_total: budget };
     } },
   { name: 'semantic_search', description: 'Search by meaning. The embedder executor answers (r_semantic_search); until it has, the answer says so and never guesses. An answer is in the log: it stays when the embedder is gone.',
-    input: obj({ query: s(), top_k: n(), domain: s(), include_edges: b() }, ['query']), access: 'anyone', text: pretty,
+    input: obj({ query: s(), top_k: n(), domain: s(), include_edges: b(),
+      max_description: int(`cut each description and edge context to at most this many characters (default ${DESCRIPTION_MAX}; 0: whole)`) }, ['query']), access: 'anyone', text: pretty,
     run: async (ctx, a) => {
       const r = await node(ctx).meaningSearch(a.query as string, ctx.caller);
       const none = (index: string, message: string) => ({ nodes: [], ...(a.include_edges ? { edges: [] } : {}), index, message });
@@ -284,15 +287,19 @@ export const ENOX_OPS: Op[] = [
       // Hits the CALLER may not read are not in its view, and so not answered.
       const g = await graph(ctx);
       const topK = (a.top_k as number | undefined) ?? 10;
+      // Bounded (r_bounded_reads): a description can be a whole paper's abstract.
+      const max = (a.max_description as number | undefined) ?? DESCRIPTION_MAX;
+      const cut = (t: string) => (max > 0 && t.length > max ? truncateAtWordBoundary(t, max - 1) : t);
       const domain = a.domain as string | undefined;
       const sim = (x: number) => Math.round(x * 1000) / 1000;
       const nodes = r.hits.filter((h) => h.kind === 'node').map((h) => ({ h, nd: g.nodes.get(h.id) }))
         .filter(({ nd }) => nd && (domain === undefined || nd.domain.startsWith(domain)))
-        .slice(0, topK).map(({ h, nd }) => staleness({ ...g.record(nd!), similarity: sim(h.score) }, ctx.now()));
+        .slice(0, topK).map(({ h, nd }) => staleness({ ...g.record(nd!), similarity: sim(h.score) }, ctx.now()))
+        .map((x) => ({ ...x, description: cut(x.description) }));
       const byF = new Map(g.edges.map((e) => [e.F, e]));
       const edges = r.hits.filter((h) => h.kind === 'fact').map((h) => ({ h, e: byF.get(h.id) }))
         .filter(({ e }) => e && (domain === undefined || (g.nodes.get(e.source)?.domain ?? '').startsWith(domain)))
-        .slice(0, topK).map(({ h, e }) => ({ ...g.row(e!), similarity: sim(h.score) }));
+        .slice(0, topK).map(({ h, e }) => ({ ...g.row(e!), similarity: sim(h.score) })).map((x) => ({ ...x, context: cut(x.context) }));
       return { nodes, ...(a.include_edges ? { edges } : {}), index: `embedder:${r.embedder}`,
         message: `${nodes.length} entities${a.include_edges ? ` and ${edges.length} assertions` : ''} by meaning, answered by ${r.embedder}` };
     } },

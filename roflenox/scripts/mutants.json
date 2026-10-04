@@ -4472,6 +4472,76 @@
    "red": [
     "wrong arity, a conjunction, a negation and a fact held only under another perspective each get one consistent explanation without engine internals"
    ]
+  },
+  {
+   "id": "M328",
+   "title": "r_bounded_reads: chain answers the whole chain whatever the limit",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "      const page = digests.slice(from, from + limit);",
+     "      const page = digests.slice(from);"
+    ]
+   ],
+   "red": [
+    "chain pages with a limit, semantic_search cuts descriptions to the cap, and why on an Enox edge answers once with the batch and claim of its axiom"
+   ]
+  },
+  {
+   "id": "M329",
+   "title": "r_bounded_reads: semantic_search answers whole descriptions",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "      const cut = (t: string) => (max > 0 && t.length > max ? truncateAtWordBoundary(t, max - 1) : t);",
+     "      const cut = (t: string) => t;"
+    ]
+   ],
+   "red": [
+    "chain pages with a limit, semantic_search cuts descriptions to the cap, and why on an Enox edge answers once with the batch and claim of its axiom"
+   ]
+  },
+  {
+   "id": "M330",
+   "title": "r_bounded_reads: why and whynot answer once per book the reader may see",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    const scope = this.matchable(rel, book, args, all);",
+     "    const scope = all;"
+    ]
+   ],
+   "red": [
+    "chain pages with a limit, semantic_search cuts descriptions to the cap, and why on an Enox edge answers once with the batch and claim of its axiom"
+   ]
+  },
+  {
+   "id": "M331",
+   "title": "r_bounded_reads: an axiom says nothing of where it comes from",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        if (!c) continue;\n        const digest",
+     "        if (c || !c) continue;\n        const digest"
+    ]
+   ],
+   "red": [
+    "chain pages with a limit, semantic_search cuts descriptions to the cap, and why on an Enox edge answers once with the batch and claim of its axiom"
+   ]
+  },
+  {
+   "id": "M332",
+   "title": "r_bounded_reads: a publishing client takes the last digest of the first page as its head",
+   "file": "src/client.ts",
+   "edits": [
+    [
+     "    const prev = c.head !== undefined ? c.head : c.digests.length ? c.digests[c.digests.length - 1]! : null;",
+     "    const prev = c.digests.length ? c.digests[c.digests.length - 1]! : null;"
+    ]
+   ],
+   "red": [
+    "chain pages with a limit, semantic_search cuts descriptions to the cap, and why on an Enox edge answers once with the batch and claim of its axiom"
+   ]
   }
  ]
 }

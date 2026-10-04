@@ -114,6 +114,8 @@ const explainSay = (r: { identity: string; text: string }[]) => r.map((e) => `[$
  *  r_compat_parity) takes that: rows written behind its position are left
  *  for its next read. */
 export const DEFAULT_LIMIT = 1000;
+/** How many digests chain answers at a time by default (r_bounded_reads). */
+export const CHAIN_LIMIT = 100;
 export const MAX_LIMIT = 10_000;
 
 function page(ctx: Ctx, a: Record<string, unknown>, ans: { vars: string[]; rows: unknown[]; unknown?: unknown }) {
@@ -194,9 +196,21 @@ export const OPS: Op[] = [
     access: 'anyone', positional: ['literal'], say: explainSay, run: async (ctx, a) => needNode(ctx).why(await byEdgeId(ctx, a.literal), ctx.caller) },
   { name: 'whynot', description: 'Why a ground literal does not hold, in the books you may read whole.', input: obj({ literal: str() }, ['literal']),
     access: 'anyone', positional: ['literal'], say: explainSay, run: async (ctx, a) => needNode(ctx).whynot(await byEdgeId(ctx, a.literal), ctx.caller) },
-  { name: 'chain', description: 'The digests of an identity\'s batches, in chain order (what any feed shows of it).',
-    input: obj({ identity: str() }, ['identity']), access: 'anyone', positional: ['identity'],
-    run: async (ctx, a) => ({ identity: a.identity, ...(await needNode(ctx).readChain(a.identity as string, ctx.caller)) }) },
+  // Paged (r_bounded_reads): a chain grows with every write.
+  { name: 'chain', description: `The digests of an identity's batches, in chain order (what any feed shows of it), at most \`limit\` at a time (default ${CHAIN_LIMIT}): a longer chain answers cut, with a cursor for the next page. head and total are the whole chain's.`,
+    input: obj({ identity: str(), limit: { type: 'number' }, cursor: str('from the previous page: continue after it') }, ['identity']), access: 'anyone', positional: ['identity'],
+    run: async (ctx, a) => {
+      const { digests, last_claimed_at } = await needNode(ctx).readChain(a.identity as string, ctx.caller);
+      const limit = Math.min(MAX_LIMIT, Math.max(1, Math.floor((a.limit as number | undefined) ?? CHAIN_LIMIT)));
+      let from = 0;
+      if (a.cursor !== undefined) {
+        from = digests.indexOf(a.cursor as string) + 1;
+        if (from === 0) throw new Refusal(400, 'bad_cursor', `${a.cursor} is not a batch of ${a.identity}'s chain`);
+      }
+      const page = digests.slice(from, from + limit);
+      return { identity: a.identity, digests: page, from, total: digests.length, head: digests.at(-1) ?? null, last_claimed_at,
+        ...(from + limit < digests.length ? { cut: true, cursor: page.at(-1) } : {}) };
+    } },
   { name: 'feed', description: 'An identity\'s batches after a digest, as signed; withheld where the reader may not have them. With a limit, at most that many batches (a reader pages by the last digest it got).',
     input: obj({ identity: str(), after: str(), challenge: str(), limit: { type: 'number' } }, ['identity']), access: 'anyone', positional: ['identity'],
     http: { method: 'GET', path: '/feeds/:identity' },

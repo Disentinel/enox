@@ -1111,12 +1111,13 @@ export class RoflenoxNode {
   /** Explanations, each from the world that derives the literal: an author's
    *  rule world for what its rules conclude (and answered), else main. */
   private async explainWith(op: 'why' | 'whynot', query: string, requester: string | null): Promise<Explanation[]> {
-    const scope = await this.scopeFor(requester);
-    await this.requireBook(query, requester, scope, true);
+    const all = await this.scopeFor(requester);
+    await this.requireBook(query, requester, all, true);
     this.fault('engine:explain');
     const { rel, book, args } = parseLiteral(query);
+    const scope = this.matchable(rel, book, args, all);
     if (rel === 'conf' || rel === 'persp' || rel === 'asserted') return this.explainAssertion(op, rel, book, args, scope);
-    if (rel === 'live') return this.explainLive(op, book, args, scope);
+    if (rel === 'live') return this.withProvenance(await this.explainLive(op, book, args, scope));
     const out = rel === 'answered'
       ? [...scope].filter(([b, sc]) => sc.only === null && (book === null || b === book)).map(([, sc]) => ({ identity: sc.identity, holds: false, text: `whynot answered: ${sc.identity} has no rules here` }))
       : await (op === 'why' ? this.engine.why(query, scope) : this.engine.whynot(query, scope));
@@ -1130,6 +1131,51 @@ export class RoflenoxNode {
       e.holds = r.holds;
       e.text = r.text;
       if (w.partial) e.unknown = { reason: w.holes.join('; '), budget: this.ruleBudget, unit: 'steps' };
+    }
+    return this.withProvenance(out);
+  }
+
+  /** The books an explanation is asked of (r_bounded_reads): for a question
+   *  about facts, only those whose facts it can match — each constant held
+   *  at its place, as the node keeps them by place — never once per book the
+   *  reader may see. When none can, the reader's own book (or the first). */
+  private matchable(rel: string, book: string | null, args: string, scope: Map<string, BookScope>): Map<string, BookScope> {
+    if (book !== null || !['edge', 'edge_num', 'live', 'conf', 'persp', 'asserted'].includes(rel)) return scope;
+    const c = splitArgs(args).map((x) => (x.startsWith('"') ? JSON.parse(x) as string : null));
+    const places = rel === 'edge' || rel === 'live' ? ['S', 'R', 'T'] as const : rel === 'edge_num' ? ['S', 'R'] as const : [] as const;
+    const can = [...scope].filter(([, sc]) => {
+      if (sc.only !== null) return false;
+      if (c[0] != null && !this.assertions.of(sc.identity).has(c[0])) return false;
+      const v = this.values.get(sc.identity);
+      return places.every((p, i) => { const x = c[i + 1]; return x == null || x.length > VALUE_MAX || (v?.[p].has(x) ?? false); });
+    });
+    if (can.length) return new Map(can);
+    const fallback = [...scope].filter(([, sc]) => sc.only === null).sort(([x, xs], [y]) => (xs.identity === this.identity?.name ? -1 : x < y ? -1 : 1))[0];
+    return new Map(fallback ? [fallback] : []);
+  }
+
+  /** Each axiom of an explanation names where it comes from (r_bounded_reads):
+   *  the batch of its current assertion, that batch's admission number in
+   *  this node's log and position in its identity's chain, the time the batch
+   *  claims, and — for an Enox edge — who the write claims as its author. */
+  private async withProvenance(out: Explanation[]): Promise<Explanation[]> {
+    const owners = new Map([...this.chains.keys()].map((id) => [bookOf(id), id]));
+    for (const e of out) {
+      const lines = e.text.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const m = /^(\s*)(?:edge|edge_num)\[(b_[0-9a-f]{16})\]\("([0-9a-f]{64})",.*\[axiom\]$/.exec(lines[i]!);
+        const id = m ? owners.get(m[2]!) : undefined;
+        const c = id !== undefined ? this.assertions.of(id).get(m![3]!) : undefined;
+        if (!c) continue;
+        const digest = this.chains.get(id!)![c.S]!;
+        const n = this.writtenAt(id!, c.S);
+        const r = this.log.receipts[n]!;
+        const claimedAt = r.withheld ? null : this.log.read(r).manifest.claimed_at;
+        const G = this.assertions.valueOf(id!, m![3]!, 'enox:asserted_by');
+        const by = G !== undefined ? (await this.engine.sysRows(`edge[${m![2]}](${roflString(G)}, S, R, T)`))[0]?.[2] : undefined;
+        lines[i] += ` batch ${digest} (admission ${n}, ${id}'s batch ${c.S}${claimedAt ? `, claimed_at ${claimedAt}` : ''})${by !== undefined ? `, claimed_by ${JSON.stringify(String(by))}` : ''}`;
+      }
+      e.text = lines.join('\n');
     }
     return out;
   }
