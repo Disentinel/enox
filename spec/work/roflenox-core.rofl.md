@@ -156,3 +156,4 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_ask_since`.
 - `roflenox_core` finished `r_ask_since` at "f1d51d1178102392bc716c123a704dcb9ff84e52".
 - `roflenox_core` takes `r_admission_order`.
+- `roflenox_core` finished `r_admission_order` at "8f0ac5b910e3433b8ec5f870e5190cb019899077".
