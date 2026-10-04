@@ -132,3 +132,4 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_empty_explains`.
 - `roflenox_core` finished `r_empty_explains` at "85914c7991c44b87b6ba087d49683bcd9ce9a2ed".
 - `roflenox_core` takes `r_one_fact_id`.
+- `roflenox_core` finished `r_one_fact_id` at "807ae9bbc2aeb791517e1dc1545b48d1d6e40f79".
