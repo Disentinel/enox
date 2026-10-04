@@ -43,6 +43,12 @@ test('an answer longer than the limit is marked cut and the rest is fetched page
     const stale = await post(a.url, '/ask', { query: 'edge(F, S, R, T)', cursor: first.cursor });
     assert.equal(stale.status, 409);
     assert.equal(stale.body.error, 'cursor_stale');
+    // … unless the asker says resume: then it continues after its last row, in the log as it is now.
+    const resumed = await post(a.url, '/ask', { query: 'edge(F, S, R, T)', cursor: first.cursor, resume: true });
+    assert.equal(resumed.status, 200, JSON.stringify(resumed.body));
+    assert.equal(resumed.body.resumed, true);
+    const seen = new Set(first.rows.map((r) => r.cells[0]));
+    assert.ok((resumed.body.rows as { cells: unknown[] }[]).every((r) => !seen.has(r.cells[0] as string)), 'no row of the first page again');
     const other = await post(a.url, '/ask', { query: 'edge(F, S, "r", T)', cursor: (await ask({})).cursor });
     assert.equal(other.body.error, 'bad_cursor');
   } finally { await a.stop(); }

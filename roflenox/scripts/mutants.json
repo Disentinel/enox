@@ -650,8 +650,8 @@
    "file": "src/http.ts",
    "edits": [
     [
-     "const target = `${node.publicUrl ?? `http://${req.headers.host}`}${req.url}`;",
-     "const target = `http://${req.headers.host}${req.url}`;"
+     "  const out = [`${node.publicUrl}${p}`];",
+     "  const out = [`http://${req.headers.host}${p}`];"
     ]
    ],
    "red": [
@@ -791,8 +791,8 @@
    "file": "src/http.ts",
    "edits": [
     [
-     "if (!node.identity || given.length !== want.length || !crypto.timingSafeEqual(given, want)) {",
-     "if (!node.identity) {"
+     "    const operator = given.length === want.length && crypto.timingSafeEqual(given, want);",
+     "    const operator = true;"
     ]
    ],
    "red": [
@@ -805,8 +805,8 @@
    "file": "src/ops.ts",
    "edits": [
     [
-     "    const ans = await n.ask(query, ctx.caller, perspective);",
-     "    const ans = await n.ask(query, n.identity?.name ?? null, perspective);"
+     "const ans = await n.ask(query, ctx.caller, perspective, { at, since,",
+     "const ans = await n.ask(query, n.identity?.name ?? null, perspective, { at, since,"
     ]
    ],
    "red": [
@@ -847,7 +847,7 @@
    "file": "src/executor.ts",
    "edits": [
     [
-     "`ulimit -t ${cpu}; exec \"$0\" \"$@\"`",
+     "`ulimit -H -t ${cpu + 1}; ulimit -S -t ${cpu}; exec \"$0\" \"$@\"`",
      "`exec \"$0\" \"$@\"`"
     ]
    ],
@@ -1234,8 +1234,8 @@
    "file": "src/http.ts",
    "edits": [
     [
-     "  const auth = headers.authorization;",
-     "  if (headers['x-api-key'] === process.env.ROFLENOX_API_KEY) return node.identity?.name ?? null;\n  const auth = headers.authorization;"
+     "export function callerOf(node: RoflenoxNode, method: string, target: string | readonly string[], headers: http.IncomingHttpHeaders, raw: Buffer | null, mcp = false): string | null {\n  const auth = headers.authorization;",
+     "export function callerOf(node: RoflenoxNode, method: string, target: string | readonly string[], headers: http.IncomingHttpHeaders, raw: Buffer | null, mcp = false): string | null {\n  if (headers['x-api-key'] === process.env.ROFLENOX_API_KEY) return node.identity?.name ?? null;\n  const auth = headers.authorization;"
     ]
    ],
    "red": [
@@ -1304,8 +1304,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "      if (unknown.length) ans.unknown = unknown;",
-     "      void unknown;"
+     "    if (unknown.length) ans.unknown = unknown;",
+     "    void unknown;"
     ]
    ],
    "red": [
@@ -1421,7 +1421,7 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "          if (this.engine.dead) throw e;       // a death is never an empty answer\n",
+     "        if (this.engine.dead) throw e;       // a death is never an empty answer\n",
      ""
     ]
    ],
@@ -1547,8 +1547,8 @@
    "file": "src/http.ts",
    "edits": [
     [
-     "        const caller = callerOf(node, method, target, req.headers, raw);\n        let msg: unknown;",
-     "        const caller = callerOf(node, method, target, req.headers, raw);\n        if (req.headers[`mcp-${'sess' + 'ion'}-id`]) return send(res, 404, { error: 'unknown' });\n        let msg: unknown;"
+     "        let msg: unknown;\n        try { msg = JSON.parse(raw!.toString('utf8')); } catch {",
+     "        if (req.headers[`mcp-${'sess' + 'ion'}-id`]) return send(res, 404, { error: 'unknown' });\n        let msg: unknown;\n        try { msg = JSON.parse(raw!.toString('utf8')); } catch {"
     ]
    ],
    "red": [
@@ -1634,7 +1634,7 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "    while (this.recentFacts > RECENT_FACTS) this.recentFacts -= this.recent.shift()!.facts.length;",
+     "    while (this.recentFacts > this.recentLimit) this.recentFacts -= this.recent.shift()!.facts.length;",
      "    while (this.recent.length > 1000) this.recentFacts -= this.recent.shift()!.facts.length;"
     ]
    ],
@@ -1901,7 +1901,7 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "        unknown.push(...await this.silentFeeds(sc.identity));\n",
+     "      unknown.push(...await this.silentFeeds(sc.identity));\n",
      ""
     ]
    ],
@@ -2766,7 +2766,7 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "      unknown.push(...this.forkedUnknowns(scope, book));\n",
+     "    unknown.push(...this.forkedUnknowns(scope, book));\n",
      ""
     ]
    ],
@@ -2780,8 +2780,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "        if (forked.length) a.unknown = [...(a.unknown ?? []), ...forked];",
-     "        if (false) a.unknown = [...(a.unknown ?? []), ...forked];"
+     "      if (forked.length) a.unknown = [...(a.unknown ?? []), ...forked];",
+     "      if (false) a.unknown = [...(a.unknown ?? []), ...forked];"
     ]
    ],
    "red": [
@@ -3744,7 +3744,7 @@
     ]
    ],
    "red": [
-    "the embedder embeds a book of mixed text lengths in bounded memory and finishes although writes land during its read"
+    "an answer longer than the limit is marked cut and the rest is fetched page by page to the same total"
    ]
   },
   {
@@ -4227,7 +4227,7 @@
    "file": "src/assertions.ts",
    "edits": [
     [
-     "    return !oneValue(R) || this.valueOf(identity, S, R) === F;",
+     "    return !oneValue(R) || this.valueOf(identity, S, R, view) === F;",
      "    return true;"
     ]
    ],
@@ -4241,8 +4241,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "        if (!this.liveNow(sc.identity, t.map(String) as [string, string, string, string])) continue;",
-     "        if (false) continue;"
+     "await this.askFacts('edge', book, args, scope, (id, t) => this.liveNow(id, t, undo?.get(id)))",
+     "await this.askFacts('edge', book, args, scope, () => true)"
     ]
    ],
    "red": [
@@ -4325,8 +4325,8 @@
    "file": "src/enox-ops.ts",
    "edits": [
     [
-     "      const f = g.assertion(a.fact_id as string);\n      if (!f || f.confidence === 0)",
-     "      const f = g.edgeByFactId(a.fact_id as string) ? g.assertion(a.fact_id as string) : undefined;\n      if (!f || f.confidence === 0)"
+     "      const f = g.assertion(a.fact_id as string);\n      if (!f) notAnEdge(g, a.fact_id as string);",
+     "      const f = g.edgeByFactId(a.fact_id as string) ? g.assertion(a.fact_id as string) : undefined;\n      if (!f) notAnEdge(g, a.fact_id as string);"
     ]
    ],
    "red": [
@@ -4353,8 +4353,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "      return { receipt, body, held: false, seq: this.chains.get(me.name)!.length - 1 };",
-     "      return { receipt, body, held: false, seq: this.chains.get(me.name)!.length };"
+     "held: false, seq: this.chains.get(me.name)!.length - 1, admission:",
+     "held: false, seq: this.chains.get(me.name)!.length, admission:"
     ]
    ],
    "red": [
@@ -4469,8 +4469,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "      const ans: AskAnswer = rel === 'answered' ? { vars: named, rows: [] } : await this.engine.ask(query, scope);",
-     "      const ans: AskAnswer = rel === 'answered' ? { vars: [], rows: [] } : await this.engine.ask(query, scope);"
+     "    const ans: AskAnswer = rel === 'answered' ? { vars: named, rows: [] } : await this.engine.ask(query, scope);",
+     "    const ans: AskAnswer = rel === 'answered' ? { vars: [], rows: [] } : await this.engine.ask(query, scope);"
     ]
    ],
    "red": [
@@ -4707,8 +4707,8 @@
    "file": "src/ops.ts",
    "edits": [
     [
-     "...(ask ? { ask } : {}) });",
-     "});\n      if (ask) Object.assign(r, { admission: r.admission, answer: await n.ask(ask.query, ask.asker, ask.perspective, ask.options) });"
+     "...(ask ? { ask } : {}),\n        ...(a.knew !== undefined ? { knew: a.knew as string } : {}) });",
+     "...(a.knew !== undefined ? { knew: a.knew as string } : {}) });\n      if (ask) Object.assign(r, { admission: r.admission, answer: await n.ask(ask.query, ask.asker, ask.perspective, ask.options) });"
     ]
    ],
    "red": [
