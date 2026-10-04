@@ -479,6 +479,11 @@ Declared as facts:
 - `r_heap_headroom` says "graph_stats answers from counts the node keeps as facts are admitted, so a call costs milliseconds and no memory that grows with the book".
 - `r_heap_headroom` is stated in "deploy of 976f7b1 to rofl.enox.dev, 2026-10-04: three concurrent graph_stats on a copy of the owner's book exhaust a 1 GB heap (each call ~11 s and ~150 MB); prod crashed with Reached heap limit while the embedder polled and one graph_stats ran".
 - `r_heap_headroom` is to be checked by "on an owner-sized book under a 1 GB heap, ten concurrent graph_stats, recall and ask calls while an embedder polls leave the node alive and answering, and graph_stats answers within 200 ms".
+- `r_session_no_access_control` is about `access`.
+- `r_session_no_access_control` binds as `must`.
+- `r_session_no_access_control` says "who may read is the owner's decision alone: a session may not assert a grant, an export, a delegation, a trust or a follow, and such a fact from a session is refused at admission with the reason; rules stay allowed under r_owner_rules".
+- `r_session_no_access_control` is stated in "lead's verification of r_session_identity at de4bee7, 2026-10-04: a session granted a stranger its own book, and the stranger read a copy of the owner's edge the session had retracted".
+- `r_session_no_access_control` is to be checked by "a session's grant, export, delegation, trust or follow is refused at admission, a stranger it named reads nothing, and the owner's grant still works".
 - `r_typed` says "every requirement is of exactly one kind from the closed list".
 - `r_typed` is stated in "owner 2026-09-26".
 - `r_typed` is to be checked by "a requirement with an unknown kind fails typing".
@@ -884,6 +889,8 @@ Kinds of the requirements:
 - `r_perspective_export` is of `feature`.
 - `r_attribute_delete_explains` is of `feature`.
 - `r_heap_headroom` is of `reliability`.
+- `r_session_no_access_control` is of `security`.
+- `r_session_no_access_control` resists "a session, or anyone holding a stolen session token, that publishes a grant, export, delegation, trust or follow to open the owner's facts to a stranger".
 - `r_oauth_lockout` resists "a stranger who sends wrong secrets to the authorize page to keep the owner from approving, or forges a forwarded address to spend someone else's allowance".
 - `r_mcp_oauth` resists "anyone on the internet who registers a client and lures the owner to approve it, guesses the owner's secret on the authorize page, steals or replays a code or a refresh token, or presents a token minted for another server".
 - `r_compat_parity` is of `feature`.
@@ -991,6 +998,7 @@ The queue:
 - `r_perspective_export` is queued at 112.
 - `r_attribute_delete_explains` is queued at 113.
 - `r_heap_headroom` is queued at 108.
+- `r_session_no_access_control` is queued at 114.
 - `r_mutation_gate` is queued at 73.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 - `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
@@ -1078,6 +1086,7 @@ Accepted after verification:
 - `r_perspective_export` is accepted at "9c4300b52797cba876969164f1293a30f5029eb9".
 - `r_attribute_delete_explains` is accepted at "de7f30329d8983500e268e3c9d3a12703ada001a".
 - `r_heap_headroom` is accepted at "6447fbfb7bfbf5660449586c3dc1675e3a708481".
+- `r_session_identity` is accepted at "de4bee71e25453a30bbdd04c268bcb518afbdc9e".
 
 > Решение 2026-09-27 по замерам на 200000 фактах: rofl-serve пересчитывает
 > все выведенные факты при каждом evaluate (Eval::run → clear_derived), форк
@@ -1487,6 +1496,14 @@ The checks that exist:
 - "delete_assertion with an attribute fact's id names the node and attribute and points to update_node or retract_node" lives in "roflenox/test/retest.test.ts".
 - "on an owner-sized book under a 1 GB heap, ten concurrent graph_stats, recall and ask calls while an embedder polls leave the node alive and answering, and graph_stats answers within 200 ms" guards `r_heap_headroom`.
 - "on an owner-sized book under a 1 GB heap, ten concurrent graph_stats, recall and ask calls while an embedder polls leave the node alive and answering, and graph_stats answers within 200 ms" lives in "roflenox/test/perf/headroom.test.ts".
+- "two OAuth sessions write as two distinct identities delegated by the owner, neither can sign as the other or as the owner, and a revoked session can no longer write" guards `r_session_identity`.
+- "two OAuth sessions write as two distinct identities delegated by the owner, neither can sign as the other or as the owner, and a revoked session can no longer write" lives in "roflenox/test/sessions.test.ts".
+- "a session token is refused for operator_token, the OAuth grant list and revocation, and after the owner's key rotates no session identity can write until approved again" guards `r_session_identity`.
+- "a session token is refused for operator_token, the OAuth grant list and revocation, and after the owner's key rotates no session identity can write until approved again" lives in "roflenox/test/sessions.test.ts".
+- "a reader granted the owner's book reads what a session wrote while delegated, still reads it after the session is revoked, and a stranger reads none of it" guards `r_session_identity`.
+- "a reader granted the owner's book reads what a session wrote while delegated, still reads it after the session is revoked, and a stranger reads none of it" lives in "roflenox/test/sessions.test.ts".
+- "a session that deletes an edge the owner or another session asserted removes it from live and from every Enox read alike, and conf shows it retired" guards `r_session_identity`.
+- "a session that deletes an edge the owner or another session asserted removes it from live and from every Enox read alike, and conf shows it retired" lives in "roflenox/test/sessions.test.ts".
 
 ## Что выводится
 
