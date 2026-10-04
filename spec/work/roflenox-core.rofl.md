@@ -138,3 +138,4 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_edge_context_stays`.
 - `roflenox_core` finished `r_edge_context_stays` at "6828402262c51180879e0b54d6cfb52cd96dc2d3".
 - `roflenox_core` takes `r_retract_node`.
+- `roflenox_core` finished `r_retract_node` at "1fe1bde79dc193101a568488e5f8f832363f5fac".
