@@ -353,6 +353,59 @@ Declared as facts:
 - `r_stats_bounded` says "graph_stats answers totals, every relation and the twenty largest domain and type buckets with a count of the rest by default, and the whole breakdown only when asked for it; this is a deliberate departure from the Enox it replaces".
 - `r_stats_bounded` is stated in "owner's claude.ai session on rofl.enox.dev, 2026-10-03".
 - `r_stats_bounded` is to be checked by "graph_stats by default stays under 4 KB on the owner's book and its full form still matches the Enox breakdown".
+- `r_one_fact_id` is about `hybrid`.
+- `r_one_fact_id` binds as `must`.
+- `r_one_fact_id` says "an edge has one name a caller can use everywhere: every tool that takes a fact id accepts either the Enox fact_id or the fact id that ask returns, and every write or read that names an edge returns both".
+- `r_one_fact_id` is stated in "owner's claude.ai retest of rofl.enox.dev, 2026-10-04".
+- `r_one_fact_id` is to be checked by "update_assertion, delete_assertion and why accept either the Enox fact_id or the fact id ask returns, and add_assertion returns both".
+- `r_live_view` is about `hybrid`.
+- `r_live_view` binds as `must`.
+- `r_live_view` says "ask answers live(F, S, R, T): the edges whose latest assertion holds them above confidence zero, and for an attribute that holds one value (an entity's label, description, type, domain, an edge's context) only the value its latest write gives, by the order the node received them; edge(F, S, R, T) stays the whole history".
+- `r_live_view` says "a grant to a grantee that a newer grant to the same grantee replaces is no longer live, so the grants live at any moment are the ones in force".
+- `r_live_view` is stated in "owner's claude.ai retest of rofl.enox.dev, 2026-10-04".
+- `r_live_view` is to be checked by "after delete_assertion the edge is gone from live and still in edge with confidence zero".
+- `r_live_view` is to be checked by "after update_node only the new description holds in live while the old one stays in edge".
+- `r_live_view` is to be checked by "a grant replaced by a newer grant to the same grantee leaves exactly one grant in live".
+- `r_edge_context_stays` is about `hybrid`.
+- `r_edge_context_stays` binds as `must`.
+- `r_edge_context_stays` says "the context given to add_assertion belongs to that edge only: a node the call creates gets no description from it".
+- `r_edge_context_stays` is stated in "owner's claude.ai retest of rofl.enox.dev, 2026-10-04".
+- `r_edge_context_stays` is to be checked by "add_assertion that creates its target node leaves that node without a description and keeps the context on the edge".
+- `r_retract_node` is about `hybrid`.
+- `r_retract_node` binds as `must`.
+- `r_retract_node` says "the owner can retract a node with one tool call: every fact about it and every edge touching it is retracted in one batch, so it leaves every Enox read and live, and stays in the log as history".
+- `r_retract_node` is stated in "owner's claude.ai retest of rofl.enox.dev, 2026-10-04".
+- `r_retract_node` is to be checked by "retract_node removes a node and its edges from explore, traverse, query_graph and live in one batch, and they remain in edge with confidence zero".
+- `r_delete_any_perspective` is about `hybrid`.
+- `r_delete_any_perspective` binds as `must`.
+- `r_delete_any_perspective` says "delete_assertion retracts a fact the owner asserted under any perspective, not only the Enox one".
+- `r_delete_any_perspective` is stated in "owner's claude.ai retest of rofl.enox.dev, 2026-10-04".
+- `r_delete_any_perspective` is to be checked by "delete_assertion retracts a fact asserted through assert under another perspective".
+- `r_assert_receipt` is about `hybrid`.
+- `r_assert_receipt` binds as `must`.
+- `r_assert_receipt` says "every write answers what it wrote: the batch digest, the batch's position in its identity's chain, and the id of every fact admitted".
+- `r_assert_receipt` is stated in "owner's claude.ai retest of rofl.enox.dev, 2026-10-04".
+- `r_assert_receipt` is to be checked by "assert returns the batch digest, its chain position and every admitted fact id, and they match chain and ask".
+- `r_introspect` is about `hybrid`.
+- `r_introspect` binds as `must`.
+- `r_introspect` says "a caller learns the query language without guessing: one tool lists every predicate ask answers with its arity and meaning, every perspective present with its fact count, and the units (confidence in per mille in conf and asserted, 0..1 in the Enox tools); the ask tool points to it".
+- `r_introspect` is stated in "owner's claude.ai retest of rofl.enox.dev, 2026-10-04".
+- `r_introspect` is to be checked by "the schema tool lists every predicate ask answers with its arity and every perspective present, and asking each listed predicate with its arity is never refused".
+- `r_query_errors` is about `hybrid`.
+- `r_query_errors` binds as `should`.
+- `r_query_errors` says "every malformed question gets one kind of answer: a wrong arity is a note for every predicate, a conjunction or a negation says a question is one literal without the engine's internal wording, answered/3 names its variables, an empty answer whose facts exist under another perspective names that perspective, and a hash-like id gets no nearest names".
+- `r_query_errors` is stated in "owner's claude.ai retest of rofl.enox.dev, 2026-10-04".
+- `r_query_errors` is to be checked by "wrong arity, a conjunction, a negation and a fact held only under another perspective each get one consistent explanation without engine internals".
+- `r_bounded_reads` is about `hybrid`.
+- `r_bounded_reads` binds as `should`.
+- `r_bounded_reads` says "reads that grow with the log page: chain takes a limit and a cursor; semantic_search cuts descriptions to a length the caller may set (300 characters by default); why and whynot answer only for books whose facts the question can match, and an axiom names its batch, its admission number and its claim".
+- `r_bounded_reads` is stated in "owner's claude.ai retest of rofl.enox.dev, 2026-10-04".
+- `r_bounded_reads` is to be checked by "chain pages with a limit, semantic_search cuts descriptions to the cap, and why on an Enox edge answers once with the batch and claim of its axiom".
+- `r_tool_list_clean` is about `hybrid`.
+- `r_tool_list_clean` binds as `should`.
+- `r_tool_list_clean` says "tools/list offers only tools that work on this node, and re-adding a deleted edge answers that it was restored".
+- `r_tool_list_clean` is stated in "owner's claude.ai retest of rofl.enox.dev, 2026-10-04".
+- `r_tool_list_clean` is to be checked by "tools/list holds no tool described as not offered, and re-adding a deleted edge answers restored".
 - `r_typed` says "every requirement is of exactly one kind from the closed list".
 - `r_typed` is stated in "owner 2026-09-26".
 - `r_typed` is to be checked by "a requirement with an unknown kind fails typing".
@@ -734,6 +787,16 @@ Kinds of the requirements:
 - `r_recent_order` is of `feature`.
 - `r_search_latency` is of `reliability`.
 - `r_stats_bounded` is of `feature`.
+- `r_one_fact_id` is of `feature`.
+- `r_live_view` is of `feature`.
+- `r_edge_context_stays` is of `feature`.
+- `r_retract_node` is of `feature`.
+- `r_delete_any_perspective` is of `feature`.
+- `r_assert_receipt` is of `feature`.
+- `r_introspect` is of `feature`.
+- `r_query_errors` is of `feature`.
+- `r_bounded_reads` is of `feature`.
+- `r_tool_list_clean` is of `feature`.
 - `r_oauth_lockout` resists "a stranger who sends wrong secrets to the authorize page to keep the owner from approving, or forges a forwarded address to spend someone else's allowance".
 - `r_mcp_oauth` resists "anyone on the internet who registers a client and lures the owner to approve it, guesses the owner's secret on the authorize page, steals or replays a code or a refresh token, or presents a token minted for another server".
 - `r_compat_parity` is of `feature`.
@@ -818,6 +881,16 @@ The queue:
 - `r_recent_order` is queued at 90.
 - `r_search_latency` is queued at 91.
 - `r_stats_bounded` is queued at 92.
+- `r_one_fact_id` is queued at 93.
+- `r_live_view` is queued at 94.
+- `r_edge_context_stays` is queued at 95.
+- `r_retract_node` is queued at 96.
+- `r_delete_any_perspective` is queued at 97.
+- `r_assert_receipt` is queued at 98.
+- `r_introspect` is queued at 99.
+- `r_query_errors` is queued at 100.
+- `r_bounded_reads` is queued at 101.
+- `r_tool_list_clean` is queued at 102.
 - `r_mutation_gate` is queued at 73.
 - `r_key_change_loud` is rejected at "a4a880b53bf0dd24e6e071c3a3f509457e7682a3".
 - `r_atomic_write` is rejected at "4cc3e06f8ea18e959c23b43e7a052a4cb697e1b1".
