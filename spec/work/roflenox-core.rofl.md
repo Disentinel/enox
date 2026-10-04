@@ -150,3 +150,4 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_bounded_reads`.
 - `roflenox_core` finished `r_bounded_reads` at "0670a04ca5f5297ba59d1004c0de8b19c413be03".
 - `roflenox_core` takes `r_tool_list_clean`.
+- `roflenox_core` finished `r_tool_list_clean` at "259149f0acb8e962b4469dda6a8da6906cd0d8a1".
