@@ -5207,6 +5207,48 @@
    "red": [
     "a session that deletes an edge the owner or another session asserted removes it from live and from every Enox read alike, and conf shows it retired"
    ]
+  },
+  {
+   "id": "M377",
+   "title": "r_session_no_access_control: a session may assert a grant",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "const SESSION_MAY_NOT = new Set([GRANT, EXPORT,",
+     "const SESSION_MAY_NOT = new Set([EXPORT,"
+    ]
+   ],
+   "red": [
+    "a session's grant, export, delegation, trust or follow is refused at admission, a stranger it named reads nothing, and the owner's grant still works"
+   ]
+  },
+  {
+   "id": "M378",
+   "title": "r_session_no_access_control: a session may assert a follow",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "'roflenox:trust_rules', 'roflenox:follow']);",
+     "'roflenox:trust_rules']);"
+    ]
+   ],
+   "red": [
+    "a session's grant, export, delegation, trust or follow is refused at admission, a stranger it named reads nothing, and the owner's grant still works"
+   ]
+  },
+  {
+   "id": "M379",
+   "title": "r_session_no_access_control: a session's grant already in the log acts on replay",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "v.facts, seq, this.isSession(v.manifest.identity))): void {",
+     "v.facts, seq, false)): void {"
+    ]
+   ],
+   "red": [
+    "a session's grant, export, delegation, trust or follow is refused at admission, a stranger it named reads nothing, and the owner's grant still works"
+   ]
   }
  ]
 }

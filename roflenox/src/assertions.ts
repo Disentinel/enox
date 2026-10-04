@@ -125,7 +125,9 @@ export class Assertions {
   /** What a batch changes, without changing anything yet: the engine rows it
    *  replaces (to retract), the rows to load, and `apply` to record it once
    *  the batch is admitted. */
-  plan(identity: string, book: string, facts: Fact[], seq: number): { retract: string[]; load: string; before: Map<string, Current | null>; apply: () => void } {
+  /** `inert`: the identity's control facts never act — a session's, kept
+   *  from a log written before sessions were refused them (r_session_no_access_control). */
+  plan(identity: string, book: string, facts: Fact[], seq: number, inert = false): { retract: string[]; load: string; before: Map<string, Current | null>; apply: () => void } {
     const m = this.of(identity);
     const retract: string[] = [];
     const load: string[] = [];
@@ -138,9 +140,9 @@ export class Assertions {
       const old = next.get(F) ?? m.get(F);
       if (old && old.S > seq) continue;                 // never happens in chain order; guard anyway
       if (old && !next.has(F) && old.follow !== undefined && old.C > 0) unfollowed.add(old.follow);
-      const ctl = controlRow(book, f);
-      const cur: Current = { P: f.perspective, C: permille(f.confidence), S: seq, N: ++this.received, first: old?.first ?? seq, ...(f.relation === FOLLOW ? { follow: f.source } : {}),
-        ...(ctl ? { ctl } : {}), ...(f.relation === GRANT ? { grantee: checkName(f.source) } : {}) };
+      const ctl = inert ? undefined : controlRow(book, f);
+      const cur: Current = { P: f.perspective, C: permille(f.confidence), S: seq, N: ++this.received, first: old?.first ?? seq, ...(f.relation === FOLLOW && !inert ? { follow: f.source } : {}),
+        ...(ctl ? { ctl } : {}), ...(f.relation === GRANT && !inert ? { grantee: checkName(f.source) } : {}) };
       if (!m.has(F) && !next.has(F)) {
         firsts.push({ F, f });
         if (cur.grantee !== undefined) granted.set(cur.grantee, [...(granted.get(cur.grantee) ?? []), F]);

@@ -22,7 +22,7 @@ import * as v8 from 'node:v8';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import * as zlib from 'node:zlib';
 import { canonicalize } from './jcs.ts';
-import { batchDigest, decodeCell, DELEGATE, EMBEDDER, factId, GRANT, isSalt, newSalt, parseJsonl, Refusal, roflString, SEARCH, sha256hex, toJsonl, toRofl, type Fact } from './facts.ts';
+import { batchDigest, decodeCell, DELEGATE, EMBEDDER, EXPORT, factId, GRANT, isSalt, newSalt, parseJsonl, Refusal, roflString, SEARCH, sha256hex, toJsonl, toRofl, type Fact } from './facts.ts';
 import {
   bookOf, canonicalOrNull, CHECKPOINT_CONTEXT, checkIdentityDoc, checkManifest, docHash, docSignedBy, FEED_CONTEXT, isTime, keyValidAt, LocalIdentity,
   REATTEST_CONTEXT, verifyIdentityDoc, verifyManifestSig, verifySigned,
@@ -154,6 +154,9 @@ export interface NodeOptions {
 }
 
 export const DEFAULT_SILENCE_SEC = 3600;
+
+/** What only the owner may assert, never a session (r_session_no_access_control). */
+const SESSION_MAY_NOT = new Set([GRANT, EXPORT, DELEGATE, 'roflenox:trust_rules', 'roflenox:follow']);
 
 /** A long answer gives way to other callers every so many rows: the serial
  *  queue still orders the engine's work, but reads that need no slot of it
@@ -623,8 +626,10 @@ export class RoflenoxNode {
   /** `mirrored`: the batch came by a feed or an envelope, not from its author
    *  posting here — its rules are inert until trusted (r_foreign_rules_opt_in). */
   private record(v: Verified, at: number, mirrored = false, seq = (this.chains.get(v.manifest.identity)?.length ?? 0),
-    plan = this.assertions.plan(v.manifest.identity, bookOf(v.manifest.identity), v.facts, seq)): void {
+    plan = this.assertions.plan(v.manifest.identity, bookOf(v.manifest.identity), v.facts, seq, this.isSession(v.manifest.identity))): void {
     const id = v.manifest.identity;
+    // A session's control facts, from a log written before they were refused: inert, and said (r_session_no_access_control).
+    if (this.isSession(id) && v.facts.some((f) => SESSION_MAY_NOT.has(f.relation))) this.warnings.push(`INERT ACCESS FACTS in ${id}'s batch ${v.manifest.digest}: a session's grant, export, delegation, trust or follow never acts`);
     plan.apply();
     const vals = this.values.get(id) ?? { S: new Set<string>(), R: new Set<string>(), T: new Set<string>() };
     this.values.set(id, vals);
@@ -964,7 +969,14 @@ export class RoflenoxNode {
     const id = v.manifest.identity;
     const rules = this.chains.has(id) ? null : this.rulesFor(id);
     const seq = this.chains.get(id)?.length ?? 0;
-    const plan = this.assertions.plan(id, bookOf(id), v.facts, seq);
+    // Who may read is the owner's decision alone (r_session_no_access_control).
+    if (this.isSession(id)) {
+      const ctl = v.facts.find((f) => SESSION_MAY_NOT.has(f.relation));
+      if (ctl) {
+        throw new Refusal(403, 'session_no_access_control', `${id} is a session of ${this.identity!.name}: a session may not assert ${ctl.relation} — grants, exports, delegations, trust and follows are the owner's own decisions; nothing was admitted`);
+      }
+    }
+    const plan = this.assertions.plan(id, bookOf(id), v.facts, seq, this.isSession(id));
     const staged = await this.engine.stage(programOf(v, seq) + plan.load, id, rules, () => this.fault('engine:staged'));
     try {
       await this.engine.retract(plan.retract);

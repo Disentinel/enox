@@ -179,3 +179,4 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_session_identity` at "bbf8ba17ec77d293bb095bb0985007d4506c8888".
 - `roflenox_core` takes `r_session_identity`.
 - `roflenox_core` finished `r_session_identity` at "de4bee71e25453a30bbdd04c268bcb518afbdc9e".
+- `roflenox_core` takes `r_session_no_access_control`.

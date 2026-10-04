@@ -228,3 +228,68 @@ test('a session that deletes an edge the owner or another session asserted remov
     assert.deepEqual((await outgoing(kept.source)).length, 1, 'and in the Enox view');
   } finally { await a.stop(); }
 });
+
+test('a session\'s grant, export, delegation, trust or follow is refused at admission, a stranger it named reads nothing, and the owner\'s grant still works', async () => {
+  const a = await start(tmpDir('sessions-acl'), 'node-a', { publicUrl: PUBLIC, oauth: OAUTH });
+  try {
+    const op = a.node.operatorToken();
+    const stranger = identityAt(tmpDir('sessions-acl-s'), 'stranger');
+    await vouch(a, stranger);
+    const ta = await connect(a, 'Session A');
+    ok(await tool(a, op, 'add_assertion', { source: 'OwnerNode', target: 'OwnerTarget', relation: 'depends_on' }));
+    ok(await tool(a, ta, 'assert', { facts: [note('a session note')] }));
+    const sa = a.node.sessionName(grantOf(a, ta));
+    const chainLength = async (id: string) => ((await post(a.url, '/op/chain', { identity: id, limit: 1 })).body as { total: number }).total;
+    const before = await chainLength(sa);
+    const until = iso(a.clock.t + DAY);
+    for (const f of [grant('stranger', until), exportRule('*', 'public'), exportRule('depends_on', 'stranger'),
+      { source: 'stranger', relation: 'roflenox:delegate', target: until, perspective: 'policy', confidence: 1 },
+      { source: 'stranger', relation: 'roflenox:trust_rules', target: 'rules', perspective: 'policy', confidence: 1 },
+      { source: 'stranger', relation: 'roflenox:follow', target: 'http://stranger.example', perspective: 'policy', confidence: 1 }]) {
+      // Through the tools, alone or beside an ordinary fact …
+      const r = await tool(a, ta, 'assert', { facts: [note('beside it'), f] });
+      assert.equal(r.isError, true, f.relation);
+      assert.match(r.text, /session_no_access_control/, f.relation);
+      assert.match(r.text, new RegExp(`may not assert ${f.relation}`), f.relation);
+      // … and signed with the session's own key, posted directly.
+      const owner = LocalIdentity.load(a.dir)!;
+      const key = LocalIdentity.derive(owner, sa, `${grantOf(a, ta)} ${owner.keyId}`, new Date(a.clock.t));
+      const head = ((await post(a.url, '/op/chain', { identity: sa, limit: 1 })).body as { head: string }).head;
+      const direct = await post(a.url, '/batches', batch(key, [f], head, iso(a.clock.t)));
+      assert.equal(direct.status, 403, f.relation);
+      assert.equal(direct.body.error, 'session_no_access_control', f.relation);
+    }
+    assert.equal(await chainLength(sa), before, 'nothing was admitted');
+    // A stranger it named reads nothing: not the session's book, not the owner's.
+    for (const q of ['edge(F, S, R, T)', `edge[${bookOf(sa)}](F, S, R, T)`, `edge[${bookOf('node-a')}](F, S, R, T)`]) {
+      const r = await post(a.url, '/ask', { query: q }, { as: stranger });
+      assert.ok(r.status !== 200 || (r.body.rows as unknown[]).length === 0, `${q}: ${r.status} ${JSON.stringify(r.body).slice(0, 200)}`);
+    }
+    // Rules stay allowed for a session.
+    ok(await tool(a, ta, 'assert', { facts: [{ source: 'notes', relation: 'roflenox:rule', target: 'noted(S) :- edge(F, S, "zz_note", T).', perspective: 'rules', confidence: 1 }] }));
+    // The owner's grant still works: the stranger reads the owner's book and the session's.
+    await publish(a.url, LocalIdentity.load(a.dir)!, [grant('stranger', until)], () => a.clock.t);
+    assert.ok(((await post(a.url, '/ask', { query: 'edge(F, S, "depends_on", T)' }, { as: stranger })).body.rows as unknown[]).length >= 1);
+    assert.ok(((await post(a.url, '/ask', { query: 'edge(F, "a session note", R, T)' }, { as: stranger })).body.rows as unknown[]).length === 1);
+
+    // A log written before this refusal may hold a session's grant: on replay it never acts, and says so.
+    const owner = LocalIdentity.load(a.dir)!;
+    const key = LocalIdentity.derive(owner, sa, `${grantOf(a, ta)} ${owner.keyId}`, new Date(a.clock.t));
+    const other = identityAt(tmpDir('sessions-acl-o'), 'other');
+    await vouch(a, other);
+    const head = ((await post(a.url, '/op/chain', { identity: sa, limit: 1 })).body as { head: string }).head;
+    await a.stop();
+    const { Log } = await import('../src/log.ts');
+    const { toJsonl, newSalt } = await import('../src/facts.ts');
+    const log = new Log(a.dir);
+    log.open();
+    const jsonl = toJsonl([grant('other', until)]);
+    const salt = newSalt();
+    log.append(key.signBatch(jsonl, head, iso(a.clock.t), salt), jsonl, iso(a.clock.t), null, { salt });
+    const b = await start(a.dir, 'node-a', { publicUrl: PUBLIC, oauth: OAUTH, clock: a.clock });
+    try {
+      assert.ok(((await post(b.url, '/op/health', {})).body.warnings as string[]).some((w) => /INERT ACCESS FACTS/.test(w) && w.includes(sa)));
+      assert.equal((await post(b.url, '/ask', { query: `edge[${bookOf(sa)}](F, S, R, T)` }, { as: other })).status, 403, 'the old grant never acts');
+    } finally { await b.stop(); }
+  } finally { await a.stop().catch(() => {}); }
+});
