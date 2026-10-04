@@ -4658,6 +4658,48 @@
    "red": [
     "ask since a digest answers only the facts admitted after it, and its cost on an owner-sized book grows with the new facts, not the log"
    ]
+  },
+  {
+   "id": "M341",
+   "title": "r_admission_order: an edge row carries its latest assertion's batch, not the one that made it true",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        r.admission = at(r.identity, rel === 'edge' || rel === 'edge_num' ? c?.first : c?.S);",
+     "        r.admission = at(r.identity, c?.S);"
+    ]
+   ],
+   "red": [
+    "ask ordered by admission lists rows in the order their batches were admitted, the same after a restart"
+   ]
+  },
+  {
+   "id": "M342",
+   "title": "r_admission_order: rows keep their fixed order",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    ans.rows.sort((x, y) => (x.admission ?? Infinity) - (y.admission ?? Infinity));",
+     ""
+    ]
+   ],
+   "red": [
+    "ask ordered by admission lists rows in the order their batches were admitted, the same after a restart"
+   ]
+  },
+  {
+   "id": "M343",
+   "title": "r_admission_order: a grant row carries no admission number",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      for (const r of ans.rows) r.admission = at(r.identity, rowOf(r.identity).get(ground(r)));",
+     "      for (const r of ans.rows) r.admission = null;"
+    ]
+   ],
+   "red": [
+    "ask ordered by admission lists rows in the order their batches were admitted, the same after a restart"
+   ]
   }
  ]
 }

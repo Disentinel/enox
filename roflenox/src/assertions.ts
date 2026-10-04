@@ -26,7 +26,7 @@ import { checkName } from './identity.ts';
  *  position, and N — the order the node received it in, over all facts. A
  *  control fact carries its engine row (ctl) and whether that row is loaded
  *  (on); a grant, its grantee (r_live_view). */
-export interface Current { P: string; C: number; S: number; N: number; follow?: string; ctl?: string; on?: boolean; grantee?: string }
+export interface Current { P: string; C: number; S: number; N: number; /** The chain position of the identity's first assertion of the fact. */ first: number; follow?: string; ctl?: string; on?: boolean; grantee?: string }
 
 /** Relations that hold one value per subject (r_live_view): an entity's
  *  attributes and an edge's (src/enox.ts). The latest assertion above
@@ -130,7 +130,7 @@ export class Assertions {
       if (old && old.S > seq) continue;                 // never happens in chain order; guard anyway
       if (old && !next.has(F) && old.follow !== undefined && old.C > 0) unfollowed.add(old.follow);
       const ctl = controlRow(book, f);
-      const cur: Current = { P: f.perspective, C: permille(f.confidence), S: seq, N: ++this.received, ...(f.relation === FOLLOW ? { follow: f.source } : {}),
+      const cur: Current = { P: f.perspective, C: permille(f.confidence), S: seq, N: ++this.received, first: old?.first ?? seq, ...(f.relation === FOLLOW ? { follow: f.source } : {}),
         ...(ctl ? { ctl } : {}), ...(f.relation === GRANT ? { grantee: checkName(f.source) } : {}) };
       if (!m.has(F) && !next.has(F)) {
         firsts.push({ F, f });

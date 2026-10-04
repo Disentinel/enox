@@ -568,3 +568,44 @@ test('two asks at the same head answer the same rows while writes land between t
   } finally { await k.stop().catch(() => {}); }
 });
 
+
+test('ask ordered by admission lists rows in the order their batches were admitted, the same after a restart', async () => {
+  const dir = tmpDir('admission');
+  const a = await start(dir, 'node-a');
+  try {
+    const call = tools(a);
+    const claim = (s: string, c = 1) => ({ source: s, relation: 'zz_claim', target: 'task', perspective: 'zz_coord', confidence: c });
+    // Batches admitted in an order that is not the rows' sorted order.
+    for (const s of ['session-c', 'session-a', 'session-d', 'session-b']) json(await call('assert', { facts: [claim(s)] }));
+    json(await call('assert', { facts: [claim('session-c', 0.5)] }));          // re-asserted: its assertion is now the latest
+    const reader = identityAt(tmpDir('admission-r'), 'reader');
+    await vouch(a, reader);
+    await publish(a.url, a.me, [grant('reader', iso(T0 + DAY))], () => a.clock.t);
+    type Ord = { rows: { identity: string; cells: (string | number)[]; admission?: number | null }[] };
+    const ordered = async (url: string, query: string) => (await post(url, '/ask', { query, order: 'admission' })).body as unknown as Ord;
+    const edge = await ordered(a.url, 'edge(F, S, "zz_claim", T)');
+    assert.deepEqual(edge.rows.map((r) => r.cells[1]), ['session-c', 'session-a', 'session-d', 'session-b'], 'edge: by the batch that first asserted it');
+    const adm = edge.rows.map((r) => r.admission!);
+    assert.ok(adm.every((x, i) => typeof x === 'number' && (i === 0 || x > adm[i - 1]!)), JSON.stringify(adm));
+    const live = await ordered(a.url, 'live(F, S, "zz_claim", T)');
+    assert.deepEqual(live.rows.map((r) => r.cells[1]), ['session-a', 'session-d', 'session-b', 'session-c'], 'live: by the batch of its current assertion');
+    const claims = (await ordered(a.url, 'asserted(F, "zz_coord", C, S)')).rows;
+    assert.deepEqual(claims.map((r) => r.cells[1]), [1000, 1000, 1000, 500]);
+    const grants = await ordered(a.url, 'grant(R, U)');
+    assert.equal(grants.rows.length, 1);
+    assert.ok(grants.rows[0]!.admission! > claims.at(-1)!.admission!, 'a grant: the batch of the grant in force');
+    // Without order: no admission numbers.
+    const plain = (await post(a.url, '/ask', { query: 'edge(F, S, "zz_claim", T)' })).body as unknown as Ord;
+    assert.ok(plain.rows.every((r) => r.admission === undefined));
+    assert.deepEqual(new Set(plain.rows.map((r) => r.cells[1])), new Set(edge.rows.map((r) => r.cells[1])));
+    // The same after a restart.
+    const QS = ['edge(F, S, "zz_claim", T)', 'asserted(F, P, C, S)', 'grant(R, U)', 'live(F, S, R, T)'];
+    const before = await Promise.all(QS.map((q) => ordered(a.url, q)));
+    await a.stop();
+    const b = await start(dir, 'node-a');
+    try {
+      const after = await Promise.all(QS.map((q) => ordered(b.url, q)));
+      assert.deepEqual(after.map((x) => x.rows), before.map((x) => x.rows));
+    } finally { await b.stop(); }
+  } finally { await a.stop().catch(() => {}); }
+});

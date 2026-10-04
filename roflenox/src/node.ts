@@ -1091,6 +1091,53 @@ export class RoflenoxNode {
   private readonly byDigest: { n: number; at: Map<string, number> } = { n: 0, at: new Map() };
 
   private async askAt(query: string, requester: string | null, perspective: string | null, o: AskOptions): Promise<AskAnswer> {
+    const ans = await this.askOrdered(query, requester, perspective, o);
+    if (o.order === 'admission') {
+      const { rel, args } = parseLiteral(query);
+      this.byAdmission(rel, splitArgs(args), ans, o.at !== undefined ? this.undoSince(o.at) : null);
+    }
+    return ans;
+  }
+
+  /** The admission number (the log position, r_recent_order) of the batch
+   *  that made each row true (r_admission_order): for a fact's edge, the
+   *  batch that first asserted it; for its live row and its assertion, the
+   *  batch of its current assertion; for a grant, delegation, export, trust
+   *  or follow, the batch of the fact in force. A row a rule derives has
+   *  none (null). Rows are put in that order, those with none last. The
+   *  number is the log's order, so it is the same on every read and after a
+   *  restart. */
+  private byAdmission(rel: string, a: string[], ans: AskAnswer, undo: Map<string, Map<string, Current | null>> | null): void {
+    const view = (id: string) => this.assertions.viewAt(id, undo?.get(id));
+    const at = (id: string, seq: number | undefined) => (seq === undefined ? null : this.writtenAt(id, seq));
+    if (['edge', 'edge_num', 'live', 'asserted', 'conf', 'persp'].includes(rel)) {
+      const constF = /^[A-Z_]/.test(a[0] ?? '') ? null : a[0] !== undefined ? decodeCell(a[0].trim()) : null;
+      for (const r of ans.rows) {
+        const c = view(r.identity).get(String(constF ?? r.cells[0]));
+        r.admission = at(r.identity, rel === 'edge' || rel === 'edge_num' ? c?.first : c?.S);
+      }
+    } else if (['grant', 'delegate', 'export', 'trusts', 'follows'].includes(rel)) {
+      const byRow = new Map<string, Map<string, number>>();
+      const rowOf = (id: string) => {
+        let m = byRow.get(id);
+        if (m) return m;
+        m = new Map();
+        for (const [, c] of view(id)) {
+          const k = c.on === true && c.ctl !== undefined ? c.ctl : c.follow !== undefined && c.C > 0 ? `follows:${canonicalOrNull(c.follow)}` : undefined;
+          if (k !== undefined && (m.get(k) ?? -1) < c.S) m.set(k, c.S);
+        }
+        byRow.set(id, m);
+        return m;
+      };
+      const ground = (r: AskRow) => (rel === 'follows' ? `follows:${r.cells[0]}` : `${rel}[${bookOf(r.identity)}](${r.cells.map((x) => (typeof x === 'number' ? String(x) : roflString(x))).join(', ')})`);
+      for (const r of ans.rows) r.admission = at(r.identity, rowOf(r.identity).get(ground(r)));
+    } else {
+      for (const r of ans.rows) r.admission = null;
+    }
+    ans.rows.sort((x, y) => (x.admission ?? Infinity) - (y.admission ?? Infinity));
+  }
+
+  private async askOrdered(query: string, requester: string | null, perspective: string | null, o: AskOptions): Promise<AskAnswer> {
     const scope = await this.scopeFor(requester);
     await this.requireBook(query, requester, scope, false);
     this.fault('engine:ask');

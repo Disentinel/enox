@@ -62,7 +62,8 @@ export function bookRules(book: string, owner: string): string {
   ].join('\n');
 }
 
-export interface AskRow { identity: string; cells: (string | number)[] }
+export interface AskRow { identity: string; cells: (string | number)[];
+  /** The admission number of the batch that made the row true (r_admission_order), when asked for. */ admission?: number | null }
 /** `unknown`: books whose authors' rules ran out of their budget — their
  *  rows are what was derived before the wall, not the whole answer. */
 /** Why part of an answer is unknown: a rule world that ran out of its budget
@@ -72,7 +73,8 @@ export interface Unknown { identity: string; reason: string; budget?: number; un
 export interface AskAnswer { vars: string[]; rows: AskRow[]; unknown?: Unknown[]; /** Why there are no rows, when the cause is in the question (src/empty.ts). */ note?: string;
   /** The log head the answer is of (r_ask_at_revision). */ head?: string }
 export interface AskOptions { /** A log head: answer as the node would have when it was the latest. */ at?: string;
-  /** A batch digest: answer only from the facts admitted after that batch (r_ask_since). */ since?: string }
+  /** A batch digest: answer only from the facts admitted after that batch (r_ask_since). */ since?: string;
+  /** 'admission': each row carries the admission number of the batch that made it true, and rows come in that order (r_admission_order). */ order?: 'admission' }
 export interface Explanation { identity: string; holds: boolean; text: string; unknown?: { reason: string; budget: number; unit: string } }
 
 export class Engine {

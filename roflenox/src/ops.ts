@@ -180,14 +180,17 @@ export const OPS: Op[] = [
       limit: { type: 'number' }, cursor: str('from the previous page'),
       resume: { type: 'boolean', description: 'with a cursor of a log that has changed since: continue after its last row instead of refusing' },
       at: str('a log head (an earlier answer\'s head, or health\'s log_head): answer as the node would have when it was the latest, so several questions read one state'),
-      since: str('a batch digest (an assert answer\'s digest, or one from chain): answer only from the facts admitted after that batch') }, ['query']),
+      since: str('a batch digest (an assert answer\'s digest, or one from chain): answer only from the facts admitted after that batch'),
+      order: str('"admission": each row carries the admission number of the batch that made it true (the node\'s order of writes), and rows come in that order') }, ['query']),
     access: 'anyone', positional: ['query'], http: { method: 'POST', path: '/ask' }, say: rowsSay,
     run: async (ctx, a) => {
       const n = needNode(ctx);
       const perspective = (a.perspective as string | undefined) ?? null;
       const query = await byEdgeId(ctx, a.query);
       const at = a.at as string | undefined, since = a.since as string | undefined;
-      const ans = await n.ask(query, ctx.caller, perspective, { at, since });
+      if (a.order !== undefined && a.order !== 'admission') throw new Refusal(400, 'bad_args', 'order is "admission"');
+      if (a.order !== undefined && a.resume === true) throw new Refusal(400, 'bad_args', 'a page in admission order is not resumed after a change; ask again at the head');
+      const ans = await n.ask(query, ctx.caller, perspective, { at, since, ...(a.order === 'admission' ? { order: 'admission' as const } : {}) });
       // (A note looks at the whole latest state; an answer at an earlier head, or since a batch, gets none.)
       const note = ans.rows.length === 0 && !ans.unknown && at === undefined && since === undefined ? await explainEmpty(n, query, ctx.caller, perspective) : undefined;
       return page(ctx, a, note !== undefined ? { ...ans, note } : ans);

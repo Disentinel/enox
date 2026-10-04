@@ -155,3 +155,4 @@ What roflenox-core reports:
 - `roflenox_core` finished `r_ask_at_revision` at "04d3cc543cb308c15665f94fc437228847ac9129".
 - `roflenox_core` takes `r_ask_since`.
 - `roflenox_core` finished `r_ask_since` at "f1d51d1178102392bc716c123a704dcb9ff84e52".
+- `roflenox_core` takes `r_admission_order`.
