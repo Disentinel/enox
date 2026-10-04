@@ -1318,8 +1318,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "    if (author === op) return all;\n",
-     "    return all;\n"
+     "    if (!op || !this.chains.has(op)) return [];\n    const b = bookOf(op);",
+     "    return all;\n    const b = bookOf(op!);"
     ]
    ],
    "red": [
@@ -2472,8 +2472,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     ".filter(([F]) => (cur.get(F)?.C ?? 0) > 0).map(([, text]) => text);",
-     ".map(([, text]) => text);"
+     "      .filter(([F, , by]) => (this.assertions.of(by).get(F)?.C ?? 0) > 0);",
+     "      ;"
     ]
    ],
    "red": [
@@ -4915,6 +4915,90 @@
    ],
    "red": [
     "ask answers a conjunction joining edge and conf, refuses an unbound negation with a note, and stops at the budget with the budget named"
+   ]
+  },
+  {
+   "id": "M358",
+   "title": "r_owner_rules: a rule may conclude a built-in predicate",
+   "file": "src/rules.ts",
+   "edits": [
+    [
+     "  if (BUILTIN.has(hm[2]!)) {",
+     "  if (false) {"
+    ]
+   ],
+   "red": [
+    "a rule that concludes a built-in predicate or exceeds the budget is refused at admission and stored facts and grants are unchanged"
+   ]
+  },
+  {
+   "id": "M359",
+   "title": "r_owner_rules: admission does not try the owner's rules against the budget",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    await this.trialRules(v, this.chains.get(v.manifest.identity)?.length ?? 0);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a rule that concludes a built-in predicate or exceeds the budget is refused at admission and stored facts and grants are unchanged"
+   ]
+  },
+  {
+   "id": "M360",
+   "title": "r_owner_rules: a built-in-head rule already in the log refuses the start",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        if (!replaying || !(e instanceof Refusal)) throw e;",
+     "        throw e;"
+    ]
+   ],
+   "red": [
+    "a rule that concludes a built-in predicate or exceeds the budget is refused at admission and stored facts and grants are unchanged"
+   ]
+  },
+  {
+   "id": "M361",
+   "title": "r_owner_rules: a session's rule is its own book's, so it never runs for the owner",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    const author = op !== undefined && parent === op ? op : m.identity;",
+     "    const author = m.identity;"
+    ]
+   ],
+   "red": [
+    "a rule written by a delegated session derives for the owner, and goes inert once that session is revoked"
+   ]
+  },
+  {
+   "id": "M362",
+   "title": "r_owner_rules: a session's rules keep running after its delegation ends",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        if (by === op || live.get(by)) out.push(text);",
+     "        out.push(text);"
+    ]
+   ],
+   "red": [
+    "a rule written by a delegated session derives for the owner, and goes inert once that session is revoked"
+   ]
+  },
+  {
+   "id": "M363",
+   "title": "r_owner_rules: why does not name the rule a derivation used",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      e.text = this.namingRules(e.identity, r.text);",
+     "      e.text = r.text;"
+    ]
+   ],
+   "red": [
+    "a rule in the owner's book derives a predicate that ask answers and why explains with that rule"
    ]
   }
  ]

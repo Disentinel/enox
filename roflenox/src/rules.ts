@@ -24,6 +24,14 @@ import { SYSTEM_BOOK } from './engine.ts';
 
 export const RULE = 'roflenox:rule';
 
+/** What a rule may never conclude (r_owner_rules): the predicates the node
+ *  answers itself and those its access, liveness and history rest on — a
+ *  rule deriving them would fake a grant, a confidence or a fact. (intent is
+ *  not among them: deriving intents is what rules are for, r_intent_loop.) */
+export const BUILTIN = new Set(['edge', 'edge_num', 'live', 'asserted', 'conf', 'persp', 'admitted_at', 'answered', 'grant', 'delegate', 'export',
+  'follows', 'trusts', 'may_read', 'may_read_book', 'readable_until', 'delegated_until', 'exported', 'reserved', 'result_of', 'clock', 'hole',
+  'update', 'current_key', 'recovery_key', 'changes_recovery', 'revokes', 'accepted_update']);
+
 const LITERAL = /^(not\s+)?([a-z][A-Za-z0-9_]*)\s*(?:\[([^\]]*)\])?\s*\(([\s\S]*)\)$/;
 const BOOK = /^b_[0-9a-f]{16}$/;
 const VAR = /^[A-Z][A-Za-z0-9_]*$/;
@@ -78,6 +86,9 @@ export function compileRule(text: string, author: string): string {
   if (parts.length !== 2 || !parts[0] || !parts[1]) throw bad('a rule is HEAD :- BODY.');
   const hm = LITERAL.exec(parts[0]);
   if (!hm || hm[1]) throw bad('a rule head is one positive literal');
+  if (BUILTIN.has(hm[2]!)) {
+    throw new Refusal(422, 'rule_builtin', `a rule may not conclude ${hm[2]}: it is one of the node's own predicates, and a rule deriving it would fake what is stored or who may read it`);
+  }
   const headBook = resolveBook(hm[3], author, true);
   const foreign = new Set<string>();
   const variables = new Set<string>();

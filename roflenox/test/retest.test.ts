@@ -863,3 +863,108 @@ test('ask answers a conjunction joining edge and conf, refuses an unbound negati
     assert.ok(r.rows.length < 900, `stopped: ${r.rows.length} rows`);
   } finally { await b.stop(); }
 });
+
+const ruleFact = (name: string, text: string) => ({ source: name, relation: 'roflenox:rule', target: text, perspective: 'rules', confidence: 1 });
+
+test('a rule in the owner\'s book derives a predicate that ask answers and why explains with that rule', async () => {
+  const a = await start(tmpDir('owner-rule'), 'node-a');
+  try {
+    const call = tools(a);
+    const RULE = 'claimed(T, S) :- edge(F, S, "zz_claim", T).';
+    json(await call('assert', { facts: [{ source: 'session-1', relation: 'zz_claim', target: 'task-1', perspective: 'zz', confidence: 1 }, ruleFact('claims', RULE)] }));
+    const rows = (await ask(a, 'claimed(T, S)')).rows;
+    assert.deepEqual(rows.map((r) => [r.identity, ...r.cells]), [['node-a', 'task-1', 'session-1']]);
+    const why = json<{ holds: boolean; text: string }[]>(await call('why', { literal: 'claimed("task-1", "session-1")' }));
+    assert.equal(why.length, 1);
+    assert.equal(why[0]!.holds, true);
+    // It names the rule it used, and the fact, with the batch that holds it.
+    assert.match(why[0]!.text, /<= r[0-9a-f]+ @tick \d+ — rule "claimed\[b_[0-9a-f]{16}\]\(T, S\) :- edge\[b_[0-9a-f]{16}\]\(F, S, \\"zz_claim\\", T\)\."/);
+    assert.match(why[0]!.text, /"session-1","zz_claim","task-1"\) \[axiom\] batch [0-9a-f]{64}/);
+    // schema lists the derived predicate.
+    assert.ok(json<{ predicates: { name: string }[] }>(await call('schema')).predicates.some((p) => p.name === 'claimed'));
+  } finally { await a.stop(); }
+});
+
+test('a rule that concludes a built-in predicate or exceeds the budget is refused at admission and stored facts and grants are unchanged', async () => {
+  const a = await start(tmpDir('rule-refused'), 'node-a', { ruleBudget: 2000 });
+  try {
+    const call = tools(a);
+    json(await call('assert', { facts: Array.from({ length: 60 }, (_, i) => ({ source: `s${i}`, relation: 'zz_x', target: `t${i}`, perspective: 'zz', confidence: 1 })) }));
+    await publish(a.url, a.me, [grant('reader', iso(T0 + DAY))], () => a.clock.t);
+    const state = async () => ({ chain: json<{ total: number }>(await call('chain', { identity: 'node-a', limit: 1 })).total,
+      edges: (await ask(a, 'edge(F, S, R, T)')).rows.length, grants: (await ask(a, 'grant(R, U)')).rows, conf: (await ask(a, 'conf(F, C)')).rows.length });
+    const before = await state();
+    // A head that fakes history, liveness or access: refused, whatever the body.
+    for (const head of ['edge(F, S, "zz_x", "faked")', 'conf(F, 1000)', 'grant("intruder", 4102444800)', 'delegate("intruder", 4102444800)',
+      'export("*", "public")', 'asserted(F, "zz", 1000, 0)']) {
+      const r = await call('assert', { facts: [{ source: 'x', relation: 'zz_note', target: 'y', perspective: 'zz', confidence: 1 }, ruleFact('fake', `${head} :- edge(F, S, "zz_x", T).`)] });
+      assert.equal(r.isError, true, head);
+      assert.match(r.text, /rule_builtin/, head);
+      assert.match(r.text, new RegExp(`may not conclude ${head.split('(')[0]}`), head);
+    }
+    // A rule that loops, and one that floods: refused at admission, naming the budget.
+    for (const [name, rule] of [['loop', 'n(M) :- n(N), M is N + 1.'], ['flood', 'pair(A, B) :- edge(F, A, "zz_x", T), edge(G, B, "zz_x", T2).']]) {
+      const facts = name === 'loop' ? [ruleFact('base', 'n(0) :- edge(F, S, "zz_x", T).'), ruleFact(name, rule)] : [ruleFact(name, rule)];
+      const r = await call('assert', { facts });
+      assert.equal(r.isError, true, name);
+      assert.match(r.text, /rule_budget/, name);
+      assert.match(r.text, /rule budget of 2000 steps/, name);
+    }
+    // Nothing was admitted: the log, the facts and the grants are as they were; nothing derived.
+    assert.deepEqual(await state(), before);
+    assert.deepEqual((await ask(a, 'n(X)')).rows, []);
+    assert.deepEqual((await ask(a, 'pair(A, B)')).rows, []);
+    // A rule within the budget is admitted.
+    json(await call('assert', { facts: [ruleFact('fine', 'xs(S) :- edge(F, S, "zz_x", T).')] }));
+    assert.equal((await ask(a, 'xs(S)')).rows.length, 60);
+  } finally { await a.stop(); }
+
+  // A log that already holds a built-in-head rule (written before this check)
+  // starts, with that rule inert and a warning.
+  const dir = tmpDir('rule-replay');
+  const { LocalIdentity } = await import('../src/identity.ts');
+  const { Log } = await import('../src/log.ts');
+  const { toJsonl, newSalt } = await import('../src/facts.ts');
+  const me = LocalIdentity.create(dir, 'node-r', new Date(T0 - DAY));
+  const log = new Log(dir);
+  log.open();
+  const jsonl = toJsonl([{ source: 'a', relation: 'zz_x', target: 'b', perspective: 'zz', confidence: 1 }, ruleFact('old', 'edge(F, "faked", "zz_x", T) :- edge(F, S, "zz_x", T).')]);
+  const salt = newSalt();
+  log.append(me.signBatch(jsonl, null, iso(T0), salt), jsonl, iso(T0), me.identityDoc(), { salt });
+  const r = await start(dir, 'node-r');
+  try {
+    const health = (await post(r.url, '/op/health', {})).body as { warnings: string[] };
+    assert.ok(health.warnings.some((w) => /INERT RULE/.test(w) && /may not conclude edge/.test(w)), JSON.stringify(health.warnings));
+    assert.deepEqual((await post(r.url, '/ask', { query: 'edge(F, "faked", R, T)' })).body.rows, [], 'the rule is inert');
+    assert.equal(((await post(r.url, '/ask', { query: 'edge(F, "a", "zz_x", T)' })).body.rows as unknown[]).length, 1, 'its facts are there');
+  } finally { await r.stop(); }
+});
+
+test('a rule written by a delegated session derives for the owner, and goes inert once that session is revoked', async () => {
+  const a = await start(tmpDir('session-rule'), 'node-a', { ruleBudget: 2000 });
+  try {
+    const { LocalIdentity } = await import('../src/identity.ts');
+    const session = LocalIdentity.create(tmpDir('session-rule-s'), 's1.node-a', new Date(T0 - DAY), { delegatedBy: 'node-a' });
+    const delegate = (c: number) => ({ source: 's1.node-a', relation: 'roflenox:delegate', target: iso(T0 + DAY), perspective: 'policy', confidence: c });
+    await publish(a.url, a.me, [{ source: 'session-1', relation: 'zz_claim', target: 'task-1', perspective: 'zz', confidence: 1 }, delegate(1)], () => a.clock.t);
+    // The session writes a rule over the OWNER's book: it runs as the owner's.
+    const b1 = batch(session, [ruleFact('claims', 'claimed(T, S) :- edge(F, S, "zz_claim", T).')], null, iso(a.clock.t));
+    assert.equal((await post(a.url, '/batches', b1)).status, 201);
+    assert.deepEqual((await ask(a, 'claimed(T, S)')).rows.map((r) => [r.identity, ...r.cells]), [['node-a', 'task-1', 'session-1']]);
+    assert.match(((await post(a.url, '/op/why', { literal: 'claimed("task-1", "session-1")' })).body as unknown as { text: string }[])[0]!.text, /— rule "claimed/);
+    // Its built-in heads and runaways are refused like the owner's.
+    const fake = await post(a.url, '/batches', batch(session, [ruleFact('fake', 'grant("intruder", 4102444800) :- edge(F, S, "zz_claim", T).')], b1.manifest.digest, iso(a.clock.t)));
+    assert.equal(fake.body.error, 'rule_builtin');
+    const loop = await post(a.url, '/batches', batch(session, [ruleFact('base', 'n(0) :- edge(F, S, "zz_claim", T).'), ruleFact('loop', 'n(M) :- n(N), M is N + 1.')], b1.manifest.digest, iso(a.clock.t)));
+    assert.equal(loop.body.error, 'rule_budget');
+    // Revoked: its rules go inert.
+    await publish(a.url, a.me, [delegate(0)], () => a.clock.t);
+    assert.deepEqual((await ask(a, 'claimed(T, S)')).rows, []);
+    // A rule an undelegated identity writes does not run for the owner (r_foreign_rules_opt_in).
+    const other = identityAt(tmpDir('session-rule-o'), 'other');
+    await vouch(a, other);
+    await publish(a.url, other, [{ source: 'session-9', relation: 'zz_claim', target: 'task-9', perspective: 'zz', confidence: 1 },
+      ruleFact('theirs', 'theirs(S) :- edge(F, S, "zz_claim", T).')], () => a.clock.t);
+    assert.deepEqual((await ask(a, 'theirs(S)')).rows, []);
+  } finally { await a.stop(); }
+});

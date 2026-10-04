@@ -165,8 +165,10 @@ type Mode = 'post' | 'feed' | 'offline' | 'replay';
 
 interface Verified {
   manifest: Manifest; facts: Fact[]; pin: IdentityDoc | null; reattest: Attestation | null; withheld: boolean;
-  /** The batch's user rules, compiled to its author's book (src/rules.ts), by fact id. */
-  rules: { F: string; text: string }[];
+  /** The batch's user rules, compiled (src/rules.ts), by fact id: into its
+   *  signer's book — or, for a session the owner delegated, the owner's
+   *  (r_owner_rules), `author` naming whose. */
+  rules: { F: string; text: string; author: string }[];
 }
 
 /** The ROFL program a verified batch loads into the MAIN world: its facts.
@@ -245,7 +247,9 @@ export class RoflenoxNode {
   /** Proven forks, per identity: the two signed successors of one batch. */
   private readonly forks = new Map<string, { prev: string | null; proof: [Manifest, Manifest] }[]>();
   private readonly userRules = new Map<string, Map<string, string>>();  // author → rule fact id → compiled rule
-  private readonly worlds = new Map<string, { w: World; version: number; clock: number }>();
+  /** Who signed a rule that runs as another's (a session's rule, run as the owner's). */
+  private readonly ruleBy = new Map<string, string>();
+  private readonly worlds = new Map<string, { w: World; version: number; clock: number; rules: string }>();
   /** The current assertion of every fact, per identity (src/assertions.ts). */
   private readonly assertions = new Assertions();
   private version = 0;
@@ -587,10 +591,11 @@ export class RoflenoxNode {
     this.programs.set(id, [...(this.programs.get(id) ?? []), programOf(v, seq)]);
     const res = v.facts.filter((f) => f.relation === RESULT);
     if (res.length) this.results.set(id, [...(this.results.get(id) ?? []), toRofl(res, bookOf(id), seq)]);
-    if (v.rules.length) {
-      const m = this.userRules.get(id) ?? new Map<string, string>();
-      for (const r of v.rules) m.set(r.F, r.text);
-      this.userRules.set(id, m);
+    for (const r of v.rules) {
+      const m = this.userRules.get(r.author) ?? new Map<string, string>();
+      m.set(r.F, r.text);
+      this.userRules.set(r.author, m);
+      if (r.author !== id) this.ruleBy.set(r.F, id);
     }
     this.version++;
     const claimed = Date.parse(v.manifest.claimed_at);
@@ -839,7 +844,23 @@ export class RoflenoxNode {
     }
     // User rules are checked here, with the batch: a rule that would conclude
     // outside its author's book refuses the whole batch.
-    const rules = facts.filter((f) => f.relation === RULE).map((f) => ({ F: factId(f), text: compileRule(f.target, m.identity) }));
+    // A rule signed by an identity the owner delegated (a session) is
+    // compiled as the owner's own (r_owner_rules); it runs only while that
+    // delegation lives (runnableRules). A rule already in the log that is
+    // refused now (a built-in head) is made inert, with a warning: a node
+    // never refuses to start over one.
+    const op = this.identity?.name;
+    const parent = (this.current(m.identity) ?? pending)?.doc.delegated_by;
+    const author = op !== undefined && parent === op ? op : m.identity;
+    const rules = facts.filter((f) => f.relation === RULE).flatMap((f) => {
+      try {
+        return [{ F: factId(f), text: compileRule(f.target, author), author }];
+      } catch (e) {
+        if (!replaying || !(e instanceof Refusal)) throw e;
+        this.warnings.push(`INERT RULE in ${m.identity}'s batch ${m.digest}: ${e.message}`);
+        return [];
+      }
+    });
     return { manifest: m, facts, pin, reattest, withheld, rules };
   }
 
@@ -886,6 +907,7 @@ export class RoflenoxNode {
       throw e;
     }
     await this.checkDelegation(v.manifest, receivedAt, mode, pending);
+    await this.trialRules(v, this.chains.get(v.manifest.identity)?.length ?? 0);
     const id = v.manifest.identity;
     const rules = this.chains.has(id) ? null : bookRules(bookOf(id), id);
     const seq = this.chains.get(id)?.length ?? 0;
@@ -1423,7 +1445,7 @@ export class RoflenoxNode {
       const q = rel === 'answered' ? `answered[${SYSTEM_BOOK}](${roflString(b)}, ${args})` : `${rel}[${b}](${args})`;
       const r = await w.explain(op, q);
       e.holds = r.holds;
-      e.text = r.text;
+      e.text = this.namingRules(e.identity, r.text);
       if (w.partial) e.unknown = { reason: w.holes.join('; '), budget: this.ruleBudget, unit: 'steps' };
     }
     return this.withProvenance(out);
@@ -1446,6 +1468,22 @@ export class RoflenoxNode {
     if (can.length) return new Map(can);
     const fallback = [...scope].filter(([, sc]) => sc.only === null).sort(([x, xs], [y]) => (xs.identity === this.identity?.name ? -1 : x < y ? -1 : 1))[0];
     return new Map(fallback ? [fallback] : []);
+  }
+
+  /** A derivation names the rule it used (r_owner_rules): the engine says
+   *  `<= r<hash>`; each such step gets the text of the author's rule with
+   *  that head — or of each, when several conclude it. */
+  private namingRules(author: string, text: string): string {
+    const byHead = new Map<string, string[]>();
+    for (const r of this.currentRules(author)) {
+      const h = /^([a-z][A-Za-z0-9_]*)\[/.exec(r)?.[1];
+      if (h) byHead.set(h, [...(byHead.get(h) ?? []), r]);
+    }
+    return text.split('\n').map((l) => {
+      const m = /^\s*([a-z][A-Za-z0-9_]*)\[b_[0-9a-f]{16}\]\(.*\)\s+<= r[0-9a-f]+ @tick \d+$/.exec(l);
+      const rs = m ? byHead.get(m[1]!) : undefined;
+      return rs ? `${l} — ${rs.length === 1 ? 'rule' : 'one of the rules'} ${rs.map((r) => JSON.stringify(r)).join(', ')}` : l;
+    }).join('\n');
   }
 
   /** Each axiom of an explanation names where it comes from (r_bounded_reads):
@@ -1591,8 +1629,14 @@ export class RoflenoxNode {
   /** An author's rules whose fact is current with confidence above 0: a rule
    *  re-asserted at 0 is retired and derives nothing (r_confidence). */
   private currentRules(author: string): string[] {
-    const cur = this.assertions.of(author);
-    return [...(this.userRules.get(author) ?? [])].filter(([F]) => (cur.get(F)?.C ?? 0) > 0).map(([, text]) => text);
+    return this.currentRuleFacts(author).map(([, text]) => text);
+  }
+
+  /** [fact id, compiled rule, signer] of an author's current rules: each
+   *  current above 0 in the book of whoever signed it. */
+  private currentRuleFacts(author: string): [string, string, string][] {
+    return [...(this.userRules.get(author) ?? [])].map(([F, text]) => [F, text, this.ruleBy.get(F) ?? author] as [string, string, string])
+      .filter(([F, , by]) => (this.assertions.of(by).get(F)?.C ?? 0) > 0);
   }
 
   /** Rules that run for `author` here: the operator's own, and another
@@ -1607,7 +1651,20 @@ export class RoflenoxNode {
     const all = this.currentRules(author);
     if (all.length === 0) return all;
     const op = this.identity?.name;
-    if (author === op) return all;
+    if (author === op) {
+      // The owner's own, and those of the sessions it delegates — while the
+      // delegation lives; once it ends, they go inert (r_owner_rules).
+      const now = Math.floor(this.now() / 1000);
+      const live = new Map<string, boolean>();
+      const out: string[] = [];
+      for (const [, text, by] of this.currentRuleFacts(author)) {
+        if (by !== op && !live.has(by)) {
+          live.set(by, (await this.engine.sysRows(`delegated_until[${SYSTEM_BOOK}](${roflString(by)}, ${roflString(op)}, U)`)).some((r) => now < Number(r[0])));
+        }
+        if (by === op || live.get(by)) out.push(text);
+      }
+      return out;
+    }
     if (!op || !this.chains.has(op)) return [];
     const b = bookOf(op);
     // (A trusts row stands while the trust fact is current above 0, with the
@@ -1646,11 +1703,21 @@ export class RoflenoxNode {
     }
     const clock = Math.floor(this.now() / 1000);
     const cached = this.worlds.get(author);
-    if (cached && cached.version === this.version) {
+    const key = rules.join('\n');
+    if (cached && cached.version === this.version && cached.rules === key) {
       if (cached.clock !== clock) { await cached.w.setClock(clock); cached.clock = clock; }
       return cached.w;
     }
     if (cached) { await cached.w.close(); this.worlds.delete(author); }
+    const w = await this.buildWorld(author, rules, clock);
+    this.worlds.set(author, { w, version: this.version, clock, rules: key });
+    return w;
+  }
+
+  /** A rule world for `author`'s `rules`, evaluated once at `clock`. `extra`:
+   *  a batch not yet admitted, loaded into the author's book (the admission
+   *  trial, r_owner_rules). */
+  private async buildWorld(author: string, rules: string[], clock: number, extra = ''): Promise<World> {
     const own = bookOf(author);
     const owners = new Map([...this.chains.keys()].map((id) => [bookOf(id), id]));
     const named = [...new Set([...rules.join('\n').matchAll(/\[(b_[0-9a-f]{16})\]/g)].map((m) => m[1]!))];
@@ -1664,10 +1731,11 @@ export class RoflenoxNode {
     const foreign = [...new Set([...named, ...granted])].filter((b) => b !== own);
     const w = await this.engine.world(this.ruleBudget);
     await w.session.load(`clock[${SYSTEM_BOOK}](${clock}).\n`, 'roflenox');
+    if (!owners.has(own) && extra) owners.set(own, author);
     for (const b of [own, ...foreign]) {
       const id = owners.get(b);
       if (!id) continue;
-      const text = (this.programs.get(id) ?? []).join('') + this.assertions.lines(id, b, true);
+      const text = (this.programs.get(id) ?? []).join('') + this.assertions.lines(id, b, true) + (b === own ? extra : '');
       if (text) await w.session.load(text, id);
       if (b !== own || ranging) await w.session.load(mayReadRules(b, id), 'roflenox');
     }
@@ -1685,8 +1753,26 @@ export class RoflenoxNode {
       w.partial = true;
       w.holes = [`engine_refused: ${(e as Error).message.slice(0, 200)}`];
     }
-    this.worlds.set(author, { w, version: this.version, clock });
     return w;
+  }
+
+  /** THE ADMISSION TRIAL (r_owner_rules): a batch that brings rules that run
+   *  as the owner's — its own, or a delegated session's — is admitted only if
+   *  the owner's rules with them evaluate within the rule budget. Run once,
+   *  in a throwaway world, before anything is staged; a refusal names the
+   *  budget and what stopped it, and nothing is admitted. */
+  private async trialRules(v: Verified, seq: number): Promise<void> {
+    const op = this.identity?.name;
+    const mine = v.rules.filter((r) => r.author === op);
+    if (!op || mine.length === 0) return;
+    const rules = [...await this.runnableRules(op), ...mine.map((r) => r.text)];
+    const w = await this.buildWorld(op, rules, Math.floor(this.now() / 1000), v.manifest.identity === op ? programOf(v, seq) : '');
+    try {
+      if (w.partial) {
+        throw new Refusal(422, 'rule_budget', `the owner's rules with this batch's do not evaluate within the rule budget of ${this.ruleBudget} steps (${w.holes.join('; ')}); nothing was admitted`,
+          { budget: this.ruleBudget, unit: 'steps', rules: mine.map((r) => r.text) });
+      }
+    } finally { await w.close(); }
   }
 
   /** OFFLINE ADMISSION (r_offline_admission): a sealed envelope addressed to

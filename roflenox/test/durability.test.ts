@@ -353,12 +353,13 @@ test('killing the engine during an ask never yields a plain answer: the asker ge
   let armed: string | null = null;
   let node: Running | null = null;
   const a = node = await start(tmpDir('askkill'), 'alice', {
-    ruleBudget: 20_000,                            // the runaway rule stops at its budget in milliseconds
+    ruleBudget: 20_000,
     fault: (p) => { if (p === armed) { armed = null; killEngine(node!); } },
   });
   try {
     const rule = (name: string, text: string) => ({ source: name, relation: 'roflenox:rule', target: text, perspective: 'rules', confidence: 1 });
-    const b1 = batch(a.me, [fact('alice', 'knows', 'bob'), rule('base', 'n(0) :- edge(F, S, "knows", T).'), rule('grow', 'n(M) :- n(N), M is N + 1.')], null, iso(a.clock.t));
+    const b1 = batch(a.me, [fact('alice', 'knows', 'bob'), rule('base', 'n(0) :- edge(F, S, "knows", T).'), rule('who', 'n(S) :- edge(F, S, "knows", T).')], null, iso(a.clock.t));
+    // (An owner's rule that runs away is refused at admission, r_owner_rules: these terminate.)
     assert.equal((await post(a.url, '/batches', b1)).status, 201);
     const plain = (r: { status: number; body: Record<string, unknown> }) => r.status === 200 && r.body.unknown === undefined;
     const answered = async (p: string, body: unknown) => {
@@ -374,7 +375,7 @@ test('killing the engine during an ask never yields a plain answer: the asker ge
     assert.equal(m.body.error, 'engine_down');
     assert.equal(((await answered('/ask', { query: 'edge(F, S, R, T)' })).body.rows as unknown[]).length, 3);
 
-    // 2. A rule world, killed as it starts to evaluate the runaway rule (a
+    // 2. A rule world, killed as it starts to evaluate the rules (a
     // new batch makes the next question build the world afresh).
     assert.equal((await post(a.url, '/batches', batch(a.me, [fact('bob', 'knows', 'carol')], b1.manifest.digest, iso(a.clock.t)))).status, 201);
     armed = 'engine:world';
