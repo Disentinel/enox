@@ -170,3 +170,4 @@ What roflenox-core reports:
 - `roflenox_core` takes `r_attribute_delete_explains`.
 - `roflenox_core` finished `r_attribute_delete_explains` at "de7f30329d8983500e268e3c9d3a12703ada001a".
 - `roflenox_core` takes `r_conjunction`.
+- `roflenox_core` finished `r_conjunction` at "f02869996dd4d43be58de1ba4022a4d3519af3ca".
