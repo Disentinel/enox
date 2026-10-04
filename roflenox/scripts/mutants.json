@@ -4342,6 +4342,34 @@
    "red": [
     "delete_assertion retracts a fact asserted through assert under another perspective"
    ]
+  },
+  {
+   "id": "M319",
+   "title": "r_assert_receipt: assert names the chain position one off",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      return { receipt, body, held: false, seq: this.chains.get(me.name)!.length - 1 };",
+     "      return { receipt, body, held: false, seq: this.chains.get(me.name)!.length };"
+    ]
+   ],
+   "red": [
+    "assert returns the batch digest, its chain position and every admitted fact id, and they match chain and ask"
+   ]
+  },
+  {
+   "id": "M320",
+   "title": "r_assert_receipt: the fact ids an Enox write answers are not the facts it wrote",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "  return { digest: r.receipt.digest, seq: r.seq, fact_ids: all.map((f) => factId(f)) };",
+     "  return { digest: r.receipt.digest, seq: r.seq, fact_ids: all.slice(1).map((f) => factId(f)) };"
+    ]
+   ],
+   "red": [
+    "assert returns the batch digest, its chain position and every admitted fact id, and they match chain and ask"
+   ]
   }
  ]
 }

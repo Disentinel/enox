@@ -1,5 +1,6 @@
 // The MCP adapter: a thin JSON-RPC layer over the same admission and access.
 import { test } from 'node:test';
+import { factId } from '../src/facts.ts';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -37,8 +38,9 @@ test('an MCP client lists the tools, asserts a fact, and asks it back with why, 
     // assert: a signed batch through normal admission, as the node's identity.
     const asserted = await rpc('tools/call', { name: 'assert', arguments: { facts: [
       { source: 'alice', relation: 'knows', target: 'bob', perspective: 'mcp', confidence: 0.8 }] } });
-    assert.deepEqual(tool(asserted), { admitted: true, identity: 'node-a', facts: 1 });
-    const feed = (await get(a.url, '/feeds/node-a')).body.batches as { manifest: { key_id: string; sig: string } }[];
+    const feed = (await get(a.url, '/feeds/node-a')).body.batches as { manifest: { key_id: string; sig: string; digest: string } }[];
+    assert.deepEqual(tool(asserted), { admitted: true, identity: 'node-a', facts: 1, digest: feed[0]!.manifest.digest, seq: 0,
+      fact_ids: [factId({ source: 'alice', relation: 'knows', target: 'bob' })] });
     assert.equal(feed.length, 1);
     assert.equal(feed[0]!.manifest.key_id, a.me.keyId, 'signed by the node\'s key');
 

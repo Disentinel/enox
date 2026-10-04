@@ -2,7 +2,7 @@
 // argument names and answer shapes are Enox's (smart-node/src/mcp, 2026-09-26);
 // what answers them is ask over facts and signed batches through admission.
 import { createHash } from 'node:crypto';
-import { Refusal, type Fact } from './facts.ts';
+import { factId, Refusal, type Fact } from './facts.ts';
 import type { RoflenoxNode } from './node.ts';
 import {
   addFacts, deriveDescription, ENOX_PERSPECTIVE, entityFacts, Graph, meta, refuseText, slugify, STALE_TTL, truncateAtWordBoundary,
@@ -71,9 +71,17 @@ const agent = (ctx: Ctx) => ctx.agent?.trim() || 'operator';
 /** The identity every Enox write is signed as: the node's own. */
 const self = (ctx: Ctx) => node(ctx).identity!.name;
 
-async function write(ctx: Ctx, facts: Fact[]): Promise<void> {
-  if (facts.length) await node(ctx).assertAsSelf(uniq(facts));
+/** What a write wrote (r_assert_receipt): its batch's digest, the batch's
+ *  position in the node's chain, and the id of every fact in it. */
+export interface Written { digest: string; seq: number; fact_ids: string[] }
+
+async function write(ctx: Ctx, facts: Fact[]): Promise<Written | null> {
+  if (!facts.length) return null;
+  const all = uniq(facts);
+  const r = await node(ctx).signAsSelf(all);
+  return { digest: r.receipt.digest, seq: r.seq, fact_ids: all.map((f) => factId(f)) };
 }
+const said = (b: Written | null) => (b ? `\nbatch ${b.digest} (seq ${b.seq}, ${b.fact_ids.length} facts)` : '');
 
 /** Enox's staleness, as the base adds it to semantic_search rows: the age of
  *  the entity's updated_at in whole days, and stale past its domain's TTL. */
@@ -344,10 +352,10 @@ export const ENOX_OPS: Op[] = [
     run: async (ctx, a) => {
       const g = await graph(ctx);
       const { facts, result, inverse } = addFacts(g, a as unknown as AddArgs, agent(ctx), new Map(), self(ctx));
-      await write(ctx, facts);
+      const batch = await write(ctx, facts);
       const warn = inverse && ['supersedes', 'outperforms', 'contradicts'].includes(result.relation)
         ? { warnings: [`Potential contradiction: inverse "${result.relation}" assertion exists from target to source (fact_id: ${inverse.fact_id})`] } : {};
-      return { ...result, ...warn };
+      return { ...result, ...warn, batch };
     } },
   { name: 'batch_assertions', description: 'Up to 50 add_assertion calls in one signed batch.', input: obj({ assertions: { type: 'array' } }, ['assertions']),
     access: 'operator', text: pretty,
@@ -365,8 +373,8 @@ export const ENOX_OPS: Op[] = [
           return { fact_id: '', source: x.source, target: x.target, relation: x.relation, ok: false, error: String(e) };
         }
       });
-      await write(ctx, all);
-      return { succeeded: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results };
+      const batch = await write(ctx, all);
+      return { succeeded: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results, batch };
     } },
   { name: 'remember', description: 'Record a fact about a subject: a fact node linked from the subject.',
     input: obj({ subject: s(), fact: s(), relation: s(), domain: s(), confidence: n(), asserted_by: s() }, ['subject', 'fact']), access: 'operator', text: pretty,
@@ -390,9 +398,9 @@ export const ENOX_OPS: Op[] = [
       const r = addFacts(g, { source: subj!.id, target: fid, relation, confidence: (a.confidence as number | undefined) ?? 0.9, context: fact,
         asserted_by: a.asserted_by as string | undefined }, agent(ctx), new Map([[fid, { id: fid } as never], [subj!.id, { id: subj!.id } as never]]), self(ctx));
       facts.push(...r.facts);
-      await write(ctx, facts);
+      const batch = await write(ctx, facts);
       return { subject: { id: subj!.id, name: subj!.name }, fact: { id: fid, text: truncateAtWordBoundary(fact, 300) }, relation,
-        asserted_by: r.result.asserted_by, claimed_by: r.result.claimed_by, fact_id: r.result.fact_id, edge_id: r.result.edge_id, created: r.result.created };
+        asserted_by: r.result.asserted_by, claimed_by: r.result.claimed_by, fact_id: r.result.fact_id, edge_id: r.result.edge_id, created: r.result.created, batch };
     } },
   { name: 'update_assertion', description: 'Change an assertion\'s confidence/context/author: a new assertion that supersedes.',
     input: obj({ fact_id: s(), confidence: n(), context: s(), asserted_by: s(), proof_depth: ASSERTION.proof_depth! }, ['fact_id']), access: 'operator', text: pretty,
@@ -407,9 +415,9 @@ export const ENOX_OPS: Op[] = [
       const claim = (a.asserted_by as string | undefined)?.trim();
       if (claim) facts.push(meta(e.F, 'asserted_by', claim));
       if (a.proof_depth !== undefined) facts.push(meta(e.F, 'proof_depth', a.proof_depth as number));
-      await write(ctx, facts);
+      const batch = await write(ctx, facts);
       return { fact_id: e.fact_id, edge_id: e.F, source: e.source, target: e.target, relation: e.relation, asserted_by: self(ctx), claimed_by: claim || e.claimed_by,
-        confidence, proof_depth: (a.proof_depth as number | undefined) ?? e.proof_depth, context: (a.context as string | undefined) ?? e.context, updated_at: t };
+        confidence, proof_depth: (a.proof_depth as number | undefined) ?? e.proof_depth, context: (a.context as string | undefined) ?? e.context, updated_at: t, batch };
     } },
   { name: 'delete_assertion', description: 'Retire an assertion: re-asserted with confidence 0 (the log keeps its history).',
     input: obj({ fact_id: s() }, ['fact_id']), access: 'operator', text: plain,
@@ -419,9 +427,9 @@ export const ENOX_OPS: Op[] = [
       // edge of the Enox view (r_delete_any_perspective).
       const f = g.assertion(a.fact_id as string);
       if (!f || f.confidence === 0) throw refuseText(`Assertion ${a.fact_id} not found`);
-      await write(ctx, [{ source: f.S, relation: f.R, target: f.T, perspective: f.P, confidence: 0 },
+      const batch = await write(ctx, [{ source: f.S, relation: f.R, target: f.T, perspective: f.P, confidence: 0 },
         meta(f.F, 'deleted_at', new Date().toISOString())]);
-      return `Deleted assertion ${f.fact_id} (edge ${f.F})`;
+      return `Deleted assertion ${f.fact_id} (edge ${f.F})${said(batch)}`;
     } },
   { name: 'update_node', description: 'Change an entity\'s name, description or aliases: new attribute facts that supersede.',
     input: obj({ node_id: s(), name: s(), description: s(), aliases: { type: 'array' } }, ['node_id']), access: 'operator', text: pretty,
@@ -435,9 +443,9 @@ export const ENOX_OPS: Op[] = [
       if (a.name !== undefined) facts.push(f('label', a.name as string));
       if (a.description !== undefined && a.description !== '') facts.push(f('description', a.description as string));
       if (a.aliases !== undefined) facts.push(f('aliases', JSON.stringify(a.aliases)));
-      await write(ctx, facts);
+      const batch = await write(ctx, facts);
       return { id: x.id, type: x.type, name: (a.name as string | undefined) ?? x.name, description: (a.description as string | undefined) ?? x.description,
-        aliases: (a.aliases as string[] | undefined) ?? x.aliases, updated_at: t };
+        aliases: (a.aliases as string[] | undefined) ?? x.aliases, updated_at: t, batch };
     } },
   // One call retracts an entity (r_retract_node): its facts and the edges
   // touching it, re-asserted at confidence 0 in one signed batch. An edge
@@ -450,10 +458,10 @@ export const ENOX_OPS: Op[] = [
       const x = g.nodes.get(id);
       const { facts, others } = g.about(id, self(ctx));
       if (!x && facts.length === 0) throw refuseText(`Node ${id} not found`);
-      await write(ctx, facts.map((f) => ({ source: f.S, relation: f.R, target: f.T, perspective: f.P, confidence: 0 })));
+      const batch = await write(ctx, facts.map((f) => ({ source: f.S, relation: f.R, target: f.T, perspective: f.P, confidence: 0 })));
       const edges = facts.filter((f) => f.edge);
       return { node_id: id, name: x?.name ?? null, retracted: facts.length, attributes: facts.length - edges.length, edges: edges.length,
-        edge_ids: edges.map((f) => f.F), ...(others ? { kept: `${others} facts about it are signed by other identities, and stay theirs` } : {}) };
+        edge_ids: edges.map((f) => f.F), ...(others ? { kept: `${others} facts about it are signed by other identities, and stay theirs` } : {}), batch };
     } },
   // ---- artifacts: an artifact is an entity whose body is one of its facts ----
   { name: 'create_artifact', description: 'Store a document as an entity (body as a fact), deduplicated by content hash, with optional links.',
@@ -488,10 +496,10 @@ export const ENOX_OPS: Op[] = [
         facts.push(...r.facts);
         links++;
       }
-      await write(ctx, facts);
+      const batch = await write(ctx, facts);
       return { id, entity_id: eid, content_type: a.content_type, title: a.title, domain, size, sha256: sha, deduped: false, links_created: links,
-        edges_materialized: links,
-        text: `Artifact "${a.title}" created in domain "${domain}".\nid: ${id}\nentity_id: ${eid}\ncontent_type: ${a.content_type}, size: ${size} bytes, sha256: ${sha}\nlinks_created: ${links}, edges_materialized: ${links}` };
+        edges_materialized: links, batch,
+        text: `Artifact "${a.title}" created in domain "${domain}".\nid: ${id}\nentity_id: ${eid}\ncontent_type: ${a.content_type}, size: ${size} bytes, sha256: ${sha}\nlinks_created: ${links}, edges_materialized: ${links}${said(batch)}` };
     } },
   { name: 'list_artifacts', description: 'List stored documents.', input: obj({ domain: s(), content_type: s(), limit: n(), offset: n() }), access: 'anyone', text: pretty,
     run: async (ctx, a) => {

@@ -64,9 +64,9 @@ test('update_assertion, delete_assertion and why accept either the Enox fact_id 
 
     // delete_assertion by either name; the answer names both.
     const d1 = await call('delete_assertion', { fact_id: ab.edge_id });
-    assert.equal(d1.text, `Deleted assertion ${ab.fact_id} (edge ${ab.edge_id})`);
+    assert.equal(d1.text.split('\n')[0], `Deleted assertion ${ab.fact_id} (edge ${ab.edge_id})`);
     const d2 = await call('delete_assertion', { fact_id: bc.fact_id });
-    assert.equal(d2.text, `Deleted assertion ${bc.fact_id} (edge ${bc.edge_id})`);
+    assert.equal(d2.text.split('\n')[0], `Deleted assertion ${bc.fact_id} (edge ${bc.edge_id})`);
     for (const x of [ab, bc]) assert.deepEqual((await ask(a, `conf(${JSON.stringify(x.edge_id)}, C)`)).rows.map((r) => r.cells[0]), [0]);
     // An id that names nothing is still not found.
     assert.equal((await call('delete_assertion', { fact_id: 'f'.repeat(64) })).isError, true);
@@ -237,7 +237,7 @@ test('delete_assertion retracts a fact asserted through assert under another per
 
     const d = await call('delete_assertion', { fact_id: F });
     assert.equal(d.isError, false, d.text);
-    assert.equal(d.text, `Deleted assertion ${F} (edge ${F})`, 'a fact no Enox write named has one id');
+    assert.equal(d.text.split('\n')[0], `Deleted assertion ${F} (edge ${F})`, 'a fact no Enox write named has one id');
     // Retracted under its own perspective, not re-asserted under "enox".
     assert.deepEqual((await ask(a, `asserted(${JSON.stringify(F)}, P, C, S)`)).rows.map((r) => r.cells.slice(0, 2)), [['zz_coord', 0]]);
     assert.deepEqual((await ask(a, 'live(F, S, "zz_claim", T)')).rows.map((r) => r.cells[1]), ['session-8']);
@@ -249,8 +249,45 @@ test('delete_assertion retracts a fact asserted through assert under another per
     json(await call('assert', { facts: [{ source: ab.source, relation: 'zz_depends', target: ab.target, perspective: 'zz_coord', confidence: 1 },
       { source: factIdOf(ab.source, 'zz_depends', ab.target), relation: 'enox:fact_id', target: 'e'.repeat(64), perspective: 'enox', confidence: 1 }] }));
     const del = await call('delete_assertion', { fact_id: 'e'.repeat(64) });
-    assert.equal(del.text, `Deleted assertion ${'e'.repeat(64)} (edge ${factIdOf(ab.source, 'zz_depends', ab.target)})`);
+    assert.equal(del.text.split('\n')[0], `Deleted assertion ${'e'.repeat(64)} (edge ${factIdOf(ab.source, 'zz_depends', ab.target)})`);
     assert.deepEqual((await ask(a, `live(F, S, "zz_depends", T)`)).rows, []);
     assert.deepEqual((await ask(a, 'live(F, S, "zz_claim", T)')).rows.map((r) => r.cells[1]), ['session-8'], 'the other fact stays');
+  } finally { await a.stop(); }
+});
+
+test('assert returns the batch digest, its chain position and every admitted fact id, and they match chain and ask', async () => {
+  const a = await start(tmpDir('assert-receipt'), 'node-a');
+  try {
+    const call = tools(a);
+    type Receipt = { admitted: boolean; identity: string; facts: number; digest: string; seq: number; fact_ids: string[] };
+    const facts = [{ source: 'session-7', relation: 'zz_claim', target: 'task-42', perspective: 'zz_coord', confidence: 1 },
+      { source: 'session-7', relation: 'zz_note', target: 'started', perspective: 'zz_coord', confidence: 0.5 }];
+    const first = json<Receipt>(await call('assert', { facts }));
+    const second = json<Receipt>(await call('assert', { facts: [{ ...facts[0]!, confidence: 0 }] }));
+    const chain = json<{ digests: string[] }>(await call('chain', { identity: 'node-a' }));
+    for (const r of [first, second]) {
+      assert.equal(r.identity, 'node-a');
+      assert.match(r.digest, /^[0-9a-f]{64}$/);
+      assert.equal(chain.digests[r.seq], r.digest, 'chain[seq] is the batch');
+    }
+    assert.equal(second.seq, first.seq + 1);
+    assert.equal(first.fact_ids.length, 2);
+    // Each id is ask's F of that fact, and asserted names the same position.
+    for (const [i, f] of facts.entries()) {
+      const rows = (await ask(a, `edge(F, ${JSON.stringify(f.source)}, ${JSON.stringify(f.relation)}, ${JSON.stringify(f.target)})`)).rows;
+      assert.deepEqual(rows.map((r) => r.cells[0]), [first.fact_ids[i]]);
+    }
+    assert.deepEqual((await ask(a, `asserted(${JSON.stringify(first.fact_ids[1])}, P, C, S)`)).rows.map((r) => r.cells), [['zz_coord', 500, first.seq]]);
+    assert.deepEqual((await ask(a, `asserted(${JSON.stringify(second.fact_ids[0])}, P, C, S)`)).rows.map((r) => r.cells), [['zz_coord', 0, second.seq]]);
+    // The Enox writes answer the same way.
+    type Batch = { batch: { digest: string; seq: number; fact_ids: string[] } };
+    const added = json<Batch & { edge_id: string }>(await call('add_assertion', { source: 'Alpha', target: 'Beta', relation: 'uses' }));
+    assert.equal(added.batch.seq, second.seq + 1);
+    assert.equal(json<{ digests: string[] }>(await call('chain', { identity: 'node-a' })).digests[added.batch.seq], added.batch.digest);
+    assert.ok(added.batch.fact_ids.includes(added.edge_id));
+    for (const F of added.batch.fact_ids) assert.equal((await ask(a, `conf(${JSON.stringify(F)}, C)`)).rows.length, 1, F);
+    const updated = json<Batch>(await call('update_assertion', { fact_id: added.edge_id, confidence: 0.5 }));
+    assert.equal(updated.batch.seq, added.batch.seq + 1);
+    assert.match((await call('delete_assertion', { fact_id: added.edge_id })).text, new RegExp(`\\nbatch [0-9a-f]{64} \\(seq ${updated.batch.seq + 1}, 2 facts\\)$`));
   } finally { await a.stop(); }
 });

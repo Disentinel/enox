@@ -18,7 +18,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { createHash } from 'node:crypto';
-import { checkFact, Refusal, type Fact } from './facts.ts';
+import { checkFact, factId, Refusal, type Fact } from './facts.ts';
 import { LocalIdentity } from './identity.ts';
 import type { RoflenoxNode } from './node.ts';
 import { edgeIdOf, ENOX_OPS } from './enox-ops.ts';
@@ -210,7 +210,11 @@ export const OPS: Op[] = [
       const n = needNode(ctx);
       const { importSalt } = await import('./import.ts');
       const r = await n.signAsSelf(facts, a.import === true ? { salt: (jsonl) => importSalt(n.identity!, jsonl) } : {});
-      const out: Record<string, unknown> = { admitted: !r.held, identity: r.receipt.identity, facts: facts.length, ...(r.held ? { held: true } : {}) };
+      // What it wrote (r_assert_receipt): the batch's digest, its position in
+      // the identity's chain (chain[seq] = digest; asserted's S column), and
+      // each fact's id (ask's F).
+      const out: Record<string, unknown> = { admitted: !r.held, identity: r.receipt.identity, facts: facts.length, ...(r.held ? { held: true } : {}),
+        digest: r.receipt.digest, seq: r.seq, fact_ids: facts.map((f) => factId(f)) };
       if (a.seal_to !== undefined) {
         const { seal } = await import('./seal.ts');
         const keys = [];
