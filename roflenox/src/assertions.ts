@@ -22,7 +22,18 @@
 import { DELEGATE, EXPORT, factId, GRANT, permille, roflString, sha256hex, type Fact } from './facts.ts';
 import { checkName } from './identity.ts';
 
-export interface Current { P: string; C: number; S: number; follow?: string; ctl?: string }
+/** A fact's current assertion: perspective, confidence (permille), chain
+ *  position, and N — the order the node received it in, over all facts. A
+ *  control fact carries its engine row (ctl) and whether that row is loaded
+ *  (on); a grant, its grantee (r_live_view). */
+export interface Current { P: string; C: number; S: number; N: number; follow?: string; ctl?: string; on?: boolean; grantee?: string }
+
+/** Relations that hold one value per subject (r_live_view): an entity's
+ *  attributes and an edge's (src/enox.ts). The latest assertion above
+ *  confidence 0 is the value; the others stay history. */
+const ONE_VALUE = new Set(['type', 'domain', 'label', 'description', 'source_ref', 'created_at', 'updated_at', 'aliases', 'content_type', 'body',
+  'sha256', 'size', 'filename', 'artifact_id', 'asserted_by', 'context', 'proof_depth', 'fact_id', 'deleted_at'].map((a) => `enox:${a}`));
+export const oneValue = (R: string) => ONE_VALUE.has(R);
 
 /** A CONTROL fact's engine row (r_confidence): grant[book](R, Until),
  *  delegate[book](Agent, Until), export[book](Rel, Audience). One row per
@@ -42,7 +53,7 @@ function controlRow(book: string, f: Fact): string | undefined {
   return undefined;
 }
 const TRUST = 'roflenox:trust_rules';
-const acting = (c: Current | undefined): c is Current & { ctl: string } => c?.ctl !== undefined && c.C > 0;
+const acting = (c: Current | undefined): c is Current & { ctl: string } => c?.ctl !== undefined && c.on === true;
 
 /** A follow is a CURRENT assertion too: `follows[book](Name, b_<atom>)` — the
  *  row a rule ranges over books by — exists only while the follow's current
@@ -52,11 +63,37 @@ const FOLLOW = 'roflenox:follow';
 
 export class Assertions {
   private readonly by = new Map<string, Map<string, Current>>();
+  /** Per identity: subject → one-value relation → the facts that set it, and
+   *  grantee → its grant facts, each in first-seen order. */
+  private readonly values = new Map<string, Map<string, Map<string, string[]>>>();
+  private readonly grants = new Map<string, Map<string, string[]>>();
+  private received = 0;
 
   of(identity: string): Map<string, Current> {
     let m = this.by.get(identity);
     if (!m) { m = new Map(); this.by.set(identity, m); }
     return m;
+  }
+
+  /** The fact that holds the value of a one-value relation of `S` now: the
+   *  latest received above confidence 0 (r_live_view). */
+  valueOf(identity: string, S: string, R: string): string | undefined {
+    const m = this.of(identity);
+    let best: [number, string] | undefined;
+    for (const F of this.values.get(identity)?.get(S)?.get(R) ?? []) {
+      const c = m.get(F)!;
+      if (c.C > 0 && (!best || c.N > best[0])) best = [c.N, F];
+    }
+    return best?.[1];
+  }
+
+  /** Is this fact live (r_live_view): asserted above confidence 0 now, and —
+   *  for a one-value relation — the value; for a grant, the one in force. */
+  live(identity: string, F: string, S: string, R: string): boolean {
+    const c = this.of(identity).get(F);
+    if (!c || c.C <= 0) return false;
+    if (c.grantee !== undefined) return c.on === true;
+    return !oneValue(R) || this.valueOf(identity, S, R) === F;
   }
 
   /** What a batch changes, without changing anything yet: the engine rows it
@@ -68,24 +105,49 @@ export class Assertions {
     const load: string[] = [];
     const next = new Map<string, Current>();
     const unfollowed = new Set<string>();
+    const firsts: { F: string; f: Fact }[] = [];
+    const granted = new Map<string, string[]>();      // grantee → grant facts new to this identity
     for (const f of facts) {
       const F = factId(f);
       const old = next.get(F) ?? m.get(F);
       if (old && old.S > seq) continue;                 // never happens in chain order; guard anyway
       if (old && !next.has(F) && old.follow !== undefined && old.C > 0) unfollowed.add(old.follow);
       const ctl = controlRow(book, f);
-      const cur: Current = { P: f.perspective, C: permille(f.confidence), S: seq, ...(f.relation === FOLLOW ? { follow: f.source } : {}), ...(ctl ? { ctl } : {}) };
+      const cur: Current = { P: f.perspective, C: permille(f.confidence), S: seq, N: ++this.received, ...(f.relation === FOLLOW ? { follow: f.source } : {}),
+        ...(ctl ? { ctl } : {}), ...(f.relation === GRANT ? { grantee: checkName(f.source) } : {}) };
+      if (!m.has(F) && !next.has(F)) {
+        firsts.push({ F, f });
+        if (cur.grantee !== undefined) granted.set(cur.grantee, [...(granted.get(cur.grantee) ?? []), F]);
+      }
       next.set(F, cur);
       if (cur.follow !== undefined && cur.C > 0) load.push(`${followRow(book, cur.follow)}.`);
     }
-    // A control row changes only when the fact starts or stops acting: loaded
-    // and retracted rows are applied load-then-retract, so a row that stays
-    // is touched by neither.
-    for (const [F, cur] of next) {
-      const was = m.get(F);
-      if (acting(cur) && !acting(was)) load.push(`${cur.ctl}.`);
-      if (acting(was) && !acting(cur)) retract.push(was.ctl);
+    // Which control rows act after this batch: a control fact's while its
+    // current assertion is above 0 — and a grant's only while it is the
+    // grantee's latest grant (r_live_view): a newer grant to the same grantee
+    // replaces it, and retiring the newest leaves none in force (an older
+    // grant never comes back). A row changes only when its fact starts or
+    // stops acting, and a row both loaded and retracted is touched by neither.
+    const on = new Map<string, boolean>();
+    for (const [F, cur] of next) if (cur.ctl !== undefined && cur.grantee === undefined) on.set(F, cur.C > 0);
+    const grantees = new Set([...next.values()].map((c) => c.grantee).filter((g): g is string => g !== undefined));
+    const held = this.grants.get(identity);
+    for (const g of grantees) {
+      const Fs = [...(held?.get(g) ?? []), ...(granted.get(g) ?? [])];
+      let latest: [number, string] | undefined;
+      for (const F of Fs) { const c = next.get(F) ?? m.get(F)!; if (!latest || c.N > latest[0]) latest = [c.N, F]; }
+      for (const F of Fs) on.set(F, F === latest![1] && (next.get(F) ?? m.get(F)!).C > 0);
     }
+    const loads = new Set<string>(), retracts = new Set<string>();
+    for (const [F, act] of on) {
+      const was = acting(m.get(F));
+      const ctl = (next.get(F) ?? m.get(F)!).ctl!;
+      if (act && !was) loads.add(ctl);
+      if (!act && was) retracts.add(m.get(F)!.ctl!);
+    }
+    for (const r of loads) if (retracts.has(r)) { loads.delete(r); retracts.delete(r); }
+    for (const r of loads) load.push(`${r}.`);
+    retract.push(...retracts);
     // A follows row goes only when NO current follow of that name is left:
     // two follow facts of one host with one retired still follow it, and a
     // re-asserted follow keeps the row (admission loads, then retracts).
@@ -94,7 +156,27 @@ export class Assertions {
       const still = (F: string, c: Current) => c.follow === name && c.C > 0 && (next.get(F) ?? c) === c;
       if (![...next].some(([F, c]) => still(F, c)) && ![...m].some(([F, c]) => !next.has(F) && still(F, c))) retract.push(followRow(book, name));
     }
-    return { retract, load: load.length ? `${load.join('\n')}\n` : '', apply: () => { for (const [F, c] of next) m.set(F, c); } };
+    return { retract, load: load.length ? `${load.join('\n')}\n` : '', apply: () => {
+      for (const [F, c] of next) m.set(F, c);
+      for (const [F, act] of on) m.get(F)!.on = act;
+      for (const { F, f } of firsts) this.index(identity, F, f);
+    } };
+  }
+
+  private index(identity: string, F: string, f: Fact): void {
+    if (f.relation === GRANT) {
+      const g = this.grants.get(identity) ?? new Map<string, string[]>();
+      this.grants.set(identity, g);
+      const k = checkName(f.source);
+      g.set(k, [...(g.get(k) ?? []), F]);
+    } else if (oneValue(f.relation)) {
+      const v = this.values.get(identity) ?? new Map<string, Map<string, string[]>>();
+      this.values.set(identity, v);
+      const byR = v.get(f.source) ?? new Map<string, string[]>();
+      v.set(f.source, byR);
+      const Fs = byR.get(f.relation);
+      if (Fs) Fs.push(F); else byR.set(f.relation, [F]);
+    }
   }
 
   /** Every current assertion of an identity, as ROFL: its control and follow

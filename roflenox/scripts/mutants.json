@@ -4216,6 +4216,62 @@
    "red": [
     "update_assertion, delete_assertion and why accept either the Enox fact_id or the fact id ask returns, and add_assertion returns both"
    ]
+  },
+  {
+   "id": "M310",
+   "title": "r_live_view: every value of a one-value attribute is live",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "    return !oneValue(R) || this.valueOf(identity, S, R) === F;",
+     "    return true;"
+    ]
+   ],
+   "red": [
+    "after update_node only the new description holds in live while the old one stays in edge"
+   ]
+  },
+  {
+   "id": "M311",
+   "title": "r_live_view: live answers every edge, retired ones too",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        if (!this.liveNow(sc.identity, t.map(String) as [string, string, string, string])) continue;",
+     "        if (false) continue;"
+    ]
+   ],
+   "red": [
+    "after delete_assertion the edge is gone from live and still in edge with confidence zero"
+   ]
+  },
+  {
+   "id": "M312",
+   "title": "r_live_view: a newer grant to the same grantee does not replace the older one",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "      for (const F of Fs) on.set(F, F === latest![1] && (next.get(F) ?? m.get(F)!).C > 0);",
+     "      for (const F of Fs) on.set(F, (next.get(F) ?? m.get(F)!).C > 0);"
+    ]
+   ],
+   "red": [
+    "a grant replaced by a newer grant to the same grantee leaves exactly one grant in live"
+   ]
+  },
+  {
+   "id": "M313",
+   "title": "r_live_view: an expired grant stays live",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    return R !== GRANT || this.now() < Date.parse(T);",
+     "    return true;"
+    ]
+   ],
+   "red": [
+    "a grant replaced by a newer grant to the same grantee leaves exactly one grant in live"
+   ]
   }
  ]
 }

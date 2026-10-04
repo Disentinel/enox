@@ -4,6 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { publish } from '../src/client.ts';
+import { bookOf } from '../src/identity.ts';
 import { DAY, grant, identityAt, iso, post, start, T0, tmpDir, vouch, type Running } from './helpers.ts';
 
 type Text = { text: string; isError: boolean };
@@ -68,4 +69,86 @@ test('update_assertion, delete_assertion and why accept either the Enox fact_id 
     // An id that names nothing is still not found.
     assert.equal((await call('delete_assertion', { fact_id: 'f'.repeat(64) })).isError, true);
   } finally { await a.stop(); }
+});
+
+test('after delete_assertion the edge is gone from live and still in edge with confidence zero', async () => {
+  const a = await start(tmpDir('live-del'), 'node-a');
+  try {
+    const call = tools(a);
+    const ab = json<{ edge_id: string; source: string; target: string }>(await call('add_assertion', { source: 'Alpha', target: 'Beta', relation: 'uses' }));
+    json(await call('add_assertion', { source: 'Alpha', target: 'Gamma', relation: 'uses' }));
+    const q = `(F, ${JSON.stringify(ab.source)}, "uses", T)`;
+    assert.equal((await ask(a, `live${q}`)).rows.length, 2);
+    assert.equal((await call('delete_assertion', { fact_id: ab.edge_id })).isError, false);
+    const live = await ask(a, `live${q}`);
+    assert.deepEqual(live.vars, ['F', 'T']);
+    assert.equal(live.rows.length, 1);
+    assert.ok(!live.rows.some((r) => r.cells[0] === ab.edge_id), 'the deleted edge is not live');
+    // edge stays the whole history: the deleted edge is there, at confidence 0.
+    assert.ok((await ask(a, `edge${q}`)).rows.some((r) => r.cells[0] === ab.edge_id));
+    assert.deepEqual((await ask(a, `conf(${JSON.stringify(ab.edge_id)}, C)`)).rows.map((r) => r.cells[0]), [0]);
+    // why and whynot agree with ask.
+    const lit = `live(${JSON.stringify(ab.edge_id)}, ${JSON.stringify(ab.source)}, "uses", ${JSON.stringify(ab.target)})`;
+    const w = (await post(a.url, '/op/whynot', { literal: lit })).body as unknown as { holds: boolean; text: string }[];
+    assert.deepEqual(w.map((e) => e.holds), [false]);
+    assert.match(w[0]!.text, /retired \(confidence 0\)/);
+    // Re-asserted, it is live again.
+    json(await call('add_assertion', { source: 'Alpha', target: 'Beta', relation: 'uses' }));
+    assert.equal((await ask(a, `live${q}`)).rows.length, 2);
+  } finally { await a.stop(); }
+});
+
+test('after update_node only the new description holds in live while the old one stays in edge', async () => {
+  const a = await start(tmpDir('live-desc'), 'node-a');
+  try {
+    const call = tools(a);
+    const ab = json<{ source: string }>(await call('add_assertion', { source: 'Alpha', target: 'Beta', relation: 'uses' }));
+    json(await call('update_node', { node_id: ab.source, description: 'the old description' }));
+    json(await call('update_node', { node_id: ab.source, description: 'the new description', name: 'Alpha Prime' }));
+    const q = (p: string, r: string) => `${p}(F, ${JSON.stringify(ab.source)}, "${r}", T)`;
+    const values = async (p: string, r: string) => (await ask(a, q(p, r))).rows.map((x) => x.cells[1]).sort();
+    assert.deepEqual(await values('live', 'enox:description'), ['the new description']);
+    assert.deepEqual(await values('edge', 'enox:description'), ['the new description', 'the old description']);
+    assert.deepEqual(await values('live', 'enox:label'), ['Alpha Prime']);
+    assert.deepEqual(await values('edge', 'enox:label'), ['Alpha', 'Alpha Prime']);
+    // Setting the old value again makes it the value again: the latest write wins.
+    json(await call('update_node', { node_id: ab.source, description: 'the old description' }));
+    assert.deepEqual(await values('live', 'enox:description'), ['the old description']);
+    // The Enox read agrees.
+    assert.match((await call('explore', { entity: 'Alpha Prime' })).text, /> the old description/);
+  } finally { await a.stop(); }
+});
+
+test('a grant replaced by a newer grant to the same grantee leaves exactly one grant in live', async () => {
+  const a = await start(tmpDir('live-grant'), 'node-a');
+  try {
+    const reader = identityAt(tmpDir('live-grant-r'), 'reader');
+    await vouch(a, reader);
+    const pub = (until: number, c = 1) => publish(a.url, a.me, [{ ...grant('reader', iso(until)), confidence: c }], () => a.clock.t);
+    const reads = async () => (await post(a.url, '/ask', { query: `edge[${bookOf('node-a')}](F, S, R, T)` }, { as: reader })).status;
+    await pub(T0 + 10 * DAY);
+    await pub(T0 + DAY);                                           // newer, and shorter: it replaces the first
+    const live = await ask(a, 'live(F, "reader", "roflenox:grant", U)');
+    assert.deepEqual(live.rows.map((r) => r.cells[1]), [iso(T0 + DAY)]);
+    assert.equal((await ask(a, 'edge(F, "reader", "roflenox:grant", U)')).rows.length, 2, 'both stay in edge');
+    assert.deepEqual((await ask(a, 'grant(R, U)')).rows.map((r) => r.cells), [['reader', (T0 + DAY) / 1000]], 'the engine holds the one in force');
+    // In force means what access does: the reader reads until the newer grant ends, not the older.
+    assert.equal(await reads(), 200);
+    a.clock.t = T0 + 2 * DAY;
+    assert.equal(await reads(), 403);
+    assert.deepEqual((await ask(a, 'live(F, "reader", "roflenox:grant", U)')).rows, [], 'an expired grant is not live');
+    // A grant again, then retired: an older grant never comes back into force.
+    await pub(T0 + 5 * DAY);
+    assert.equal(await reads(), 200);
+    await pub(T0 + 5 * DAY, 0);
+    assert.equal(await reads(), 410);
+    assert.deepEqual((await ask(a, 'live(F, S, "roflenox:grant", U)')).rows, []);
+    // The same after a restart: replay keeps which grant is in force.
+    await a.node.close();
+    const { RoflenoxNode } = await import('../src/node.ts');
+    const n = await RoflenoxNode.open({ dataDir: a.dir, now: () => a.clock.t });
+    try {
+      assert.deepEqual((await n.ask('grant(R, U)', a.me.name)).rows, []);
+    } finally { await n.close(); }
+  } finally { await a.stop().catch(() => {}); }
 });

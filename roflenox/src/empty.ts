@@ -15,7 +15,7 @@ import { ARITY, VALUE_MAX, type RoflenoxNode } from './node.ts';
 
 const ATOM = /^[a-z][A-Za-z0-9_]*$/;
 const isString = (x: string) => x.startsWith('"');
-const NAMED: Record<string, string[]> = { edge: ['fact', 'source', 'relation', 'target'], edge_num: ['fact', 'source', 'relation', 'number'] };
+const NAMED: Record<string, string[]> = { edge: ['fact', 'source', 'relation', 'target'], live: ['fact', 'source', 'relation', 'target'], edge_num: ['fact', 'source', 'relation', 'number'] };
 
 /** Edit distance (Levenshtein), stopping early past `most`. */
 let rowA = new Uint32Array(64), rowB = new Uint32Array(64);
@@ -101,7 +101,7 @@ export async function explainEmpty(node: RoflenoxNode, query: string, caller: st
   // Only what the engine is not kept for — a book seen through its exports, a
   // value too long to keep — is asked of it, with the value bound.
   const notes: string[] = [];
-  if (rel !== 'edge' && rel !== 'edge_num') return undefined;
+  if (rel !== 'edge' && rel !== 'edge_num' && rel !== 'live') return undefined;
   const PLACES = ['F', 'S', 'R', 'T'] as const;
   const kept = (x: string) => x.length <= VALUE_MAX;
   const occurs = async (x: string, at: number) => {

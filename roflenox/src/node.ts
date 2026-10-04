@@ -19,7 +19,7 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { canonicalize } from './jcs.ts';
-import { batchDigest, decodeCell, EMBEDDER, factId, isSalt, newSalt, parseJsonl, Refusal, roflString, SEARCH, sha256hex, toJsonl, toRofl, type Fact } from './facts.ts';
+import { batchDigest, decodeCell, EMBEDDER, factId, GRANT, isSalt, newSalt, parseJsonl, Refusal, roflString, SEARCH, sha256hex, toJsonl, toRofl, type Fact } from './facts.ts';
 import {
   bookOf, canonicalOrNull, CHECKPOINT_CONTEXT, checkIdentityDoc, checkManifest, docHash, docSignedBy, FEED_CONTEXT, isTime, keyValidAt, LocalIdentity,
   REATTEST_CONTEXT, verifyIdentityDoc, verifyManifestSig, verifySigned,
@@ -34,7 +34,7 @@ import { DomainVouch, type DomainTransport } from './domain.ts';
 import { verifyRequest } from './httpsig.ts';
 import { compileRule, RULE } from './rules.ts';
 import { RESULT } from './executor.ts';
-import { Assertions, match, type Current } from './assertions.ts';
+import { Assertions, match, oneValue, type Current } from './assertions.ts';
 import { whyNotDelegated, whyNotReadable } from './expiry.ts';
 import { open as openSealed, type Envelope } from './seal.ts';
 import { OAuth, type OAuthOptions } from './oauth.ts';
@@ -46,7 +46,7 @@ export const DEFAULT_FRESHNESS_SEC = 300;
  *  rules of src/engine.ts) and the node's own (conf, persp, asserted,
  *  answered). An author's rules add their heads. */
 export const ARITY: Record<string, number> = {
-  edge: 4, edge_num: 4, asserted: 4, conf: 2, persp: 2, answered: 3, intent: 4, grant: 2, delegate: 2, export: 2, follows: 2, trusts: 1,
+  edge: 4, edge_num: 4, live: 4, asserted: 4, conf: 2, persp: 2, answered: 3, intent: 4, grant: 2, delegate: 2, export: 2, follows: 2, trusts: 1,
 };
 const BASE_PREDICATES = Object.keys(ARITY);
 /** The longest value kept by place for empty-answer notes: a name, an id or
@@ -966,8 +966,8 @@ export class RoflenoxNode {
       await this.requireBook(query, requester, scope, false);
       this.fault('engine:ask');
       const { rel, book, args } = parseLiteral(query);
-      if (perspective !== null || rel === 'conf' || rel === 'persp' || rel === 'asserted') {
-        const a = await this.askAssertions(rel, book, args, scope, perspective);
+      if (perspective !== null || rel === 'conf' || rel === 'persp' || rel === 'asserted' || rel === 'live') {
+        const a = rel === 'live' && perspective === null ? await this.askLive(book, args, scope) : await this.askAssertions(rel, book, args, scope, perspective);
         const forked = this.forkedUnknowns(scope, book);
         if (forked.length) a.unknown = [...(a.unknown ?? []), ...forked];
         return a;
@@ -1037,6 +1037,41 @@ export class RoflenoxNode {
     return { vars, rows };
   }
 
+  /** live(F, S, R, T) (r_live_view): the edges as they stand now — asserted
+   *  above confidence 0, the one value of a one-value relation (an entity's
+   *  or an edge's attribute), the grant in force — while edge(F, S, R, T)
+   *  stays the whole history. Asked of the engine's edges with the
+   *  question's constants bound, and filtered by the current assertions. */
+  private async askLive(book: string | null, args: string, scope: Map<string, BookScope>): Promise<AskAnswer> {
+    const a = splitArgs(args);
+    const vars = a.filter((x, i) => x === '_' || (/^[A-Z_]/.test(x) && a.indexOf(x) === i));
+    if (a.length !== 4) return { vars, rows: [] };                  // the note says the arity (src/empty.ts)
+    const books = [...scope].filter(([b]) => book === null || b === book);
+    if (book !== null && books.length === 0) throw new Refusal(404, 'unknown_book', `no visible book ${book}`);
+    const isVar = (x: string) => /^[A-Z_]/.test(x);
+    const probe = a.map((x, i) => (isVar(x) ? `V${i}` : x)).join(', ');
+    const rows: AskAnswer['rows'] = [];
+    for (const [b, sc] of books) {
+      const r = await this.engine.ask(`edge[${b}](${probe})`, new Map([[b, sc]]));
+      const at = a.map((x, i) => (isVar(x) ? r.vars.indexOf(`V${i}`) : -1));
+      for (const row of r.rows) {
+        const t = a.map((x, i) => (at[i]! >= 0 ? row.cells[at[i]!]! : decodeCell(x.trim())));
+        if (!this.liveNow(sc.identity, t.map(String) as [string, string, string, string])) continue;
+        const m = match(a, t);
+        if (m) rows.push({ identity: sc.identity, cells: m.cells });
+      }
+    }
+    sortRows(rows);
+    return { vars, rows };
+  }
+
+  /** Whether a fact of `identity`'s is live now (r_live_view); a grant also
+   *  only before its expiry. */
+  private liveNow(identity: string, [F, S, R, T]: [string, string, string, string]): boolean {
+    if (!this.assertions.live(identity, F, S, R)) return false;
+    return R !== GRANT || this.now() < Date.parse(T);
+  }
+
   why(query: string, requester: string | null = null): Promise<Explanation[]> {
     return this.serial(async () => this.explainWith('why', query, requester), true);
   }
@@ -1053,6 +1088,7 @@ export class RoflenoxNode {
     this.fault('engine:explain');
     const { rel, book, args } = parseLiteral(query);
     if (rel === 'conf' || rel === 'persp' || rel === 'asserted') return this.explainAssertion(op, rel, book, args, scope);
+    if (rel === 'live') return this.explainLive(op, book, args, scope);
     const out = rel === 'answered'
       ? [...scope].filter(([b, sc]) => sc.only === null && (book === null || b === book)).map(([, sc]) => ({ identity: sc.identity, holds: false, text: `whynot answered: ${sc.identity} has no rules here` }))
       : await (op === 'why' ? this.engine.why(query, scope) : this.engine.whynot(query, scope));
@@ -1093,6 +1129,39 @@ export class RoflenoxNode {
         : F !== null ? `${sc.identity} holds no assertion of that fact` : `no current assertion of ${sc.identity}'s matches`;
       return { identity: sc.identity, holds: false, text: op === 'why' ? `${lit} does not hold; ${reason}` : `whynot ${lit}:\n  ${reason}` };
     });
+  }
+
+  /** why/whynot live(F, S, R, T): from the current assertions, where ask
+   *  answers it (askLive), so the two agree. */
+  private async explainLive(op: 'why' | 'whynot', book: string | null, args: string, scope: Map<string, BookScope>): Promise<Explanation[]> {
+    const a = splitArgs(args);
+    if (a.length !== 4) throw new Refusal(400, 'bad_query', 'live takes 4 arguments');
+    if (a.some((x) => /^[A-Z_]/.test(x))) throw new Refusal(400, 'bad_query', 'why and whynot explain a ground literal: every argument a constant');
+    const books = [...scope].filter(([b, sc]) => sc.only === null && (book === null || b === book)).sort((x, y) => (x[0] < y[0] ? -1 : 1));
+    const out: Explanation[] = [];
+    for (const [b, sc] of books) {
+      const lit = `live[${b}](${a.join(',')})`;
+      const r = await this.engine.ask(`edge[${b}](${a.join(', ')})`, new Map([[b, sc]]));
+      const cur = this.assertions.of(sc.identity);
+      const ground = a.map((x) => decodeCell(x.trim()));
+      if (r.rows.length === 0) {
+        out.push({ identity: sc.identity, holds: false, text: op === 'why' ? `${lit} does not hold; ${sc.identity} never asserted it` : `whynot ${lit}:\n  ${sc.identity} never asserted edge[${b}](${a.join(',')})` });
+        continue;
+      }
+      const [F, S, R, T] = ground.map(String) as [string, string, string, string];
+      const c = cur.get(F)!;
+      const asserted = `asserted[${b}](${roflString(F)},${roflString(c.P)},${c.C},${c.S}) [${sc.identity}'s latest assertion of the fact: batch ${c.S} of its chain]`;
+      const holds = this.liveNow(sc.identity, [F, S, R, T]);
+      let reason: string;
+      if (holds) reason = `edge[${b}](${a.join(',')}) [axiom]\n  ${asserted}${oneValue(R) ? `\n  the latest value of ${R} for ${S}` : R === GRANT ? `\n  the grant to ${c.grantee} in force` : ''}`;
+      else if (c.C <= 0) reason = `${asserted}: retired (confidence 0)`;
+      else if (R === GRANT && c.on === true) reason = `${asserted}: expired at ${T}`;
+      else if (R === GRANT) reason = `${asserted}: replaced by a newer grant to ${c.grantee}`;
+      else reason = `${asserted}: replaced by ${roflString(this.assertions.valueOf(sc.identity, S, R) ?? '')}, the latest value of ${R} for ${S}`;
+      out.push({ identity: sc.identity, holds, text: holds ? (op === 'why' ? `${lit}\n  ${reason}` : `whynot ${lit}: it holds —\n  ${reason}`)
+        : (op === 'why' ? `${lit} does not hold; ${reason}` : `whynot ${lit}:\n  ${reason}`) });
+    }
+    return out;
   }
 
   /** The predicates a question may name and the perspectives facts are
