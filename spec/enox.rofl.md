@@ -446,14 +446,19 @@ Declared as facts:
 - `r_owner_rules` binds as `must`.
 - `r_owner_rules` says "rules in the owner's own book run on the node: ask and why answer their derived predicates, why names the rules and facts a derivation used, and rules from any other book still run only where r_foreign_rules_opt_in lets them".
 - `r_owner_rules` says "a rule never concludes a built-in predicate, runs inside the rule budget, and a rule that breaks either is refused at admission with the reason, so derived answers can never change what is stored or who may read it".
+- `r_owner_rules` says "a rule signed by a session the owner has currently delegated runs as the owner's own; when that delegation ends, its rules go inert".
 - `r_owner_rules` is stated in "owner 2026-10-04: coordination of parallel sessions, part B in full".
 - `r_owner_rules` is to be checked by "a rule in the owner's book derives a predicate that ask answers and why explains with that rule".
 - `r_owner_rules` is to be checked by "a rule that concludes a built-in predicate or exceeds the budget is refused at admission and stored facts and grants are unchanged".
+- `r_owner_rules` is to be checked by "a rule written by a delegated session derives for the owner, and goes inert once that session is revoked".
 - `r_session_identity` is about `hybrid`.
 - `r_session_identity` binds as `must`.
 - `r_session_identity` says "each session the owner approves over OAuth writes as its own identity, delegated by the owner's identity and named after its grant, so the signer of a write says which session made it; revoking the grant ends that identity's delegation".
+- `r_session_identity` says "a session never acts for the owner's keys or credentials: operator_token, the OAuth grant list and revocation, key rotation, recovery and checkpoints answer only the owner's own credential, while a session's ordinary writes, retract_node included, are signed as the session".
+- `r_session_identity` says "when the owner's key rotates, every session identity derived from it is retired, and a hosted client approves again to write".
 - `r_session_identity` is stated in "owner 2026-10-04: coordination of parallel sessions, part B in full".
 - `r_session_identity` is to be checked by "two OAuth sessions write as two distinct identities delegated by the owner, neither can sign as the other or as the owner, and a revoked session can no longer write".
+- `r_session_identity` is to be checked by "a session token is refused for operator_token, the OAuth grant list and revocation, and after the owner's key rotates no session identity can write until approved again".
 - `r_perspective_export` is about `hybrid`.
 - `r_perspective_export` binds as `should`.
 - `r_perspective_export` says "the owner can export the live facts of one perspective as a deterministic sorted dump, byte-identical for the same state, fit for keeping in git".
