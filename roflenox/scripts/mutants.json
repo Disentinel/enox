@@ -4700,6 +4700,20 @@
    "red": [
     "ask ordered by admission lists rows in the order their batches were admitted, the same after a restart"
    ]
+  },
+  {
+   "id": "M344",
+   "title": "r_assert_then_ask: the question is asked after the write, in a slot of its own",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "...(ask ? { ask } : {}) });",
+     "});\n      if (ask) Object.assign(r, { admission: r.admission, answer: await n.ask(ask.query, ask.asker, ask.perspective, ask.options) });"
+    ]
+   ],
+   "red": [
+    "two sessions that claim the same task at once each get an answer naming the same single winner, and no batch lands between a claim and its answer"
+   ]
   }
  ]
 }

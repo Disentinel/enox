@@ -235,17 +235,26 @@ export const OPS: Op[] = [
   { name: 'assert', description: 'Publish facts as this node\'s own identity: a signed batch through normal admission. The node signs it: this is how local operations publish while a node runs (r_single_writer).',
     input: obj({ facts: { type: 'array', items: FACT_ITEMS },
       import: { type: 'boolean', description: 'an import batch: its salt derives from its content, and a batch already held is not signed again' },
-      seal_to: { type: 'array', items: { type: 'string' }, description: 'also seal the signed batch to these identities, and answer the envelope' } }, ['facts']), access: 'operator',
+      seal_to: { type: 'array', items: { type: 'string' }, description: 'also seal the signed batch to these identities, and answer the envelope' },
+      ask: { type: 'object', description: 'a question {query, perspective?, order?} the node answers right after this batch, before any other batch is admitted: claim and learn whether you won in one call' } }, ['facts']), access: 'operator',
     run: async (ctx, a) => {
       const facts = (a.facts as unknown[]).map((f, i) => checkFact(f, i + 1));
       const n = needNode(ctx);
       const { importSalt } = await import('./import.ts');
-      const r = await n.signAsSelf(facts, a.import === true ? { salt: (jsonl) => importSalt(n.identity!, jsonl) } : {});
+      const q = a.ask as { query?: unknown; perspective?: unknown; order?: unknown } | undefined;
+      if (q !== undefined && (typeof q.query !== 'string' || (q.perspective !== undefined && typeof q.perspective !== 'string') || (q.order !== undefined && q.order !== 'admission'))) {
+        throw new Refusal(400, 'bad_args', 'ask is {query, perspective?, order?: "admission"}');
+      }
+      const ask = q ? { query: await byEdgeId(ctx, q.query), asker: ctx.caller, perspective: (q.perspective as string | undefined) ?? null,
+        options: q.order === 'admission' ? { order: 'admission' as const } : {} } : undefined;
+      const r = await n.signAsSelf(facts, { ...(a.import === true ? { salt: (jsonl: string) => importSalt(n.identity!, jsonl) } : {}), ...(ask ? { ask } : {}) });
       // What it wrote (r_assert_receipt): the batch's digest, its position in
       // the identity's chain (chain[seq] = digest; asserted's S column), and
       // each fact's id (ask's F).
       const out: Record<string, unknown> = { admitted: !r.held, identity: r.receipt.identity, facts: facts.length, ...(r.held ? { held: true } : {}),
-        digest: r.receipt.digest, seq: r.seq, fact_ids: facts.map((f) => factId(f)) };
+        digest: r.receipt.digest, seq: r.seq, fact_ids: facts.map((f) => factId(f)),
+        // The question's answer, at the head right after this batch (r_assert_then_ask).
+        ...(r.answer ? { admission: r.admission, answer: r.answer } : {}) };
       if (a.seal_to !== undefined) {
         const { seal } = await import('./seal.ts');
         const keys = [];

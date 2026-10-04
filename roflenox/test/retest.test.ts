@@ -609,3 +609,35 @@ test('ask ordered by admission lists rows in the order their batches were admitt
     } finally { await b.stop(); }
   } finally { await a.stop().catch(() => {}); }
 });
+
+test('two sessions that claim the same task at once each get an answer naming the same single winner, and no batch lands between a claim and its answer', async () => {
+  const a = await start(tmpDir('claim'), 'node-a');
+  try {
+    const call = tools(a);
+    type Claimed = { digest: string; admission: number; answer: { head: string; rows: { cells: (string | number)[]; admission: number }[] } };
+    const claim = (session: string) => call('assert', { facts: [{ source: session, relation: 'zz_claim', target: 'task-42', perspective: 'zz_coord', confidence: 1 }],
+      ask: { query: 'live(F, S, "zz_claim", "task-42")', order: 'admission' } });
+    // Writes keep landing meanwhile.
+    const noise = Promise.all(Array.from({ length: 6 }, (_, i) => call('assert', { facts: [{ source: `noise-${i}`, relation: 'zz_note', target: 'x', perspective: 'zz', confidence: 1 }] })));
+    const [x, y] = (await Promise.all([claim('session-x'), claim('session-y'), noise])).slice(0, 2).map((t) => json<Claimed>(t as Text));
+    // Each answer names the same winner: the claim admitted first.
+    const winner = (c: Claimed) => c.answer.rows[0]!.cells[1];
+    assert.equal(winner(x), winner(y));
+    const first = x.admission < y.admission ? x : y, second = first === x ? y : x;
+    assert.equal(winner(x), first === x ? 'session-x' : 'session-y');
+    assert.equal(first.answer.rows.length, 1, 'the first claim\'s answer holds only itself');
+    assert.equal(second.answer.rows.length, 2);
+    // No batch lands between a claim and its answer: the answer's head is the log right after the claim.
+    for (const c of [x, y]) {
+      assert.equal(c.answer.rows.at(-1)!.admission <= c.admission, true);
+      const chain = json<{ digests: string[] }>(await call('chain', { identity: 'node-a', limit: 1000 }));
+      assert.ok(chain.digests.includes(c.digest));
+      const at = (await post(a.url, '/ask', { query: 'edge(F, S, R, T)', at: c.answer.head, order: 'admission' })).body as unknown as { rows: { admission: number }[] };
+      assert.equal(Math.max(...at.rows.map((r) => r.admission)), c.admission, 'the latest batch at the answer\'s head is the claim\'s own');
+    }
+    // A malformed question is refused before anything is written.
+    const before = json<{ total: number }>(await call('chain', { identity: 'node-a', limit: 1 })).total;
+    assert.equal((await call('assert', { facts: [{ source: 's', relation: 'zz_note', target: 'y', perspective: 'zz', confidence: 1 }], ask: { query: 1 } })).isError, true);
+    assert.equal(json<{ total: number }>(await call('chain', { identity: 'node-a', limit: 1 })).total, before);
+  } finally { await a.stop(); }
+});

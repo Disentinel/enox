@@ -1589,8 +1589,12 @@ export class RoflenoxNode {
    *  (the `assert` op) instead of signing. `salt` derives the salt from the
    *  batch (an import's, so a re-import is recognised); a batch already in
    *  the chain is then not signed again. Returns the signed body too (seal). */
-  signAsSelf(facts: Fact[], o: { salt?: (jsonl: string) => string } = {}): Promise<{ receipt: Receipt; body: BatchBody & { manifest: Manifest; jsonl: string; salt: string }; held: boolean;
-    /** The batch's position in this identity's chain (r_assert_receipt). */ seq: number }> {
+  signAsSelf(facts: Fact[], o: { salt?: (jsonl: string) => string;
+    /** A question answered right after this batch, before any other batch
+     *  is admitted, as `asker` (r_assert_then_ask). */
+    ask?: { query: string; asker: string | null; perspective: string | null; options: AskOptions } } = {}): Promise<{ receipt: Receipt; body: BatchBody & { manifest: Manifest; jsonl: string; salt: string }; held: boolean;
+    /** The batch's position in this identity's chain (r_assert_receipt). */ seq: number;
+    /** Its admission number, and the answer to `ask`. */ admission: number; answer?: AskAnswer }> {
     return this.serial(async () => {
       const me = this.identity;
       if (!me) throw new Refusal(404, 'no_identity', 'this node has no identity to assert as');
@@ -1601,14 +1605,17 @@ export class RoflenoxNode {
         const had = this.log.receipts.find((r) => r.identity === me.name && r.kind === undefined && r.digest === digest);
         if (had) {
           const s = this.log.read(had);
-          return { receipt: had, body: { manifest: s.manifest, jsonl, salt, identity: me.identityChain() }, held: true, seq: this.chainOf(me.name).indexOf(digest) };
+          return { receipt: had, body: { manifest: s.manifest, jsonl, salt, identity: me.identityChain() }, held: true, seq: this.chainOf(me.name).indexOf(digest),
+            admission: this.admissionOf(digest)!, ...(o.ask ? { answer: await this.askNow(o.ask.query, o.ask.asker, o.ask.perspective, o.ask.options) } : {}) };
         }
       }
       // The later of the clock and the chain's last claim (r_rotation).
       const manifest = me.signBatch(jsonl, this.head(me.name), new Date(Math.max(this.now(), this.lastClaimed.get(me.name) ?? -Infinity)).toISOString(), salt);
       const body = { manifest, jsonl, salt, identity: me.identityChain() };
       const receipt = await this.admitNow(body, 'post', new Date(this.now()).toISOString(), [], me.name);
-      return { receipt, body, held: false, seq: this.chains.get(me.name)!.length - 1 };
+      // Still inside this one serial slot: no other batch can land before the answer.
+      const answer = o.ask ? await this.askNow(o.ask.query, o.ask.asker, o.ask.perspective, o.ask.options) : undefined;
+      return { receipt, body, held: false, seq: this.chains.get(me.name)!.length - 1, admission: this.log.receipts.length - 1, ...(answer ? { answer } : {}) };
     });
   }
 
