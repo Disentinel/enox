@@ -456,9 +456,11 @@ Declared as facts:
 - `r_session_identity` says "each session the owner approves over OAuth writes as its own identity, delegated by the owner's identity and named after its grant, so the signer of a write says which session made it; revoking the grant ends that identity's delegation".
 - `r_session_identity` says "a session never acts for the owner's keys or credentials: operator_token, the OAuth grant list and revocation, key rotation, recovery and checkpoints answer only the owner's own credential, while a session's ordinary writes, retract_node included, are signed as the session".
 - `r_session_identity` says "when the owner's key rotates, every session identity derived from it is retired, and a hosted client approves again to write".
+- `r_session_identity` says "a grant or an export that covers the owner's book covers what the owner's sessions (the identities this node derived for its approved grants) wrote while they were delegated, and nothing anyone else wrote: revoking a session or rotating the owner's key stops a session's new writes, never what readers already may read".
 - `r_session_identity` is stated in "owner 2026-10-04: coordination of parallel sessions, part B in full".
 - `r_session_identity` is to be checked by "two OAuth sessions write as two distinct identities delegated by the owner, neither can sign as the other or as the owner, and a revoked session can no longer write".
 - `r_session_identity` is to be checked by "a session token is refused for operator_token, the OAuth grant list and revocation, and after the owner's key rotates no session identity can write until approved again".
+- `r_session_identity` is to be checked by "a reader granted the owner's book reads what a session wrote while delegated, still reads it after the session is revoked, and a stranger reads none of it".
 - `r_perspective_export` is about `hybrid`.
 - `r_perspective_export` binds as `should`.
 - `r_perspective_export` says "the owner can export the live facts of one perspective as a deterministic sorted dump, byte-identical for the same state, fit for keeping in git".
