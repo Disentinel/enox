@@ -76,7 +76,7 @@ test('negation over an ungranted book is no oracle', async () => {
   const { n, alice } = await setup('neg');
   try {
     await publish(n.url, alice, [fact('alice', 'knows', 'ada'), fact('alice', 'knows', 'zed'),
-      rule('absent', 'absent(P) :- edge(F, S, "knows", P), not edge[@bob](G, P, "works_at", "acme").')], () => n.clock.t);
+      rule('absent', 'absent(P) :- edge(F, S, "knows", P), not edge[@bob](_, P, "works_at", "acme").')], () => n.clock.t);
     const ask = async () => ((await post(n.url, '/ask', { query: 'absent(P)' }, { as: alice })).body.rows as { cells: string[] }[]).map((r) => r.cells[0]);
     // Control, with bob's grant live: exactly the person bob does not list.
     assert.deepEqual(await ask(), ['zed']);
@@ -116,9 +116,13 @@ test('an unbounded rule yields unknown with its budget named, and another identi
     assert.deepEqual(r.unknown?.map((u) => [u.identity, u.budget, u.unit]), [['alice', 20_000, 'steps']]);
     assert.match(r.unknown![0]!.reason, /budget_exhausted/);
     assert.ok(r.rows.length > 0 && (r.total ?? r.rows.length) <= 20_001);
-    // The same author's terminating rule still answers, and so does everyone else.
-    const friend = (await post(n.url, '/ask', { query: 'friend(T)' }, { as: alice })).body as { rows: { cells: string[] }[] };
-    assert.deepEqual(friend.rows.map((x) => x.cells[0]), ['bob']);
+    // The same author's terminating rule shares her world and her budget: the
+    // engine fires a non-recursive rule once recursion settles, so under a
+    // runaway it is unknown with the budget named, never an empty answer.
+    // Everyone else still answers.
+    const friend = (await post(n.url, '/ask', { query: 'friend(T)' }, { as: alice })).body as { rows: { cells: string[] }[]; unknown?: { identity: string; budget: number }[] };
+    assert.deepEqual(friend.rows.map((x) => x.cells[0]), []);
+    assert.deepEqual(friend.unknown?.map((u) => [u.identity, u.budget]), [['alice', 20_000]]);
     const bobs = (await post(n.url, '/ask', { query: 'edge(F, "bob", "knows", T)' }, { as: bob })).body as { rows: unknown[]; unknown?: unknown };
     assert.equal(bobs.rows.length, 3);
     assert.equal(bobs.unknown, undefined, 'bob\'s answer is not touched by alice\'s budget');

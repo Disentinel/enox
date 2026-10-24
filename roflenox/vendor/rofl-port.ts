@@ -1,4 +1,4 @@
-// VENDORED from rofl @ 9a3ca79048bbbc2a964fc98576fbb99479cb3311 (origin/main), runtime/port.ts.
+// VENDORED from rofl @ 9b01f1ba7e46ffa8c23d43f86c9d30a0d9f5e32c (Disentinel/rofl main), runtime/port.ts.
 // Unmodified except this header: it imports only node built-ins, so no import path needed adapting.
 // DEFAULT_BIN below points into the rofl tree and is NOT used by roflenox (see src/engine.ts).
 // runtime/port.ts — THE RUST ENGINE, USED FROM NODE AS A LIBRARY.
@@ -41,7 +41,11 @@ import * as path from 'node:path';
 import * as readline from 'node:readline';
 
 const ROOT = path.join(path.dirname(new URL(import.meta.url).pathname), '..');
-export const DEFAULT_BIN = path.join(ROOT, 'rust/target/release/rofl-serve');
+export const DEFAULT_BIN = path.join(ROOT, 'rust/target', process.env.ROFL_PROFILE || 'release', 'rofl');
+
+/** The engine's own `ok: false` reply: a request it understood and refused. Anything else a call rejects with (a dead
+ *  engine, an unreadable answer) is a failure of the protocol, not an answer. */
+export class EngineRefusal extends Error {}
 
 export interface Evaluated {
   /** A wall was hit and a `hole` in the store names the unfinished part. NOT
@@ -54,6 +58,9 @@ export interface Evaluated {
    *  reading one against the other is a category error made here once. */
   peakRows: number;
   space: number;
+  /** The rules that read so much for what they add that their author should
+   *  hear of it, one sentence each, the costliest premise named (Rust only). */
+  hot?: string[];
 }
 
 export interface Answer {
@@ -68,11 +75,16 @@ export interface Answer {
   /** True when an index served the ask, false when the relation was walked. */
   probed: boolean;
   micros: number;
+  /** The world was cut by a wall, or the question is sealed: the rows are not the whole answer. */
+  partial: boolean;
 }
 
 export interface Ticked { advanced: boolean; quiescent: boolean; partial: boolean }
 
 /** One world. Obtained from `open` or, far more cheaply, from `fork`. */
+/** The walls a snapshot does not carry: the row limit, the ticks of provenance kept, and the evaluator. */
+export type Walls = { space?: number; retainTicks?: number; mode?: 'rounds' | 'strata' };
+
 export class RoflSession {
   readonly port: RoflPort;
   readonly id: number;
@@ -110,8 +122,10 @@ export class RoflSession {
       .then((r) => r.admitted as number);
   }
 
-  /** Base facts, written as ROFL. Returns how many were NEW. What they add is
-   *  first judged by the next WHOLE evaluation, never mid-round. */
+  /** Base facts, written as ROFL. Returns how many were NEW. Into an evaluated
+   *  world they are added by delta (the engine's `full` says when the world is
+   *  evaluated again instead); otherwise the next WHOLE evaluation judges them,
+   *  never mid-round. `load` adds facts and rules the same way. */
   assert(rofl: string): Promise<number> {
     return this.port.send({ op: 'assert', session: this.id, rofl }).then((r) => r.added as number);
   }
@@ -119,6 +133,13 @@ export class RoflSession {
   async evaluate(): Promise<Evaluated> {
     const r = await this.port.send({ op: 'evaluate', session: this.id });
     return r as unknown as Evaluated;
+  }
+
+  /** Take a base fact out of an evaluated world, by the delta where there is
+   *  one; `full` says why the world was evaluated again instead. */
+  async retract(query: string): Promise<{ full: string | null }> {
+    const r = await this.port.send({ op: 'retract', session: this.id, query });
+    return { full: r.full as string | null };
   }
 
   /** The boundary. Staged `@next` facts install here, and here is the only
@@ -133,6 +154,33 @@ export class RoflSession {
   async ask(query: string, opts: { keys?: boolean } = {}): Promise<Answer> {
     const r = await this.port.send({ op: 'ask', session: this.id, query, keys: opts.keys ?? false });
     return r as unknown as Answer;
+  }
+
+  /** `Rofl.why`, in the reference's text. A fact that does not hold rejects
+   *  with the text the reference returns under `ok: false`. `all` prints
+   *  every member of every cell, as `why all`. */
+  async why(query: string, opts: { all?: boolean } = {}): Promise<string> {
+    const r = await this.port.send({ op: 'why', session: this.id, query, ...opts });
+    return r.text as string;
+  }
+
+  /** `Rofl.whynot`. A literal that holds is an answer, not a rejection. */
+  async whynot(query: string, opts: { depth?: number; nodes?: number } = {}): Promise<{ holds: boolean; text: string }> {
+    const r = await this.port.send({ op: 'whynot', session: this.id, query, ...opts });
+    return { holds: r.holds as boolean, text: r.text as string };
+  }
+
+  /** `Rofl.whynotFiles`: a row for each file of `files`, a key prefix and the file's name. */
+  async whynotFiles(query: string, files: [string, string][], opts: { depth?: number; nodes?: number } = {}): Promise<{ file: string; found: number; stops: string[]; text: string }[]> {
+    const r = await this.port.send({ op: 'whynot', session: this.id, query, files, ...opts });
+    return r.files as { file: string; found: number; stops: string[]; text: string }[];
+  }
+
+  /** `Rofl.excise`: what this base fact holds up, on a fork; this world is
+   *  not touched. */
+  async excise(query: string): Promise<{ removed: string[]; added: string[] }> {
+    const r = await this.port.send({ op: 'excise', session: this.id, query });
+    return { removed: r.removed as string[], added: r.added as string[] };
   }
 
   /** COOL A VOLUME TO DISK: write its base facts out as ROFL and drop them.
@@ -150,10 +198,32 @@ export class RoflSession {
    *  The caller records the act — `cooled[code](File, Path)` so the file stays
    *  INDEXED rather than returning to the frontier, and `hole($cold(File),
    *  cooled_to_disk)` so a question about the cold volume refuses instead of
-   *  answering empty. */
-  async cool(prefix: string, path: string): Promise<{ facts: number; bytes: number; path: string }> {
-    const r = await this.port.send({ op: 'cool', session: this.id, prefix, path });
-    return { facts: r.facts as number, bytes: r.bytes as number, path: r.path as string };
+   *  answering empty.
+   *
+   *  With `books` only the facts of those books go; `[surface]` and the books of `keep` stay, and a base fact of the
+   *  volume in any other book refuses the cool, before anything moves. `books` of the result: what was written, by book. */
+  async cool(prefix: string, path: string, books?: string[], keep?: string[]): Promise<{ facts: number; bytes: number; path: string; books: Record<string, number> }> {
+    const r = await this.port.send({ op: 'cool', session: this.id, prefix, path, books, keep });
+    return { facts: r.facts as number, bytes: r.bytes as number, path: r.path as string, books: (r.books ?? {}) as Record<string, number> };
+  }
+
+  /** A cooled volume back, refused when this engine did not write it; into an evaluated world by delta. */
+  async reheat(path: string): Promise<{ admitted: number; evaluated: boolean }> {
+    const r = await this.port.send({ op: 'reheat', session: this.id, path });
+    return { admitted: r.admitted as number, evaluated: r.evaluated as boolean };
+  }
+
+  /** `assert`, saying whether the world was brought up to date by delta (`full` null) or left for an evaluation. */
+  async add(rofl: string): Promise<{ added: number; full: string | null }> {
+    const r = await this.port.send({ op: 'assert', session: this.id, rofl });
+    return { added: r.added as number, full: r.full as string | null };
+  }
+
+  /** What this world wrote above the base it was forked from: the facts of `books` and of `rels`, and the atoms and
+   *  strings they name that do not begin with `prefix` (docs/surface-split.md, the driver). */
+  async view(prefix: string, books: string[], rels: string[] = []): Promise<{ facts: string[]; names: string[] }> {
+    const r = await this.port.send({ op: 'view', session: this.id, prefix, books, rels });
+    return { facts: r.facts as string[], names: r.names as string[] };
   }
 
   /** Cool MANY volumes in one pass over the world.
@@ -166,30 +236,6 @@ export class RoflSession {
     return r.volumes as { facts: number; bytes: number; path: string }[];
   }
 
-  /** COOL THE ASSERTION TRAIL: park `asserted_by` on disk and drop it.
-   *
-   *  It is half the world and two thirds of what a load writes — 41 722 rows
-   *  against 43 078 base facts on 16 eslint files, and dropping it takes a load
-   *  from 331 ms to 94 — and it is the layer nobody asks about until something
-   *  is wrong. `sealed(assertions)` gets the same numbers more cheaply and
-   *  never writes the information at all; this parks it.
-   *
-   *  Write `hole($cold(assertions), cooled_to_disk)` alongside, so a question
-   *  about authorship REFUSES rather than answering empty. */
-  async coolTrail(path: string): Promise<{ facts: number; bytes: number; path: string }> {
-    const r = await this.port.send({ op: 'cool_trail', session: this.id, path });
-    return { facts: r.facts as number, bytes: r.bytes as number, path: r.path as string };
-  }
-
-  /** Fetch the trail back. This goes PAST THE DOOR — `asserted_by` lives in
-   *  `[$kernel]` and a program may not write a kernel ledger — and the header
-   *  is what earns that: a file this engine did not write is refused, not
-   *  translated. Same category as restoring a seed, not a new one. */
-  async reheatTrail(path: string): Promise<number> {
-    const r = await this.port.send({ op: 'reheat_trail', session: this.id, path });
-    return r.restored as number;
-  }
-
   /** Write canonicalState to a file. Deliberately not a string — see the
    *  module note on V8's cap and where the port stops being judged. */
   async state(outPath: string): Promise<number> {
@@ -199,6 +245,13 @@ export class RoflSession {
 
   /** The whole state as a string. Separate from `state` and named so that
    *  reaching for it is a decision rather than a default. */
+  /** This world as a kept image that `RoflPort.open({ keptPath })` reads back; an evaluated world opens evaluated.
+   *  `volume`: as a volume, which `open({ volumePath })` maps. */
+  async keep(path: string, volume = false): Promise<number> {
+    const r = await this.port.send({ op: 'keep', session: this.id, path, volume });
+    return r.bytes as number;
+  }
+
   async stateText(): Promise<string> {
     const r = await this.port.send({ op: 'state', session: this.id });
     return r.state as string;
@@ -233,24 +286,16 @@ export class RoflPort {
   }
 
   private constructor(bin: string) {
-    this.child = spawn(bin, [], { stdio: ['pipe', 'pipe', 'pipe'] });
+    this.child = spawn(bin, ['serve'], { stdio: ['pipe', 'pipe', 'pipe'] });
     this.rl = readline.createInterface({ input: this.child.stdout });
     this.rl.on('line', (line) => this.receive(line));
     // A child that dies with requests outstanding must REJECT them. A protocol
     // whose failures are silent leaves the caller awaiting a promise that can
     // never settle, which is worse than the crash it came from.
-    // THE ENGINE'S STDERR IS KEPT FOR THE DEATH MESSAGE — and, when asked,
-    // forwarded live. Held only, it means an engine that DIAGNOSES ITSELF says
-    // it into a buffer nobody reads unless it dies, which is how a phase
-    // breakdown printed by the engine went missing while I was measuring with
-    // it. A diagnostic that only survives a crash is not a diagnostic.
-    this.child.stderr.on('data', (b: Buffer) => {
-      const t = b.toString();
-      this.err += t;
-      if (process.env.ROFL_PORT_TRACE || process.env.ROFL_COOL_PHASES) process.stderr.write(t);
-    });
-    this.child.on('error', (e) => this.fail(`rofl-serve would not start (${e.message})`));
-    this.child.on('exit', (code, sig) => this.fail(`rofl-serve exited (code ${code}, signal ${sig})`));
+    // THE ENGINE'S STDERR IS KEPT FOR THE DEATH MESSAGE.
+    this.child.stderr.on('data', (b: Buffer) => { this.err += b.toString(); });
+    this.child.on('error', (e) => this.fail(`rofl serve would not start (${e.message})`));
+    this.child.on('exit', (code, sig) => this.fail(`rofl serve exited (code ${code}, signal ${sig})`));
   }
 
   /** Start the engine. `bin` defaults to the release build in this tree; a
@@ -258,7 +303,7 @@ export class RoflPort {
    *  repair and `ENOENT` is not. */
   static async start(bin: string = DEFAULT_BIN): Promise<RoflPort> {
     if (!fs.existsSync(bin)) {
-      throw new Error(`no engine at ${bin} — build it with: cargo build --release --bin rofl-serve`);
+      throw new Error(`no engine at ${bin} — build it with: cargo build --release --bin rofl`);
     }
     return new RoflPort(bin);
   }
@@ -302,9 +347,8 @@ export class RoflPort {
       return;
     }
     this.waiting.delete(id);
-    if (process.env.ROFL_PORT_TRACE) process.stderr.write(`<- ${id} ${line.length}B\n`);
     if (v.ok === true) w.ok(v);
-    else w.no(new Error(String(v.error ?? 'unknown engine error')));
+    else w.no(new EngineRefusal(String(v.error ?? 'unknown engine error')));
   }
 
   send(req: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -313,9 +357,6 @@ export class RoflPort {
     return new Promise((ok, no) => {
       this.waiting.set(id, { ok, no });
       const line = `${JSON.stringify({ ...req, id })}\n`;
-      if (process.env.ROFL_PORT_TRACE) {
-        process.stderr.write(`-> ${id} ${String(req.op)} ${line.length}B\n`);
-      }
       // A WRITE THAT FAILS MUST NOT BE SILENT EITHER. `write` reports an error
       // through the callback, and without it a broken pipe leaves the caller
       // waiting on an answer to a request that never left.
@@ -326,13 +367,15 @@ export class RoflPort {
   /** An EMPTY world with the kernel's bootstrap tables and nothing else —
    *  `new Rofl()`. With `load` beside it a caller never needs a seed, and
    *  therefore never needs the TypeScript kernel at all. */
-  async fresh(budget?: number): Promise<RoflSession> {
-    const r = await this.send({ op: 'fresh', budget });
+  async fresh(budget?: number, walls: Walls = {}): Promise<RoflSession> {
+    const r = await this.send({ op: 'fresh', budget, ...walls });
     return new RoflSession(this, r.session as number, r.facts as number);
   }
 
-  /** Build the core from a snapshot. Expensive; fork it after that. */
-  async open(opts: { seedPath?: string; seed?: string; budget?: number }): Promise<RoflSession> {
+  /** Build the core from a snapshot. Expensive; fork it after that. A snapshot
+   *  carries the world, not its walls: give them again or a world past the
+   *  default row limit comes back holed. */
+  async open(opts: { seedPath?: string; keptPath?: string; volumePath?: string; budget?: number } & Walls): Promise<RoflSession> {
     const r = await this.send({ op: 'open', ...opts });
     return new RoflSession(this, r.session as number, r.facts as number);
   }
@@ -340,7 +383,8 @@ export class RoflPort {
   async stop(): Promise<void> {
     this.child.stdin.end();
     await new Promise<void>((r) => {
-      if (this.child.exitCode !== null) return r();
+      // a child killed by a signal has no exit code, and its 'exit' is gone
+      if (this.child.exitCode !== null || this.child.signalCode !== null) return r();
       this.child.once('exit', () => r());
     });
     this.rl.close();

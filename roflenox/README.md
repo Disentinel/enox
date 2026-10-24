@@ -1,7 +1,7 @@
 # ROFLENOX quickstart
 
 ROFLENOX is a signed-log knowledge server. Every fact is part of a batch signed
-by an identity, and the ROFL engine (`rofl-serve`) is the index you query.
+by an identity, and the ROFL engine (`rofl serve`, from Disentinel/rofl) is the index you query.
 There are no npm dependencies. The CLI is `src/cli.ts`, run by Node's
 built-in TypeScript stripping.
 
@@ -14,17 +14,19 @@ the `DEMO=` line in step 2.
 
 ```sh
 node --version
-ls -l "${ROFL_BIN:-$HOME/rofl-rust/rust/target/release/rofl-serve}"
+ls -l "${ROFL_BIN:-$HOME/rofl/rust/target/release/rofl}"
 ```
 ```
 v22.22.0
--rwxr-xr-x  1 you  staff  1391316 …  /Users/you/rofl-rust/rust/target/release/rofl-serve
+-rwxr-xr-x  1 you  staff  …  /Users/you/rofl/rust/target/release/rofl
 ```
 
 - You need Node 22.6 or newer, because of `--experimental-strip-types`.
 - The engine binary comes from `ROFL_BIN` and defaults to
-  `~/rofl-rust/rust/target/release/rofl-serve`. If it is missing, `serve` fails
-  straight away with `roflenox: no engine at … — build it with: cargo build --release --bin rofl-serve …`.
+  `~/rofl/rust/target/release/rofl` (a checkout of Disentinel/rofl, `cargo build
+  --release --bin rofl` in `rust/`, or the `rofl-<os>-<cpu>` binary of a rofl
+  release). If it is missing, `serve` fails straight away with
+  `roflenox: no engine at … — build it with: cargo build --release --bin rofl`.
   It does not hang.
 - `./src/cli.ts` runs through its `#!/usr/bin/env -S node --experimental-strip-types …`
   line. `node --experimental-strip-types --no-warnings src/cli.ts …` works too.

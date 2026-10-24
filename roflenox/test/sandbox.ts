@@ -55,7 +55,7 @@ export function failures(tap: string): string {
  *  or exited leaving its engine behind. */
 export function orphanEngines(): Set<string> {
   const r = spawnSync('ps', ['-A', '-o', 'pid=,ppid=,comm='], { encoding: 'utf8' });
-  return new Set(r.stdout.split('\n').map((l) => l.trim().split(/\s+/)).filter((c) => c[1] === '1' && (c[2] ?? '').endsWith('rofl-serve')).map((c) => c[0]!));
+  return new Set(r.stdout.split('\n').map((l) => l.trim().split(/\s+/)).filter((c) => c[1] === '1' && c[2] === 'rofl').map((c) => c[0]!));
 }
 
 export interface Nested { status: number | null; pass: number; fail: number; report: string; stderr: string; ms: number }
