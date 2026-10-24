@@ -1,16 +1,18 @@
-// The engine: rofl-serve through the vendored RoflPort. Everything here is
+// The engine: `rofl serve` through the RoflPort of @grafema/rofl. Everything here is
 // DERIVED — rebuilt from the log by replay, and only that way.
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { RoflPort, type RoflSession } from '../vendor/rofl-port.ts';
+import { fileURLToPath } from 'node:url';
+import { EngineRefusal, RoflPort, type RoflSession } from '@grafema/rofl/port';
 import { decodeCell, NOT_BY_WILDCARD, Refusal, roflString } from './facts.ts';
 
 /** The engine's record of which log batches it holds. */
 export const SYSTEM_BOOK = 'sys_roflenox';
 const SYSTEM_WHO = 'roflenox';
 
+/** The `rofl` command of the installed package: it runs this platform's engine, held to the package's version. */
 export const DEFAULT_ROFL_BIN = process.env.ROFL_BIN
-  ?? path.join(os.homedir(), 'rofl-rust/rust/target/release/rofl-serve');
+  ?? path.join(path.dirname(fileURLToPath(import.meta.resolve('@grafema/rofl/package.json'))), 'npm/rofl.js');
 
 // One literal in positional form: `rel(args)` or `rel[book](args)`.
 const LITERAL = /^\s*([a-z][A-Za-z0-9_]*)\s*(?:\[([^\]]*)\])?\s*\(([\s\S]*)\)\s*$/;
@@ -127,7 +129,7 @@ export class Engine {
     const port = await RoflPort.start(bin);
     // A write to a dead engine is reported by the port's write callback (and
     // the port fails every outstanding request); the pipe's own 'error' event
-    // must not also crash this process. The vendored port does not listen for
+    // must not also crash this process. The package's port does not listen for
     // it, so the engine wrapper does.
     (port as unknown as { child: { stdin: NodeJS.WritableStream } }).child.stdin.on('error', () => {});
     return new Engine(port, await port.fresh());
@@ -135,7 +137,7 @@ export class Engine {
 
   /** Load a program into a FORK of the world. Nothing is visible until
    *  `commit`; `abort` leaves the world exactly as it was. */
-  /** True once the rofl-serve process has died (a crash, a kill). */
+  /** True once the engine process has died (a crash, a kill). */
   get dead(): boolean {
     return (this.port as unknown as { dead: Error | null }).dead !== null;
   }
@@ -153,19 +155,16 @@ export class Engine {
    *  (r_batch_write). The main world holds facts and system rules only — no
    *  author's rules — and a load is atomic (a refused program leaves the world
    *  as it was), so there is nothing a fork would protect. The world is left
-   *  DIRTY; the next read settles it once (ensure), however many batches came
-   *  in between. `abort` cannot unload: it marks the engine stale, and the
-   *  node rebuilds it from the log before the next operation.
-   *
-   *  WORKAROUND FOR A NON-INCREMENTAL ENGINE: rofl-serve re-derives every
-   *  fact on each evaluate (Eval::run → clear_derived). With an incremental
-   *  evaluate this would go back to evaluate-per-admission. */
+   *  as an evaluated world takes a load: by delta, or DIRTY when the engine
+   *  says it cannot (`full`), and then the next read settles it once (ensure).
+   *  `abort` cannot unload: it marks the engine stale, and the node rebuilds
+   *  it from the log before the next operation. */
   async stage(rofl: string, who: string, rules: string | null = null,
     beforeLoad: () => void = () => {}): Promise<{ commit: () => Promise<void>; abort: () => Promise<void> }> {
     try {
-      if (rules) await this.session.load(rules, SYSTEM_WHO);
+      if (rules) await this.load(rules, SYSTEM_WHO);
       beforeLoad();
-      await this.session.load(rofl, who);
+      await this.load(rofl, who);
     } catch (e) {
       if (this.dead) throw this.down(e as Error);
       throw new Refusal(422, 'engine_refused', `the engine refused the batch: ${(e as Error).message}`);
@@ -176,10 +175,24 @@ export class Engine {
   /** Set when the world holds something the log does not (an aborted admission). */
   stale = false;
 
+  /** Set while the world holds something no evaluation has settled. */
+  private dirty = true;
+
+  private async load(rofl: string, who: string): Promise<void> {
+    const r = await this.port.send({ op: 'load', session: this.session.id, rofl, who });
+    if (r.full !== null) this.dirty = true;
+  }
+
   /** Settle a dirty world before reading it: a no-op if nothing changed. */
   async ensure(): Promise<void> {
-    const r = await this.port.send({ op: 'ensure', session: this.session.id });
-    if (r.strat) throw new Refusal(422, 'engine_refused', `the world does not stratify: ${String(r.message)}`);
+    if (!this.dirty) return;
+    try {
+      await this.session.evaluate();
+    } catch (e) {
+      if (this.dead || !(e instanceof EngineRefusal)) throw e;
+      throw new Refusal(422, 'engine_refused', `the world does not stratify: ${e.message}`);
+    }
+    this.dirty = false;
   }
 
 
@@ -199,6 +212,7 @@ export class Engine {
       await this.session.load(e.rofl, e.who);
     }
     await this.session.evaluate();
+    this.dirty = false;
   }
 
 
@@ -207,7 +221,7 @@ export class Engine {
   async retract(rows: string[]): Promise<void> {
     for (const q of rows) {
       const r = await this.port.send({ op: 'retract', session: this.session.id, query: q });
-      if (r.okay === false) throw new Error(`retract refused: ${JSON.stringify(r.diagnostics)}`);
+      if (r.full !== null) this.dirty = true;
     }
   }
 
@@ -296,8 +310,7 @@ export class Engine {
     for (const [b, sc] of targets(book, scope)) {
       if (sc.only !== null) continue;
       const q = `${rel}[${b}](${args})`;
-      const r = await engineCall(() => this.port.send({ op, session: this.session.id, query: q }));
-      out.push({ identity: sc.identity, holds: (op === 'why' ? r.okay : r.holds) as boolean, text: r.text as string });
+      out.push({ identity: sc.identity, ...await explainOne(this.port, this.session.id, op, q) });
     }
     return out;
   }
@@ -315,6 +328,24 @@ export class Engine {
 
 /** An engine error on a question is the question's fault (400) — the engine
  *  reports a malformed literal as an error answer, not a crash. */
+/** `why` refuses a fact that does not hold, with the reference's text; a
+ *  query it cannot read is refused too, and whynot tells the two apart. */
+async function explainOne(port: RoflPort, session: number, op: 'why' | 'whynot', query: string): Promise<{ holds: boolean; text: string }> {
+  const whynot = () => engineCall(() => port.send({ op: 'whynot', session, query }));
+  if (op === 'whynot') {
+    const r = await whynot();
+    return { holds: r.holds as boolean, text: r.text as string };
+  }
+  try {
+    const r = await port.send({ op: 'why', session, query });
+    return { holds: true, text: r.text as string };
+  } catch (e) {
+    if (!(e instanceof EngineRefusal)) throw e;
+    const r = await whynot();
+    return { holds: r.holds as boolean, text: e.message };
+  }
+}
+
 async function engineCall<T>(f: () => Promise<T>): Promise<T> {
   try { return await f(); } catch (e) {
     // The engine's own wording names its parser's internals; the asker gets
@@ -464,8 +495,7 @@ export class World {
     await this.evaluate();
   }
   async explain(op: 'why' | 'whynot', q: string): Promise<{ holds: boolean; text: string }> {
-    const r = await engineCall(() => this.port.send({ op, session: this.session.id, query: q }));
-    return { holds: (op === 'why' ? r.okay : r.holds) as boolean, text: r.text as string };
+    return explainOne(this.port, this.session.id, op, q);
   }
   close() { return this.session.close(); }
 }

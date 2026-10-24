@@ -74,7 +74,8 @@ test('a mutant whose red test already fails on the unmutated tree is reported as
   // A copy of the tree in which that red test is already broken.
   const root = path.join(import.meta.dirname, '..');
   const copy = tmpDir('gate-broken');
-  for (const d of ['src', 'test', 'vendor', 'scripts']) fs.cpSync(path.join(root, d), path.join(copy, d), { recursive: true });
+  for (const d of ['src', 'test', 'scripts']) fs.cpSync(path.join(root, d), path.join(copy, d), { recursive: true });
+  fs.symlinkSync(path.join(root, 'node_modules'), path.join(copy, 'node_modules'));
   fs.mkdirSync(path.join(copy, 'executors'));
   fs.copyFileSync(path.join(root, 'package.json'), path.join(copy, 'package.json'));
   const f = path.join(copy, 'test', 'canonical.test.ts');

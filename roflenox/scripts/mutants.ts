@@ -119,7 +119,7 @@ function copyTree(): string {
   // An executor's installed dependencies and model cache are not source: they
   // are linked, not copied (hundreds of MB), and no mutant edits them.
   const heavy = (p: string) => /[\\/](node_modules|\.models)$/.test(p);
-  for (const d of ['src', 'test', 'vendor', 'scripts', 'executors']) {
+  for (const d of ['src', 'test', 'scripts', 'executors']) {
     fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true, filter: (p) => !heavy(p) });
   }
   for (const ex of fs.readdirSync(path.join(ROOT, 'executors'))) {
@@ -128,6 +128,7 @@ function copyTree(): string {
       if (fs.existsSync(from)) fs.symlinkSync(from, path.join(dir, 'executors', ex, h));
     }
   }
+  fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(dir, 'node_modules'));
   fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(dir, 'package.json'));
   return dir;
 }

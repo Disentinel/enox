@@ -10,6 +10,9 @@
   "engines": {
     "node": ">=22.6"
   },
+  "dependencies": {
+    "@grafema/rofl": "1.5.0"
+  },
   "scripts": {
     "test": "node --experimental-strip-types --no-warnings --test --test-concurrency=2 --test-timeout=110000 --test-force-exit test/*.test.ts",
     "roflenox": "node --experimental-strip-types --no-warnings --max-old-space-size=1024 src/cli.ts",
