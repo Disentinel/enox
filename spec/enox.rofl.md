@@ -546,9 +546,9 @@ Declared as facts:
 - `r_snapshot_is_cache` is to be checked by "a node holding 200000 facts reopens from its log within 30 seconds".
 - `r_zero_deps` is about `architecture`.
 - `r_zero_deps` binds as `must`.
-- `r_zero_deps` says "the server has no runtime npm dependencies; it uses node built-ins and the rofl-serve binary".
+- `r_zero_deps` says "the server has one runtime npm dependency, the ROFL engine (@grafema/rofl, pinned to one version); otherwise it uses node built-ins".
 - `r_zero_deps` is stated in "architecture 2026-09-26".
-- `r_zero_deps` is to be checked by "package.json declares no dependencies".
+- `r_zero_deps` is to be checked by "package.json declares one dependency, the ROFL engine".
 - `r_core_without_executors` is about `architecture`.
 - `r_core_without_executors` binds as `must`.
 - `r_core_without_executors` says "the core admits, stores and answers with no embedding model, LLM or MCP present".
@@ -1239,8 +1239,8 @@ The checks that exist:
 - "fact_id equals SHA-256 of the RFC 8785 serialisation of [source, relation, target] for a fixed vector" lives in "roflenox/test/canonical.test.ts".
 - "delete everything except the log, restart, and every ask returns the same answers" guards `r_log_is_truth`.
 - "delete everything except the log, restart, and every ask returns the same answers" lives in "roflenox/test/durability.test.ts".
-- "package.json declares no dependencies" guards `r_zero_deps`.
-- "package.json declares no dependencies" lives in "roflenox/test/hermetic.test.ts".
+- "package.json declares one dependency, the ROFL engine" guards `r_zero_deps`.
+- "package.json declares one dependency, the ROFL engine" lives in "roflenox/test/hermetic.test.ts".
 - "the full test suite passes with no network and no model files" guards `r_core_without_executors`.
 - "the full test suite passes with no network and no model files" lives in "roflenox/test/hermetic5/hermetic5.test.ts".
 - "an end-to-end pull between two nodes whose transcript contains no key material" guards `r_identity_names`.

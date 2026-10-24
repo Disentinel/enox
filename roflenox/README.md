@@ -1,8 +1,8 @@
 # ROFLENOX quickstart
 
 ROFLENOX is a signed-log knowledge server. Every fact is part of a batch signed
-by an identity, and the ROFL engine (`rofl serve`, from Disentinel/rofl) is the index you query.
-There are no npm dependencies. The CLI is `src/cli.ts`, run by Node's
+by an identity, and the ROFL engine (`rofl serve`, from the npm package `@grafema/rofl`) is the index you query.
+The only npm dependency is that engine. The CLI is `src/cli.ts`, run by Node's
 built-in TypeScript stripping.
 
 Every command below was run verbatim, in this order, from this directory,
@@ -14,20 +14,19 @@ the `DEMO=` line in step 2.
 
 ```sh
 node --version
-ls -l "${ROFL_BIN:-$HOME/rofl/rust/target/release/rofl}"
+npm install
 ```
 ```
 v22.22.0
--rwxr-xr-x  1 you  staff  …  /Users/you/rofl/rust/target/release/rofl
+added 2 packages …
 ```
 
 - You need Node 22.6 or newer, because of `--experimental-strip-types`.
-- The engine binary comes from `ROFL_BIN` and defaults to
-  `~/rofl/rust/target/release/rofl` (a checkout of Disentinel/rofl, `cargo build
-  --release --bin rofl` in `rust/`, or the `rofl-<os>-<cpu>` binary of a rofl
-  release). If it is missing, `serve` fails straight away with
-  `roflenox: no engine at … — build it with: cargo build --release --bin rofl`.
-  It does not hang.
+- The one dependency is the ROFL engine, `@grafema/rofl`, pinned to one
+  version; npm installs this platform's engine binary beside it
+  (`@grafema/rofl-<os>-<cpu>`). `ROFL_BIN` overrides it with another `rofl`
+  binary, e.g. a build of Disentinel/rofl. If the engine is missing, `serve`
+  fails straight away and says what to install. It does not hang.
 - `./src/cli.ts` runs through its `#!/usr/bin/env -S node --experimental-strip-types …`
   line. `node --experimental-strip-types --no-warnings src/cli.ts …` works too.
 

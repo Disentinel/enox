@@ -1,16 +1,18 @@
-// The engine: `rofl serve` through the vendored RoflPort. Everything here is
+// The engine: `rofl serve` through the RoflPort of @grafema/rofl. Everything here is
 // DERIVED — rebuilt from the log by replay, and only that way.
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { EngineRefusal, RoflPort, type RoflSession } from '../vendor/rofl-port.ts';
+import { fileURLToPath } from 'node:url';
+import { EngineRefusal, RoflPort, type RoflSession } from '@grafema/rofl/port';
 import { decodeCell, NOT_BY_WILDCARD, Refusal, roflString } from './facts.ts';
 
 /** The engine's record of which log batches it holds. */
 export const SYSTEM_BOOK = 'sys_roflenox';
 const SYSTEM_WHO = 'roflenox';
 
+/** The `rofl` command of the installed package: it runs this platform's engine, held to the package's version. */
 export const DEFAULT_ROFL_BIN = process.env.ROFL_BIN
-  ?? path.join(os.homedir(), 'rofl/rust/target/release/rofl');
+  ?? path.join(path.dirname(fileURLToPath(import.meta.resolve('@grafema/rofl/package.json'))), 'npm/rofl.js');
 
 // One literal in positional form: `rel(args)` or `rel[book](args)`.
 const LITERAL = /^\s*([a-z][A-Za-z0-9_]*)\s*(?:\[([^\]]*)\])?\s*\(([\s\S]*)\)\s*$/;
@@ -127,7 +129,7 @@ export class Engine {
     const port = await RoflPort.start(bin);
     // A write to a dead engine is reported by the port's write callback (and
     // the port fails every outstanding request); the pipe's own 'error' event
-    // must not also crash this process. The vendored port does not listen for
+    // must not also crash this process. The package's port does not listen for
     // it, so the engine wrapper does.
     (port as unknown as { child: { stdin: NodeJS.WritableStream } }).child.stdin.on('error', () => {});
     return new Engine(port, await port.fresh());
