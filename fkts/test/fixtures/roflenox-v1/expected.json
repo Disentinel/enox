@@ -1,0 +1,33 @@
+{
+ "session_a": "sd4c2633268.node-a",
+ "health": {
+  "facts": 35,
+  "batches": 7,
+  "heads": {
+   "helper.example.org": "d971832c6f81cb27c24856f45ec9f4b2b09c9602ebba2b995d46ace68f5dd177",
+   "node-a": "8a41eb80e0bf906446fc1ee07544acfbf576f0be546de39aa059efd1f77cf9d3",
+   "s04233dacf0.node-a": "1ecfef89dcc71489a2b584b42505a3260f7cd07c4a64f4b00528044fbcb93d90",
+   "sd4c2633268.node-a": "61741ff62f7faada7291fba555d60b56c8fe0f262235bcd56b025fdb5fef4e0f"
+  }
+ },
+ "answers": {
+  "edge(F, X, \"uses\", Y)": [
+   [
+    "s04233dacf0.node-a",
+    [
+     "fde7ad95a45488286d7027e6f9152b25089376a8532667bc6a68feeb0ef66587",
+     "enox://example.org/graph/main/cs/alpha",
+     "enox://example.org/graph/main/cs/gamma"
+    ]
+   ],
+   [
+    "sd4c2633268.node-a",
+    [
+     "c3fac1c2882e853cf08f78f2552f9a1c01cafa254c1a71d1a76c59b9a9aba6a0",
+     "enox://example.org/graph/main/cs/alpha",
+     "enox://example.org/graph/main/cs/beta"
+    ]
+   ]
+  ]
+ }
+}
