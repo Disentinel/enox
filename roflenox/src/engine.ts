@@ -159,7 +159,12 @@ export class Engine {
   /** Watch (or, `on` false, stop watching) relations of a session: from now
    *  on its answers carry the rows of them that came and went. */
   async watch(session: number, rels: { rel: string; book?: string }[], on = true): Promise<void> {
-    await this.port.send({ op: on ? 'watch' : 'unwatch', session, rels });
+    try {
+      await this.port.send({ op: on ? 'watch' : 'unwatch', session, rels });
+    } catch (e) {
+      if (this.dead || !(e instanceof EngineRefusal)) throw e;
+      throw new Refusal(501, 'engine_cannot_watch', `the engine refused to watch (${e.message.split('\n')[0]}): subscriptions need a rofl with watch; set ROFL_BIN to one`);
+    }
   }
 
   /** Load a program into a FORK of the world. Nothing is visible until
