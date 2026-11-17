@@ -5313,8 +5313,8 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "(m.texts.has(t) ? '' : guarded(t))",
-     "(m.texts.has(t) ? '' : '')"
+     "const text = on.map((t) => (m.texts.has(t) ? '' : guarded(t))",
+     "const text = on.map((t) => (m.texts.has(t) ? '' : '')"
     ]
    ],
    "red": [
@@ -5369,8 +5369,8 @@
    "file": "src/subscribe.ts",
    "edits": [
     [
-     "      if (sig(scope) !== sig(sub.scope)) {",
-     "      if (access || sig(scope) !== sig(sub.scope)) {"
+     "      if (sig(scope) === sig(sub.scope)) continue;\n      if (batch && grownBy(",
+     "      if (!access && sig(scope) === sig(sub.scope)) continue;\n      if (!access && batch && grownBy("
     ]
    ],
    "red": [
