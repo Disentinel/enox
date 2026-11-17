@@ -311,17 +311,39 @@ curl -N -H 'Accept: text/event-stream' -H "Authorization: Bearer $(./src/cli.ts 
 ./src/cli.ts subscribe 'red(P, X)' --wait 30
 ```
 
-A frame is `{kind, head, cause, vars?, rows?, added?, removed?, by?}`:
+A frame is `{kind, head, cause, vars?, rows?, added?, removed?, by?, why?}`:
 `full` carries `rows` (as `ask` answers them), `delta` carries `added` and
 `removed`; `cause` is the digest of the batch that moved them (or `start`,
 `access`, `rebuilt`, `lost`, `clock`); `by` is how the engine took it (`delta`,
-`whole`, `diff`, or `reask`). A `full` frame is sent again whenever the rows
-cannot be carried over: the reader's access changed (a grant, an export, a
-rule, a new book; a grant that expired, which the node's timer or `tick()`
-notices), the rule world was rebuilt, or the engine was replaced. `refused`
-ends a subscription to a book the reader may no longer read. Relations the
-node answers itself (`live`, `conf`, `persp`, `asserted`, `admitted_at`,
-`answered`) are asked again after each batch and diffed (`by: reask`).
+`whole`, `diff`, or `reask`).
+
+**A batch that moves rules or access goes by delta too.** A rule added is
+loaded into the author's kept rule world by delta; a rule retired (re-asserted
+at confidence 0), no longer trusted, or out of its session's delegation has
+its guard fact (`rule_on[sys_roflenox]`, one per rule) taken out by delta, and
+switched on again put back; a grant, export, delegation, trust or follow goes
+in and out of the world as its rows; a book a rule now names or ranges over is
+loaded into the world; the clock (a grant's expiry) moves by one `edit`, and
+the node's timer also wakes at the expiry of a grant a kept rule world reads
+by. The admission trial of the owner's rules is a fork of the kept world
+taking the batch by delta. So a subscriber whose own access did not change is
+sent a `delta` with `by: delta` (measured, `npm run perf`,
+test/perf/subscribe-rules.test.ts: a rule added, retired or switched on again
+over a red(P, X) of 10 / 10 000 / 100 000 rows reaches the subscriber in
+41–55 ms / 46–77 ms / 0.13–0.51 s as a one-row delta, where it was a full frame
+in 75–88 ms / 0.40–0.43 s / 4.3–4.4 s; a grant to another reader is admitted
+in 44 ms at 100 000 rows, where it was 2.5 s). An author's first rules make a
+world where there was none: its rows are sent as `added`, `by: whole`.
+
+A `full` frame is sent again only when the rows cannot be carried over: the
+reader's own access changed (a grant to it, an export to it, a book of its
+own; a grant to it that expired), the rule world had to be built anew — it fell
+behind the log, ran out of its budget, or the engine refused what it was sent
+— and then the frame says `by: whole` and `why`, or the engine was replaced.
+`refused` ends a subscription to a book the reader may no longer read.
+Relations the node answers itself (`live`, `conf`, `persp`, `asserted`,
+`admitted_at`, `answered`) are asked again after each batch and diffed (`by:
+reask`).
 
 **A view** is a fact in the owner's book; the node serves its page:
 
@@ -335,6 +357,32 @@ token from `#token=` (kept in the page's memory only, or typed in) and lights
 rows up as they come and dims them as they go. A literal with no book is the
 owner's book. The same path answers `Accept: text/event-stream` (the stream)
 and a plain call (the `view` op: one frame).
+
+**A view for a grantee, in a browser: a view link.** A reader who reads by
+signature (not the operator) mints a link with its own key, on its own
+machine, for one view on one node, for at most a day (default an hour):
+
+```sh
+./src/cli.ts view_link node.example.org stale-pages --url https://node.example.org --ttl 3600 --data ~/.roflenox-eve
+# https://node.example.org/view/node.example.org/stale-pages#link=<claims>.<signature>
+# (expires …; revoke: jti …)
+```
+
+The page sends it as `Authorization: RoflenoxView <link>` on the stream of
+that path, and the node reads the view as the link's issuer, with exactly
+`ask`'s access for it (src/viewlink.ts). The link is in the fragment, which a
+browser never sends: it is in no request line, no proxy log, no `Referer`
+(the page also says `no-referrer`), and the page drops it from the address
+bar on load. It is refused (401 `bad_view_link`) for another view, another
+node, any other route, after its `exp`, with a claim or the signature
+changed, or once its key is no longer valid here (rotated, revoked). Its
+issuer revokes it early by asserting `{source: <jti>, relation:
+"roflenox:revoke_link", target: "revoked"}` in its own book; an open stream of
+the link ends then (`refused`, `link_revoked`) and at its expiry
+(`link_expired`). The owner withdrawing the grant or export ends it as for any
+reader (`refused`, `no_grant`). Until it expires or is revoked, whoever holds
+the link reads that view as its issuer: share it as you would a password, for
+as short as you can.
 
 **A journal** is a fact in the node's own book; the node then signs, in its
 own book, one fact per transition of the literal's rows:
