@@ -5,7 +5,7 @@
 // THE ORACLE: after every step the subscriber's rows equal the whole world's
 // answer (the corpus scanned anew and evaluated in one engine), row for row.
 // Needs ROFL_BIN, a `rofl` with `watch`. The planted faults are mutants
-// P1/P2 of scripts/mutants.json.
+// P1-P4 of scripts/mutants.json.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
@@ -48,6 +48,7 @@ test('pods: the coordinator subscriber equals the whole world after a load, a lo
     // 2. An edit on pod 0 that moves conclusions about pod 1's files: g goes, h comes, through b.ts and c.ts.
     e = await fed.edit('lib/a.ts', 'export function f() { return 1; }\nexport function h() { return 2; }\n');
     assert.ok(e.pod.added > 0 && e.pod.removed > 0, JSON.stringify(e.pod));
+    assert.equal(e.pod.by, 'delta', 'a rename behind export * is taken by the engine\'s delta, not anew');
     by.add(e.pod.by);
     want = (await wholeWorld(root)).rows;
     await fed.converge(want, e.t0);
@@ -67,6 +68,14 @@ test('pods: the coordinator subscriber equals the whole world after a load, a lo
     want = (await wholeWorld(root)).rows;
     await fed.converge(want, e.t0);
     assert.ok(![...fed.rows()].some((r) => r.includes('"f"')));
-    assert.deepEqual([...by].sort(), ['anew', 'delta'], 'the steps took both of the pod\'s ways: by delta and anew');
+    assert.deepEqual([...by], ['delta'], 'every edit by delta');
+
+    // 4. An edit the engine refuses (a fact the pod holds for x.ts was taken out behind it): the pod evaluates anew.
+    const pod0 = fed.pods[0]!.pod as unknown as { s: { retract(q: string): Promise<void> }; files: Map<string, Set<string>> };
+    await pod0.s.retract([...pod0.files.get('lib/x.ts')!].find((l) => l.includes('"x2"'))!.replace(/\.$/, ''));
+    e = await fed.edit('lib/x.ts', 'export function x3() { return 0; }\n');
+    assert.equal(e.pod.by, 'anew', JSON.stringify(e.pod));
+    want = (await wholeWorld(root)).rows;
+    await fed.converge(want, e.t0);
   } finally { await fed.close(); }
 });

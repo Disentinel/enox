@@ -37,7 +37,7 @@
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { RoflPort, type RoflSession } from '@grafema/rofl/port';
+import { EngineRefusal, RoflPort, type RoflSession } from '@grafema/rofl/port';
 import { DEFAULT_ROFL_BIN, termCell, type Change } from './engine.ts';
 import { roflString, type Fact } from './facts.ts';
 import { BUILTIN, splitTop } from './rules.ts';
@@ -155,12 +155,12 @@ export interface PodOptions {
 }
 
 export interface Published { added: number; removed: number; facts: number; ms: { engine: number; publish: number };
-  /** How the engine took the edit: `delta` (the facts retracted and asserted one by one), or `anew` (the pod's world evaluated again). */
-  by: 'delta' | 'anew' }
-
-/** Past this many facts to take out, the pod's world is evaluated anew rather than retracted fact by fact:
- *  a retraction by delta of the JS model costs about two fifths of the pod's whole evaluation (measured, 19 vscode files). */
-export const DELTA_RETRACTS = 4;
+  /** The pod's facts the edit took out and put in (0 at the start). */
+  moved?: { out: number; in: number };
+  /** How the engine took the edit: `delta` (the facts out and in, in one request by delta), `whole` (the engine
+   *  refused the delta and evaluated the same world whole, its watch still told the difference), or `anew` (the
+   *  engine refused the edit or lost the watch: the pod's world evaluated again from its files). */
+  by: 'delta' | 'whole' | 'anew' }
 
 type Net = Map<string, { rel: string; cells: string[]; d: number }>;
 
@@ -217,8 +217,8 @@ export class Pod {
   }
 
   /** One file's facts now (null: the file is gone; file '' with facts null: none), and the core as it is now.
-   *  The engine takes the difference by delta, or evaluates the pod anew when much goes (DELTA_RETRACTS);
-   *  either way the pod publishes only the escaping rows that came and went. */
+   *  The engine takes the difference in one request by delta (`edit`); where it refuses the edit or loses the
+   *  watch, the pod's world is evaluated anew from its files. Either way the pod publishes only the escaping rows that came and went. */
   async edit(file: string, facts: Iterable<string> | null, core?: Iterable<string>): Promise<Published> {
     const t0 = performance.now();
     const was = this.files.get(file) ?? new Set<string>();
@@ -228,11 +228,10 @@ export class Pod {
     const add = [...now].filter((l) => !was.has(l)).concat([...coreNow].filter((l) => !this.core.has(l)));
     if (facts === null) this.files.delete(file); else this.files.set(file, now);
     this.core = coreNow;
-    if (out.length <= DELTA_RETRACTS) {
-      for (const l of out) await this.s.retract(l.replace(/\.$/, ''));
-      if (add.length) await this.s.assert(`${add.join('\n')}\n`);
-      return this.publish(this.net(this.s), t0, 'delta');
-    }
+    const r = await this.port.send({ op: 'edit', session: this.s.id, out: out.map((l) => l.replace(/\.$/, '')), rofl: add.length ? `${add.join('\n')}\n` : '' })
+      .catch((e: unknown) => { if (e instanceof EngineRefusal) return { ok: false }; throw e; });
+    const moved = { out: out.length, in: add.length };
+    if (r.ok !== false && r.changes_by !== 'lost') return { ...await this.publish(this.net(this.s), t0, r.full == null ? 'delta' : 'whole'), moved };
     const w = await this.world();
     const net = this.net(w);
     // Anew, the new world told every row it holds: what the pod published and the new world lacks went.
@@ -244,7 +243,7 @@ export class Pod {
     this.told.delete(this.s.id);
     await this.s.close();
     this.s = w;
-    return this.publish(net, t0, 'anew');
+    return { ...await this.publish(net, t0, 'anew'), moved };
   }
 
   /** The rows a world's engine said came and went since last asked, netted, of the escapes and their constants. */
