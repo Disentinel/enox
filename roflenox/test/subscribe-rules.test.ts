@@ -142,3 +142,23 @@ test('a world the node must build anew (its rules ran out of their budget) sends
     s.close();
   } finally { await n.stop(); }
 });
+
+test('a runaway rule of the owner is refused by the trial in a fork of the kept world, and the world and its subscribers are untouched', async () => {
+  const n = await start(tmpDir('subr-trial'), 'home.node', { ruleBudget: 400 });
+  const q = 'red(P, X)';
+  try {
+    await pubAs(n, n.me, [...toy('rules'), ...toy('scan'), ...toy('update')]);
+    const s = await subscribe(n.url, subPath(q), asOperator(n));
+    assert.equal((await s.next()).rows!.length, 2);
+    const head = n.node.log.head();
+    await assert.rejects(pubAs(n, n.me, [rule('big', 'big(X, Z) :- edge(F, X, "n", Y), edge(G, Y, "n", Z), edge(H, Z, "n", W).'),
+      ...Array.from({ length: 80 }, (_, i) => fact(`v${i}`, 'n', `v${(i * 7 + 1) % 80}`)), ...Array.from({ length: 80 }, (_, i) => fact(`v${i}`, 'n', `v${(i * 3 + 2) % 80}`))]), /rule_budget/);
+    assert.equal(n.node.log.head(), head, 'nothing admitted');
+    await s.quiet(150);
+    await oracle(n, s, q);
+    await pubAs(n, n.me, toy('accept'));
+    assert.equal((await s.next()).kind, 'delta', 'the kept world goes on by delta');
+    await oracle(n, s, q);
+    s.close();
+  } finally { await n.stop(); }
+});

@@ -5379,6 +5379,20 @@
    ]
   },
   {
+   "id": "MB6",
+   "title": "rule worlds: the admission trial forks the kept world and never tries the batch in it",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        if (own || add) await w.apply(own + add, op, []);",
+     "        if (false) await w.apply(own + add, op, []);"
+    ]
+   ],
+   "red": [
+    "a runaway rule of the owner is refused by the trial in a fork of the kept world, and the world and its subscribers are untouched"
+   ]
+  },
+  {
    "id": "P1",
    "title": "a pod publishes the escaping rows that came, never those that went",
    "file": "src/federation.ts",
