@@ -5305,6 +5305,48 @@
    "red": [
     "a subscriber to red(P, X) is sent the whole answer, then +2 on the update and −1 on an acceptance; the journal says why"
    ]
+  },
+  {
+   "id": "P1",
+   "title": "a pod publishes the escaping rows that came, never those that went",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "if (before > 0 && r.n === 0) {",
+     "if (false && before > 0 && r.n === 0) {"
+    ]
+   ],
+   "red": [
+    "pods: the coordinator subscriber equals the whole world after a load, a local edit, a cross-file edit and a deletion"
+   ]
+  },
+  {
+   "id": "P2",
+   "title": "one relation the coordinator's rules read does not cross (the first escape omitted)",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "return [...by.values()].sort((a, b) => (a.rel < b.rel ? -1 : 1));",
+     "return [...by.values()].sort((a, b) => (a.rel < b.rel ? -1 : 1)).slice(1);"
+    ]
+   ],
+   "red": [
+    "pods: the coordinator subscriber equals the whole world after a load, a local edit, a cross-file edit and a deletion"
+   ]
+  },
+  {
+   "id": "P3",
+   "title": "a premise's constant narrows the rows that cross to nothing (filters compared by position off by one)",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "[...f].every(([i, v]) => cells[i] === v)",
+     "[...f].every(([i, v]) => cells[i + 1] === v)"
+    ]
+   ],
+   "red": [
+    "pods: the coordinator subscriber equals the whole world after a load, a local edit, a cross-file edit and a deletion"
+   ]
   }
  ]
 }

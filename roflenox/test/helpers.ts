@@ -1,5 +1,6 @@
 // Test harness: nodes in temp dirs, on loopback ports chosen by the OS, with
 // an injectable clock. Nothing here sleeps or reaches past 127.0.0.1.
+import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -10,6 +11,7 @@ import { createServer, listen } from '../src/http.ts';
 import { newSalt, toJsonl, type Fact } from '../src/facts.ts';
 import { signRequest } from '../src/httpsig.ts';
 import { httpCaller, invitationLink, mirrorVia } from '../src/client.ts';
+import type { Frame } from '../src/subscribe.ts';
 
 /** The identity a test's /ask, /feeds, /op and write requests are signed as,
  *  per node URL: by default the node's own identity — its operator, who sees
@@ -149,3 +151,60 @@ export async function answers(url: string, o: As = {}): Promise<unknown[]> {
   for (const q of QUESTIONS) { const { head: _h, ...b } = (await post(url, '/ask', { query: q }, o)).body; out.push(b); }
   return out;
 }
+
+// ---- subscriptions (r_subscribe) ------------------------------------------
+const key = (r: { identity: string; cells: unknown[] }) => JSON.stringify([r.identity, r.cells]);
+
+/** One subscription's stream: frames as they come, and the rows they add up to. */
+export interface Stream { next(ms?: number): Promise<Frame>; quiet(ms: number): Promise<void>; rows: Map<string, { identity: string; cells: unknown[] }>; close(): void; status: number; body?: Record<string, unknown> }
+
+export async function subscribe(url: string, p: string, headers: Record<string, string>): Promise<Stream> {
+  const ac = new AbortController();
+  const res = await fetch(url + p, { headers: { accept: 'text/event-stream', ...headers }, signal: ac.signal });
+  const frames: Frame[] = [];
+  let wake: (() => void) | null = null;
+  const rows = new Map<string, { identity: string; cells: unknown[] }>();
+  const s: Stream = {
+    status: res.status, rows,
+    async next(ms = 20_000) {
+      const t0 = Date.now();
+      while (frames.length === 0) {
+        if (Date.now() - t0 > ms) throw new Error(`no frame within ${ms} ms`);
+        await new Promise<void>((r) => { wake = r; setTimeout(r, 50); });
+      }
+      const f = frames.shift()!;
+      // Strict accumulation: a frame may never add a row held or remove one not held.
+      if (f.kind === 'full') { rows.clear(); for (const r of f.rows!) rows.set(key(r), r); }
+      for (const r of f.added ?? []) { assert.ok(!rows.has(key(r)), `added twice: ${key(r)}`); rows.set(key(r), r); }
+      for (const r of f.removed ?? []) { assert.ok(rows.delete(key(r)), `removed but never held: ${key(r)}`); }
+      return f;
+    },
+    async quiet(ms) {
+      await new Promise((r) => setTimeout(r, ms));
+      assert.deepEqual(frames, [], 'no frame was due');
+    },
+    close: () => ac.abort(),
+  };
+  if (res.status !== 200) { s.body = await res.json() as Record<string, unknown>; return s; }
+  void (async () => {
+    const rd = res.body!.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    try {
+      for (;;) {
+        const { value, done } = await rd.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i;
+        while ((i = buf.indexOf('\n\n')) >= 0) {
+          const ev = buf.slice(0, i);
+          buf = buf.slice(i + 2);
+          const data = ev.split('\n').filter((l) => l.startsWith('data: ')).map((l) => l.slice(6)).join('\n');
+          if (data) { frames.push(JSON.parse(data) as Frame); (wake as (() => void) | null)?.(); }
+        }
+      }
+    } catch { /* aborted */ }
+  })();
+  return s;
+}
+
