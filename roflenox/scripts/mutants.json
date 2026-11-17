@@ -5347,6 +5347,20 @@
    "red": [
     "pods: the coordinator subscriber equals the whole world after a load, a local edit, a cross-file edit and a deletion"
    ]
+  },
+  {
+   "id": "P4",
+   "title": "a pod evaluated anew publishes what came and forgets what its new world lacks",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "      x.d -= r.n;\n",
+     "      x.d -= 0;\n"
+    ]
+   ],
+   "red": [
+    "pods: the coordinator subscriber equals the whole world after a load, a local edit, a cross-file edit and a deletion"
+   ]
   }
  ]
 }

@@ -16,7 +16,7 @@ import { RoflPort } from '@grafema/rofl/port';
 import { publish } from '../src/client.ts';
 import { DEFAULT_ROFL_BIN } from '../src/engine.ts';
 import { decodeCell, type Fact } from '../src/facts.ts';
-import { decodeRules, escapesOf, Pod, splitFacts, type Escape, type Published } from '../src/federation.ts';
+import { decodeRules, escapesOf, Pod, splitFacts, WALLS, type Escape, type Published } from '../src/federation.ts';
 import { invitation, pull, start, subscribe, tmpDir, vouch, type Clock, type Running, type Stream } from './helpers.ts';
 
 const PKG = path.dirname(fileURLToPath(import.meta.resolve('@grafema/rofl/package.json')));
@@ -69,12 +69,13 @@ export async function wholeWorld(root: string): Promise<{ rows: Set<string>; ms:
   const text = scan(root);
   const port = await RoflPort.start(DEFAULT_ROFL_BIN);
   try {
-    const s = await port.fresh();
+    const s = await port.fresh(WALLS.budget, { space: WALLS.space });
     for (const l of fs.readFileSync(MODEL, 'utf8').split('\n').map((x) => x.trim()).filter((x) => x && !x.startsWith('--'))) {
       await s.loadFile(path.resolve(path.dirname(MODEL), l));
     }
     await s.load(text);
-    await s.evaluate();
+    const ev = await s.evaluate();
+    if (ev.partial) throw new Error(`the whole world stopped at a wall: ${JSON.stringify(ev).slice(0, 300)}`);
     const a = await s.ask(QUESTION);
     const rows = new Set(a.rows.map((r) => rowKey(r.map(decodeCell))));
     const facts = (await s.factCount()).facts;

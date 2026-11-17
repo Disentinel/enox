@@ -37,8 +37,10 @@ test('pods: the coordinator subscriber equals the whole world after a load, a lo
     await fed.converge(want, performance.now());
 
     // 1. An edit on pod 0 that moves only its own file's rows.
+    const by = new Set<string>();
     let e = await fed.edit('lib/x.ts', 'export function x1() { return 0; }\nexport function x2() { return 1; }\n');
     assert.equal(e.pod.removed, 0);
+    by.add(e.pod.by);
     want = (await wholeWorld(root)).rows;
     await fed.converge(want, e.t0);
     assert.ok([...fed.rows()].some((r) => r.includes('"x2"') && r.includes('lib/x.ts')));
@@ -46,6 +48,7 @@ test('pods: the coordinator subscriber equals the whole world after a load, a lo
     // 2. An edit on pod 0 that moves conclusions about pod 1's files: g goes, h comes, through b.ts and c.ts.
     e = await fed.edit('lib/a.ts', 'export function f() { return 1; }\nexport function h() { return 2; }\n');
     assert.ok(e.pod.added > 0 && e.pod.removed > 0, JSON.stringify(e.pod));
+    by.add(e.pod.by);
     want = (await wholeWorld(root)).rows;
     await fed.converge(want, e.t0);
     for (const file of ['lib/b.ts', 'app/c.ts']) {
@@ -60,8 +63,10 @@ test('pods: the coordinator subscriber equals the whole world after a load, a lo
 
     // 3. A deletion: a.ts goes; what b.ts and c.ts offered of it goes on the other pod.
     e = await fed.edit('lib/a.ts', null);
+    by.add(e.pod.by);
     want = (await wholeWorld(root)).rows;
     await fed.converge(want, e.t0);
     assert.ok(![...fed.rows()].some((r) => r.includes('"f"')));
+    assert.deepEqual([...by].sort(), ['anew', 'delta'], 'the steps took both of the pod\'s ways: by delta and anew');
   } finally { await fed.close(); }
 });

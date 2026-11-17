@@ -43,6 +43,8 @@ import { roflString, type Fact } from './facts.ts';
 import { BUILTIN, splitTop } from './rules.ts';
 
 export const ROW = 'row:';
+/** The walls of a pod's world: a corpus's program runs far past the engine's default rows. */
+export const WALLS = { budget: 1e9, space: 1e9 };
 const LITERAL = /^(not\s+)?([a-z][A-Za-z0-9_]*)\s*(?:\[([^\]]*)\])?\s*\(([\s\S]*)\)$/;
 const VAR = /^[A-Z_]/;
 
@@ -105,14 +107,27 @@ export function rowFacts(rel: string, cells: string[], confidence: number): Fact
   });
 }
 
+/** The facts of a ROFL text, one a clause: a string may hold a line break, a `--` line between clauses is a comment. */
+export function factsOf(text: string): string[] {
+  const out: string[] = [];
+  let start = 0, inStr = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    if (inStr) { if (c === '\\') i++; else if (c === '"') inStr = false; continue; }
+    if (c === '"') { inStr = true; continue; }
+    if (c === '-' && text[i + 1] === '-' && text.slice(start, i).trim() === '') { const e = text.indexOf('\n', i); i = e < 0 ? text.length : e; start = i + 1; continue; }
+    if (c === '.' && (i + 1 === text.length || text[i + 1] === '\n')) { const f = text.slice(start, i + 1).trim(); if (f !== '.') out.push(f); start = i + 1; }
+  }
+  if (text.slice(start).trim() !== '') throw new Error(`a clause without its full stop: ${text.slice(start, start + 120)}`);
+  return out;
+}
+
 /** A scan's facts cut by file: those naming a file's node prefix, and the core naming none. */
 export function splitFacts(text: string, files: string[]): { core: Set<string>; byFile: Map<string, Set<string>> } {
   const of = new Map(files.map((f) => [filePrefix(f), f]));
   const core = new Set<string>();
   const byFile = new Map(files.map((f) => [f, new Set<string>()]));
-  for (const raw of text.split('\n')) {
-    const l = raw.trim();
-    if (l === '' || l.startsWith('--')) continue;
+  for (const l of factsOf(text)) {
     const m = NODE.exec(l);
     if (!m) { core.add(l); continue; }
     const f = of.get(m[0]);
@@ -139,25 +154,36 @@ export interface PodOptions {
   batch?: number;
 }
 
-export interface Published { added: number; removed: number; facts: number; ms: { engine: number; publish: number } }
+export interface Published { added: number; removed: number; facts: number; ms: { engine: number; publish: number };
+  /** How the engine took the edit: `delta` (the facts retracted and asserted one by one), or `anew` (the pod's world evaluated again). */
+  by: 'delta' | 'anew' }
+
+/** Past this many facts to take out, the pod's world is evaluated anew rather than retracted fact by fact:
+ *  a retraction by delta of the JS model costs about two fifths of the pod's whole evaluation (measured, 19 vscode files). */
+export const DELTA_RETRACTS = 4;
+
+type Net = Map<string, { rel: string; cells: string[]; d: number }>;
 
 export class Pod {
   private readonly o: PodOptions;
   private readonly port: RoflPort;
-  private readonly s: RoflSession;
+  /** The program, loaded and never evaluated: each world of the pod is a fork of it. */
+  private readonly base: RoflSession;
+  private s!: RoflSession;
   private readonly files = new Map<string, Set<string>>();
   private core = new Set<string>();
-  /** Row id → [relation, cells, books holding it]. */
+  /** Row key → its relation, cells and how many books hold it. */
   private readonly rows = new Map<string, { rel: string; cells: string[]; n: number }>();
-  private moved: Change[] = [];
+  /** What the engine said came and went, per session. */
+  private readonly told = new Map<number, Change[]>();
   private readonly escapes: Map<string, Escape>;
 
-  private constructor(o: PodOptions, port: RoflPort, s: RoflSession) {
-    this.o = o; this.port = port; this.s = s;
+  private constructor(o: PodOptions, port: RoflPort, base: RoflSession) {
+    this.o = o; this.port = port; this.base = base;
     this.escapes = new Map(o.escapes.map((e) => [e.rel, e]));
     const send = port.send.bind(port);
     port.send = (req: Record<string, unknown>) => send(req).then((r: Record<string, unknown>) => {
-      if (Array.isArray(r.changes)) this.moved.push(...(r.changes as Change[]));
+      if (Array.isArray(r.changes)) this.told.get(req.session as number)?.push(...(r.changes as Change[]));
       return r;
     });
   }
@@ -165,21 +191,34 @@ export class Pod {
   /** Evaluate the program over the core and the pod's files, and publish every escaping row. */
   static async start(o: PodOptions, core: Iterable<string>, files: Map<string, Iterable<string>>): Promise<{ pod: Pod; published: Published }> {
     const port = await RoflPort.start(o.bin ?? DEFAULT_ROFL_BIN);
-    const pod = new Pod(o, port, await port.fresh());
-    for (const f of programFiles(o.program)) await pod.s.loadFile(f);
+    const base = await port.fresh(WALLS.budget, { space: WALLS.space });
+    for (const f of programFiles(o.program)) await base.loadFile(f);
+    const pod = new Pod(o, port, base);
     pod.core = new Set(core);
-    let text = [...pod.core].join('\n');
-    for (const [f, facts] of files) { pod.files.set(f, new Set(facts)); text += `\n${[...facts].join('\n')}`; }
-    // Watched before the facts come: base rows are told at the load, derived ones at the evaluation.
-    await port.send({ op: 'watch', session: pod.s.id, rels: o.escapes.map((e) => ({ rel: e.rel })) });
+    for (const [f, facts] of files) pod.files.set(f, new Set(facts));
     const t0 = performance.now();
-    await pod.s.load(`${text}\n`);
-    await pod.s.evaluate();
-    return { pod, published: await pod.flush(t0) };
+    pod.s = await pod.world();
+    return { pod, published: await pod.publish(pod.net(pod.s), t0, 'anew') };
   }
 
-  /** One file's facts now (null: the file is gone), and the core as it is now: the engine takes
-   *  the difference by delta, and the pod publishes only the escaping rows that came and went. */
+  /** A world of the program over the core and the pod's files, evaluated; its escaping rows told as they came. */
+  private async world(): Promise<RoflSession> {
+    const w = await this.base.fork();
+    this.told.set(w.id, []);
+    // Watched before the facts come: base rows are told at the load, derived ones at the evaluation.
+    await this.port.send({ op: 'watch', session: w.id, rels: this.o.escapes.map((e) => ({ rel: e.rel })) });
+    let text = [...this.core].join('\n');
+    for (const facts of this.files.values()) text += `\n${[...facts].join('\n')}`;
+    await w.load(`${text}\n`);
+    const ev = await w.evaluate();
+    // A pod that stopped at a wall would publish part of its rows as if whole: it says so instead.
+    if (ev.partial) throw new Error(`the pod's world stopped at a wall (${JSON.stringify(ev).slice(0, 200)}); its rows are not published`);
+    return w;
+  }
+
+  /** One file's facts now (null: the file is gone; file '' with facts null: none), and the core as it is now.
+   *  The engine takes the difference by delta, or evaluates the pod anew when much goes (DELTA_RETRACTS);
+   *  either way the pod publishes only the escaping rows that came and went. */
   async edit(file: string, facts: Iterable<string> | null, core?: Iterable<string>): Promise<Published> {
     const t0 = performance.now();
     const was = this.files.get(file) ?? new Set<string>();
@@ -187,17 +226,31 @@ export class Pod {
     const coreNow = core ? new Set(core) : this.core;
     const out = [...was].filter((l) => !now.has(l)).concat([...this.core].filter((l) => !coreNow.has(l)));
     const add = [...now].filter((l) => !was.has(l)).concat([...coreNow].filter((l) => !this.core.has(l)));
-    for (const l of out) await this.s.retract(l.replace(/\.$/, ''));
-    if (add.length) await this.s.assert(`${add.join('\n')}\n`);
     if (facts === null) this.files.delete(file); else this.files.set(file, now);
     this.core = coreNow;
-    return this.flush(t0);
+    if (out.length <= DELTA_RETRACTS) {
+      for (const l of out) await this.s.retract(l.replace(/\.$/, ''));
+      if (add.length) await this.s.assert(`${add.join('\n')}\n`);
+      return this.publish(this.net(this.s), t0, 'delta');
+    }
+    const w = await this.world();
+    const net = this.net(w);
+    // Anew, the new world told every row it holds: what the pod published and the new world lacks went.
+    for (const [k, r] of this.rows) {
+      const x = net.get(k) ?? { rel: r.rel, cells: r.cells, d: 0 };
+      x.d -= r.n;
+      net.set(k, x);
+    }
+    this.told.delete(this.s.id);
+    await this.s.close();
+    this.s = w;
+    return this.publish(net, t0, 'anew');
   }
 
-  /** The rows the engine said came and went since the last flush, netted, published as one batch (or a few). */
-  private async flush(t0: number): Promise<Published> {
-    const net = new Map<string, { rel: string; cells: string[]; d: number }>();
-    for (const c of this.moved) {
+  /** The rows a world's engine said came and went since last asked, netted, of the escapes and their constants. */
+  private net(w: RoflSession): Net {
+    const net: Net = new Map();
+    for (const c of this.told.get(w.id) ?? []) {
       const e = this.escapes.get(c.rel);
       if (!e) continue;
       for (const [rows, d] of [[c.added, 1], [c.removed, -1]] as const) {
@@ -211,7 +264,12 @@ export class Pod {
         }
       }
     }
-    this.moved = [];
+    this.told.set(w.id, []);
+    return net;
+  }
+
+  /** Publish what moved, as one batch (or a few). */
+  private async publish(net: Net, t0: number, by: Published['by']): Promise<Published> {
     const facts: Fact[] = [];
     let added = 0, removed = 0;
     for (const [k, x] of net) {
@@ -227,7 +285,7 @@ export class Pod {
     const t1 = performance.now();
     const size = this.o.batch ?? 20_000;
     for (let i = 0; i < facts.length; i += size) await this.o.publish(facts.slice(i, i + size));
-    return { added, removed, facts: facts.length, ms: { engine: t1 - t0, publish: performance.now() - t1 } };
+    return { added, removed, facts: facts.length, ms: { engine: t1 - t0, publish: performance.now() - t1 }, by };
   }
 
   /** The escaping rows the pod has published and not retired. */
