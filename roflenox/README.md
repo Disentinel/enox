@@ -404,15 +404,19 @@ the facts as the pod's identity into its node); on each pod a
 `roflenox:grant` to the coordinator; on the coordinator one `roflenox:rule`
 per rule and decode rule and one `roflenox:follow` per pod (target: its
 invitation link), then `./src/cli.ts follow` (or `mirror`). An edit is
-`pod.edit(file, factsNow | null, coreNow)`: the pod takes the difference by
-delta (at most `DELTA_RETRACTS` facts out) or evaluates its files anew, and
-publishes only the rows that came and went.
+`pod.edit(file, factsNow | null, coreNow)`: the pod sends the difference as one
+`edit` request (the facts out and in, by delta; `by: 'delta'`, or `'whole'` where
+the engine refused the delta and evaluated the same world), evaluates its files
+anew only where the engine refuses the edit or loses the watch (`by: 'anew'`),
+and publishes only the rows that came and went.
 
 **The oracle** (`test/pods.test.ts`): the corpus scanned anew and evaluated in
 one engine answers the question; after the load, an edit that moves only its
 own file's rows, an edit on pod 0 that moves what files of pod 1 offer (a
 function renamed behind `export *`) and a deletion, the subscriber's rows equal
-it, row for row. The planted faults `P1` (a pod never retires a row), `P2` (an
+it, row for row; the rename is asserted to go by delta, and a fourth step (a
+fact taken out of the pod's world behind it, so the engine refuses the edit)
+goes anew. The planted faults `P1` (a pod never retires a row), `P2` (an
 escape omitted), `P3` (constants misread), `P4` (anew forgets what went) turn it red.
 
 **`why` on the coordinator** reaches the pod's signed batch: the row's facts,
@@ -429,16 +433,16 @@ the pod's engine (down to the scanner's facts); the two are not stitched.
 | engine memory | 2 208 MB | 551 – 736 MB (+17 MB its node) | 33 – 60 MB |
 | what it holds | 8.4 M facts | 628 – 830 rows published (1 767 – 2 404 facts) | the pods' 2 115 rows (5 989 facts) |
 | one file edited (an export added) | — | 215 ms by delta | frame 551 ms after the edit |
-| one function renamed behind `export *` | — | 6.8 s anew | frame 7.2 s |
+| one function renamed behind `export *` | — | 6.8 s anew; by `edit` 478 ms (323 facts out, 323 in; anew on the same run 5.9 s) | frame 7.2 s; by `edit` 852 ms (anew 6.3 s) |
 
 The answer (903 rows) equals the whole world's. On `observableInternal` (39
 files, 2 pods) with the follow executor at 50 ms: frames 284 ms (an export
 added) and 1.3 s (a rename, the pod anew).
 
-**What does not scale yet:** an edit that takes facts out costs the pod's
-whole evaluation, since the engine retracts one fact per request and each
-costs about two fifths of the pod's evaluation (115 facts of a rename: 39.5 s
-one by one, 1.8 s anew); every pod holds the whole corpus's core; the cut (which
+**What does not scale yet:** (an edit that takes facts out cost the pod's
+whole evaluation while the engine retracted one fact per request, 343 ms a
+fact; since `edit` it costs the facts that moved: on observableInternal, 2
+pods of 19 and 18 files, the rename 842 ms anew against 93 ms by `edit`.) Every pod holds the whole corpus's core; the cut (which
 rules are the coordinator's) is given, not derived, and a model rule that
 crosses files through another relation (here `may_be_node`, behind
 `export { x }` of an imported `x`) must be among the coordinator's rules or the

@@ -63,10 +63,11 @@ try {
     const text = fs.readFileSync(path.join(root, file), 'utf8');
     const e = await f.edit(file, change(text));
     // The frame the edit causes; with --each the whole world is asked again after it, else once at the end.
-    const frame = await f.sub.next(100_000);
-    const ms_ = performance.now() - e.t0;
+    // An edit whose rows net to nothing on the coordinator sends no frame: it is said, not waited for.
+    const frame = await f.sub.next(15_000).catch(() => ({ added: [], removed: [], none: true }) as { added?: { cells: unknown[] }[]; removed?: { cells: unknown[] }[]; none?: boolean });
+    const ms_ = frame.none ? NaN : performance.now() - e.t0;
     if (each) await f.converge((await wholeWorld(root)).rows, e.t0, 100_000);
-    edits.push({ kind, file, pod_engine_ms: ms(e.pod.ms.engine), pod_publish_ms: ms(e.pod.ms.publish), rows_published_added: e.pod.added, rows_published_removed: e.pod.removed,
+    edits.push({ kind, file, by: e.pod.by, facts_moved: e.pod.moved, pod_engine_ms: ms(e.pod.ms.engine), pod_publish_ms: ms(e.pod.ms.publish), rows_published_added: e.pod.added, rows_published_removed: e.pod.removed,
       core_moved_on_other_pods: e.others.length, other_pods_engine_ms: e.others.map((o) => ms(o.ms.engine)), ms_to_frame: ms(ms_),
       frame: { added: frame.added?.length ?? 0, removed: frame.removed?.length ?? 0, about_other_pods_files: [...(frame.added ?? []), ...(frame.removed ?? [])].filter((r) => !f.pods.find((p) => p.files.includes(file))!.files.includes(String(r.cells[2]))).length } });
   };
