@@ -560,5 +560,13 @@ export class World {
   async explain(op: 'why' | 'whynot', q: string): Promise<{ holds: boolean; text: string }> {
     return explainOne(this.port, this.session.id, op, q);
   }
+  /** A throwaway copy of this world, evaluated as it is (rofl serve `fork`):
+   *  what a delta would do to it is tried there. */
+  async fork(): Promise<World> {
+    const w = new World(this.port, await this.session.fork());
+    w.partial = this.partial;
+    w.holes = [...this.holes];
+    return w;
+  }
   close() { return this.session.close(); }
 }

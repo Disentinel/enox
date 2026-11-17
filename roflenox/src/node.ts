@@ -2233,8 +2233,28 @@ export class RoflenoxNode {
     const op = this.identity?.name;
     const mine = v.rules.filter((r) => r.author === op);
     if (!op || mine.length === 0) return;
-    const rules = [...await this.runnableRules(op), ...mine.map((r) => r.text)];
-    const w = await this.buildWorld(op, rules, Math.floor(this.now() / 1000), v.manifest.identity === op ? programOf(v, seq) : '');
+    const rules = [...new Set([...await this.runnableRules(op), ...mine.map((r) => r.text)])];
+    const own = v.manifest.identity === op ? programOf(v, seq) : '';
+    // A kept world of the owner's, current: the trial is a fork of it taking
+    // the batch by delta — the cost of the rules the batch brings, not of the
+    // world. Otherwise a world built for the trial alone.
+    const kept = this.worlds.get(op);
+    let w: World;
+    if (kept && kept.version === this.version && kept.w.meta && !kept.w.partial) {
+      await this.reconcile(op, kept, (await this.runnableRules(op)).filter((t, i, xs) => xs.indexOf(t) === i), Math.floor(this.now() / 1000));
+      const m = kept.w.meta;
+      w = await kept.w.fork();
+      try {
+        const add = rules.filter((t) => !m.on.has(t)).map((t) => (m.texts.has(t) ? '' : guarded(t)) + `${ruleGuard(t)}.\n`).join('');
+        if (own || add) await w.apply(own + add, op, []);
+      } catch (e) {
+        await w.close().catch(() => {});
+        if (this.engine.dead) throw e;
+        w = await this.buildWorld(op, rules, Math.floor(this.now() / 1000), own);
+      }
+    } else {
+      w = await this.buildWorld(op, rules, Math.floor(this.now() / 1000), own);
+    }
     try {
       if (w.partial) {
         throw new Refusal(422, 'rule_budget', `the owner's rules with this batch's do not evaluate within the rule budget of ${this.ruleBudget} steps (${w.holes.join('; ')}); nothing was admitted`,
@@ -2242,6 +2262,7 @@ export class RoflenoxNode {
       }
     } finally { await w.close(); }
   }
+
 
   /** OFFLINE ADMISSION (r_offline_admission): a sealed envelope addressed to
    *  this node's identity. There is no live channel, so no freshness: the
