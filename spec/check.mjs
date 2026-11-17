@@ -13,12 +13,12 @@
 //                (feature+model) lies in [2/3, 3/2], and no kind is empty.
 //                ROFL has no count aggregate yet (rofl roadmap 1.1), so r_balanced is counted
 //                here, in the script, from the textual `is of` facts — not by a ROFL rule.
-//   4. links     plans (`is to be checked by "T"`) matching a test('T') in roflenox/test are
+//   4. links     plans (`is to be checked by "T"`) matching a test('T') in fkts/test are
 //                reported as linked, unlinked plans are reported only; every `"T" guards r` must
 //                have a `"T" lives in "P"`, P must exist and contain a test named exactly T.
 //   5. status    counts of ROFL `? R is ready`, `? R is unchecked`, `? R is underspecified`
 //                (reported, never failed — unless the query itself errors).
-//   6. cases     r_no_orphan_tests: the test files (roflenox/test/**, roflenox/executors/*/test,
+//   6. cases     r_no_orphan_tests: the test files (fkts/test/**, fkts/executors/*/test,
 //                spec/check.test.mjs) are read twice — by a static scanner, and by the runner
 //                itself (spec/test-list: each file imported under a node:test shim that records
 //                every test() the module makes) — and the two lists must agree, file by file;
@@ -28,7 +28,7 @@
 //
 // Env: ROFL_DIR   — required: a checkout of the rofl repo on origin/main (needs `npm run read`
 //                   and `npm run repl`); there is no default
-//      SPEC_ROOT  — repository root that guard paths and roflenox/test resolve against
+//      SPEC_ROOT  — repository root that guard paths and fkts/test resolve against
 //                   (default: the parent of this script's directory)
 
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -144,9 +144,9 @@ export function testFiles(root) {
       else if (e.isFile() && /\.test\.(ts|mjs)$/.test(e.name)) out.push(join(rel, e.name));
     }
   };
-  walk(join('roflenox', 'test'));
-  const ex = join(root, 'roflenox', 'executors');
-  if (existsSync(ex)) for (const d of readdirSync(ex)) walk(join('roflenox', 'executors', d, 'test'));
+  walk(join('fkts', 'test'));
+  const ex = join(root, 'fkts', 'executors');
+  if (existsSync(ex)) for (const d of readdirSync(ex)) walk(join('fkts', 'executors', d, 'test'));
   if (existsSync(join(root, 'spec', 'check.test.mjs'))) out.push(join('spec', 'check.test.mjs'));
   return out.sort();
 }

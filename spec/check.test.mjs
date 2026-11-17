@@ -58,17 +58,17 @@ async function withTree(plant, mutate = (x) => x) {
   const root = mkdtempSync(join(tmpdir(), 'spec-tree-'));
   try {
     const heavy = (p) => /[\\/](node_modules|\.models)$/.test(p);
-    cpSync(join(ROOT, 'roflenox'), join(root, 'roflenox'), { recursive: true, filter: (p) => !heavy(p) });
-    for (const ex of readdirSync(join(ROOT, 'roflenox', 'executors'))) {
+    cpSync(join(ROOT, 'fkts'), join(root, 'fkts'), { recursive: true, filter: (p) => !heavy(p) });
+    for (const ex of readdirSync(join(ROOT, 'fkts', 'executors'))) {
       for (const h of ['node_modules', '.models']) {
-        const from = join(ROOT, 'roflenox', 'executors', ex, h);
-        if (existsSync(from)) symlinkSync(from, join(root, 'roflenox', 'executors', ex, h));
+        const from = join(ROOT, 'fkts', 'executors', ex, h);
+        if (existsSync(from)) symlinkSync(from, join(root, 'fkts', 'executors', ex, h));
       }
     }
     mkdirSync(join(root, 'spec'));
     for (const f of ['check.test.mjs', 'check.mjs']) cpSync(join(HERE, f), join(root, 'spec', f));
     const text = mutate(readFileSync(SPEC, 'utf8'));
-    // Every other file a guard lives in (outside roflenox), as it is.
+    // Every other file a guard lives in (outside fkts), as it is.
     for (const homes of parseSpec(text).lives.values()) {
       for (const { file } of homes) {
         if (!existsSync(join(root, file)) && existsSync(join(ROOT, file))) {
@@ -202,11 +202,11 @@ describe('spec gate', { concurrency: true }, () => {
     const ghost = 'a test nobody ever wrote zq7';
     const { code, out } = await withDefect((s) => afterFirstGuard(s, [
       `- "${ghost}" guards \`r_zero_deps\`.`,
-      `- "${ghost}" lives in "roflenox/test/hermetic.test.ts".`,
+      `- "${ghost}" lives in "fkts/test/hermetic.test.ts".`,
     ]));
     assert.notEqual(code, 0);
     assert.match(checkLine(out, 4), /^FAIL 4 links/);
-    assert.ok(out.includes(`"${ghost}" is not a test in "roflenox/test/hermetic.test.ts"`), out);
+    assert.ok(out.includes(`"${ghost}" is not a test in "fkts/test/hermetic.test.ts"`), out);
     assert.equal(brokenGuards(out), brokenGuards((await baseline()).out) + 1, out);
   });
 
@@ -262,15 +262,15 @@ describe('spec gate', { concurrency: true }, () => {
   });
 
   test('a test that guards no requirement fails the spec gate, and linking it passes', async () => {
-    const orphan = { 'roflenox/test/zz-orphan.test.ts': "import { test } from 'node:test';\ntest('an orphan case zq9', () => {});\n" };
+    const orphan = { 'fkts/test/zz-orphan.test.ts': "import { test } from 'node:test';\ntest('an orphan case zq9', () => {});\n" };
     const bad = await withTree(orphan);
     assert.notEqual(bad.code, 0);
     assert.match(checkLine(bad.out, 6), /^FAIL 6 cases: /, bad.out);
-    assert.ok(bad.out.includes('orphan: "an orphan case zq9" in roflenox/test/zz-orphan.test.ts guards no requirement'), bad.out);
+    assert.ok(bad.out.includes('orphan: "an orphan case zq9" in fkts/test/zz-orphan.test.ts guards no requirement'), bad.out);
     // Linked by a guard that lives in that file: that orphan is gone, and the
     // count is back to the honest tree's.
     const good = await withTree(orphan, (src) => afterFirstGuard(src, [
-      '- "an orphan case zq9" guards `r_zero_deps`.', '- "an orphan case zq9" lives in "roflenox/test/zz-orphan.test.ts".']));
+      '- "an orphan case zq9" guards `r_zero_deps`.', '- "an orphan case zq9" lives in "fkts/test/zz-orphan.test.ts".']));
     assert.ok(!good.out.includes('"an orphan case zq9"'), good.out);
     assert.equal(orphans(good.out), orphans((await baseline()).out), good.out);
     assert.equal(orphans(bad.out), orphans((await baseline()).out) + 1, bad.out);
@@ -279,15 +279,15 @@ describe('spec gate', { concurrency: true }, () => {
   test('a test the scanner cannot read, or one the runner lists and the scanner does not, fails the spec gate', async () => {
     const head = "import { test } from 'node:test';\n";
     // A generated name the scanner cannot read.
-    const tpl = await withTree({ 'roflenox/test/zz-tpl.test.ts': `${head}for (const n of [1, 2]) {\n  test(\`generated case \${n}\`, () => {});\n}\n` });
+    const tpl = await withTree({ 'fkts/test/zz-tpl.test.ts': `${head}for (const n of [1, 2]) {\n  test(\`generated case \${n}\`, () => {});\n}\n` });
     assert.notEqual(tpl.code, 0);
     assert.match(checkLine(tpl.out, 6), /^FAIL 6 cases: .* unreadable 1,/, tpl.out);
-    assert.ok(tpl.out.includes('roflenox/test/zz-tpl.test.ts: test `generated case ${n}` has no static name'), tpl.out);
+    assert.ok(tpl.out.includes('fkts/test/zz-tpl.test.ts: test `generated case ${n}` has no static name'), tpl.out);
     // A name only the runner sees: the case exists, the scanner is blind to it.
-    const hid = await withTree({ 'roflenox/test/zz-hidden.test.ts': `${head}const name = 'a hidden case zq10';\ntest(name, () => {});\n` });
+    const hid = await withTree({ 'fkts/test/zz-hidden.test.ts': `${head}const name = 'a hidden case zq10';\ntest(name, () => {});\n` });
     assert.notEqual(hid.code, 0);
     assert.match(checkLine(hid.out, 6), /^FAIL 6 cases: .* runner-only 1,/, hid.out);
-    assert.ok(hid.out.includes('roflenox/test/zz-hidden.test.ts: the runner lists "a hidden case zq10", the scanner does not'), hid.out);
+    assert.ok(hid.out.includes('fkts/test/zz-hidden.test.ts: the runner lists "a hidden case zq10", the scanner does not'), hid.out);
   });
 
   test('an accepted requirement whose checks guard no existing test fails the spec gate', async () => {
@@ -309,14 +309,14 @@ describe('spec gate', { concurrency: true }, () => {
     const open = [...says.keys()].find((r) => !accepted.has(r));
     assert.ok(done && open, 'the spec has an accepted and an unaccepted requirement to plant on');
     const honest = (await baseline()).out;
-    const planted = (name, id) => withTree({ 'roflenox/test/zz-planned.test.ts': `import { test } from 'node:test';\ntest('${name}', () => {});\n` },
+    const planted = (name, id) => withTree({ 'fkts/test/zz-planned.test.ts': `import { test } from 'node:test';\ntest('${name}', () => {});\n` },
       (s) => afterFirstGuard(s, [`- \`${id}\` is to be checked by "${name}".`]));
     // An ACCEPTED requirement's plan names the test, with no guards line: an
     // orphan, and that requirement now has an unguarded planned check.
     const name = 'a planned but unguarded case zq11';
     const bad = (await planted(name, done)).out;
     assert.match(checkLine(bad, 6), /^FAIL 6 cases: /, bad);
-    assert.ok(bad.includes(`orphan: "${name}" in roflenox/test/zz-planned.test.ts guards no requirement`), 'a plan of an accepted requirement links nothing');
+    assert.ok(bad.includes(`orphan: "${name}" in fkts/test/zz-planned.test.ts guards no requirement`), 'a plan of an accepted requirement links nothing');
     assert.ok(bad.includes(`accepted ${done}: planned check "${name}" is not guarded by an existing test`), bad);
     assert.equal(orphans(bad), orphans(honest) + 1);
     assert.equal(unguardedCount(bad), unguardedCount(honest) + 1);

@@ -1,0 +1,4 @@
+{"confidence":1,"perspective":"rules","relation":"roflenox:rule","source":"seen","target":"seen(X) :- edge(F, X, \"uses\", Y)."}
+{"confidence":1,"perspective":"policy","relation":"roflenox:grant","source":"helper.example.org","target":"2026-10-26T12:00:01.000Z"}
+{"confidence":1,"perspective":"policy","relation":"roflenox:export","source":"roflenox:result","target":"public"}
+{"confidence":1,"perspective":"search","relation":"roflenox:search","source":"q1","target":"what uses Beta"}

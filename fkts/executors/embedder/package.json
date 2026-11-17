@@ -1,0 +1,21 @@
+{
+  "name": "fkts-embedder",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The embedder executor for FKTS: answers search-by-meaning intents in its own book. A separate package: it may take dependencies (a model) that the core never does.",
+  "type": "module",
+  "bin": {
+    "fkts-embedder": "embedder.ts"
+  },
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "start": "node --experimental-strip-types --no-warnings embedder.ts",
+    "fetch-model": "node --experimental-strip-types --no-warnings -e \"const { learned } = await import('./embed.ts'); await learned(process.env.FKTS_EMBED_MODEL); console.log('model ready')\"",
+    "test": "node --experimental-strip-types --no-warnings --test --test-timeout=110000 --test-force-exit test/*.test.ts"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "3.7.0"
+  }
+}
