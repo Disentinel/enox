@@ -34,8 +34,11 @@ export interface Frame {
   rows?: AskRow[];
   added?: AskRow[];
   removed?: AskRow[];
-  /** How the engine took the change: delta, whole, diff — or reask, for a relation the node answers. */
+  /** How the engine took the change: delta, whole, diff — or reask, for a
+   *  relation the node answers. A full frame of a world built anew says
+   *  `whole`, and `why` names what made the node build it. */
   by?: string;
+  why?: string;
   unknown?: AskAnswer['unknown'];
   error?: string;
   message?: string;
@@ -54,6 +57,10 @@ export interface Host {
   ask(query: string, requester: string | null): Promise<AskAnswer>;
   /** The session of `author`'s rule world, kept current (built, or advanced by delta), or null if it has none. */
   world(author: string): Promise<number | null>;
+  /** The rows of `rel[book](args)` in `author`'s rule world, each its cells as `ask` gives them; null if the world lacks the relation. */
+  worldRows(author: string, rel: string, book: string, args: string[]): Promise<(string | number)[][] | null>;
+  /** Why `author`'s rule world was last built whole, if it was. */
+  rebuilt(author: string): string | null;
   head(): string;
   /** The node's clock, Unix seconds. */
   now(): number;
@@ -73,6 +80,8 @@ interface Sub {
   added: Map<string, AskRow>; removed: Map<string, AskRow>;
   /** The rule worlds it is watched in, by author. */
   authors: Set<string>;
+  /** Why it owes a full frame of a world built anew. */
+  why: string | null;
 }
 
 export class Hub {
@@ -118,7 +127,7 @@ export class Hub {
     const sub: Sub = {
       id: this.next++, query, rel, book: book !== null && !isVar(book) ? book : null, args: splitArgs(args), requester, sink,
       scope: await this.host.scope(requester), until: await this.host.expiry(requester),
-      reask: NODE_ANSWERED.has(rel) ? new Set() : null, owes: 'start', added: new Map(), removed: new Map(), authors: new Set(),
+      reask: NODE_ANSWERED.has(rel) ? new Set() : null, owes: 'start', added: new Map(), removed: new Map(), authors: new Set(), why: null,
     };
     this.subs.set(sub.id, sub);
     try {
@@ -140,7 +149,12 @@ export class Hub {
 
   /** After an admission (`cause` its digest) or a tick of the clock: carry
    *  every subscription to the state the node is in now. `access`: the batch
-   *  could change who reads what, or which rules run. */
+   *  could change who reads what, or which rules run. A subscriber whose
+   *  access did not change is sent what moved, by delta, even then: a rule
+   *  added, retired or no longer trusted, a grant given, revoked or expired
+   *  reach it as the rows the rule world gained and lost. Only a reader whose
+   *  own scope changed, or one watching a world the node had to build anew,
+   *  is sent its answer whole. */
   async settle(cause: string | null, access: boolean): Promise<void> {
     if (this.subs.size === 0) return;
     const now = this.host.now();
@@ -153,25 +167,49 @@ export class Hub {
         await this.remove(sub.id);
         continue;
       }
-      if (access || sig(scope) !== sig(sub.scope)) {
+      if (sig(scope) !== sig(sub.scope)) {
         await this.detach(sub);
         sub.scope = scope;
         await this.attach(sub);
         sub.owes = 'access';
       }
     }
-    // Every rule world a subscription is watched in, carried forward; one
-    // that was built anew has lost its watch, and its subscribers re-read.
+    // Every rule world a subscription is watched in, carried forward. One
+    // whose author has no rules left was emptied by delta before it closed:
+    // its rows are already pending as removed. One built anew has lost its
+    // watch, and its subscribers re-read, told why.
+    const gone: [string, number][] = [];
     for (const [author, w] of [...this.worlds]) {
       const s = await this.host.world(author);
       if (s === w.session) continue;
-      this.worlds.delete(author);
       const subs = new Set([...w.rels.values()].flatMap((x) => [...x]));
-      for (const sub of subs) { sub.authors.delete(author); sub.owes ??= 'rebuilt'; }
+      if (s === null) { gone.push([author, w.session]); for (const sub of subs) sub.authors.delete(author); continue; }
+      this.worlds.delete(author);
+      for (const sub of subs) { sub.authors.delete(author); if (sub.owes === null) { sub.owes = 'rebuilt'; sub.why = this.host.rebuilt(author); } }
       for (const sub of subs) await this.attach(sub);
+    }
+    // An author's first rules: a world where there was none. Its rows are
+    // what the subscriber lacks; they are sent as added.
+    if (access) {
+      for (const sub of this.subs.values()) {
+        if (sub.reask || FACT_KEYED.has(sub.rel)) continue;
+        const before = new Set(sub.authors);
+        await this.attach(sub);
+        if (sub.owes !== null) continue;
+        for (const [b, sc] of sub.scope) {
+          if (sc.only !== null || before.has(sc.identity) || !sub.authors.has(sc.identity) || (sub.book !== null && sub.book !== b)) continue;
+          const rows = await this.host.worldRows(sc.identity, sub.rel, b, sub.args);
+          for (const cells of rows ?? []) {
+            const row: AskRow = { identity: sc.identity, cells };
+            sub.added.set(rowKey(row), row);
+          }
+          if (rows?.length) this.by.add('whole');
+        }
+      }
     }
     if (this.main.size) await this.host.settle();
     await this.flush(cause);
+    for (const [author, session] of gone) if (this.worlds.get(author)?.session === session) this.worlds.delete(author);
   }
 
   /** The engine was replaced (it died and was rebuilt from the log): every
@@ -272,8 +310,11 @@ export class Hub {
       if (sub.reask) { await this.reask(sub, cause, head); continue; }
       if (sub.owes !== null) {
         const a = await this.host.ask(sub.query, sub.requester);
-        sub.sink({ kind: 'full', head, cause: sub.owes === 'start' ? 'start' : cause ?? sub.owes, vars: a.vars, rows: a.rows, ...(a.unknown ? { unknown: a.unknown } : {}) });
+        const whole = sub.owes === 'rebuilt' || sub.owes === 'lost';
+        sub.sink({ kind: 'full', head, cause: sub.owes === 'start' ? 'start' : cause ?? sub.owes, vars: a.vars, rows: a.rows, ...(a.unknown ? { unknown: a.unknown } : {}),
+          ...(whole ? { by: 'whole', why: sub.owes === 'lost' ? 'the engine was replaced, or its watch lost' : sub.why ?? 'the rule world was built anew' } : {}) });
         sub.owes = null;
+        sub.why = null;
       } else if (sub.added.size || sub.removed.size) {
         sub.sink({ kind: 'delta', head, cause, added: sortRows([...sub.added.values()]), removed: sortRows([...sub.removed.values()]), by });
       }

@@ -1,5 +1,6 @@
 // The engine: `rofl serve` through the RoflPort of @grafema/rofl. Everything here is
 // DERIVED — rebuilt from the log by replay, and only that way.
+import * as crypto from 'node:crypto';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -504,6 +505,18 @@ export function mayReadRules(book: string, owner: string): string {
     + `may_read_book[${SYSTEM_BOOK}](R, ${book}) :- may_read[${SYSTEM_BOOK}](R, ${b}).\n`;
 }
 
+/** A user rule as a rule world loads it: behind a guard fact of its own,
+ *  rule_on[sys]("g_<hash of its text>"), so that switching the rule off (it
+ *  was retired, its author lost trust, its session's delegation ended) is the
+ *  guard taken out by delta, and switching it on again the guard put back —
+ *  the engine takes facts out by delta, never rules. */
+export const ruleGuard = (text: string) => `rule_on[${SYSTEM_BOOK}](${roflString(`g_${sha256(text).slice(0, 16)}`)})`;
+export function guarded(text: string): string {
+  const t = text.trimEnd();
+  return `${t.slice(0, -1)}, ${ruleGuard(text)}.\n`;
+}
+const sha256 = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
+
 /** A separate world with its own step budget: an author's rules run here and
  *  nowhere else, so a rule that does not terminate costs only its author's
  *  answers (r_rule_budget). */
@@ -515,15 +528,20 @@ export class World {
   constructor(port: RoflPort, session: RoflSession) { this.port = port; this.session = session; }
   /** What the node knows of what was loaded here (node.buildWorld): the
    *  books whose facts it holds, the books its rules want, the identities
-   *  whose results it reads. A world that knows it can take a batch by delta. */
-  meta: { loaded: Set<string>; wanted: Set<string>; results: Set<string> } | null = null;
-  /** Load facts and take rows out, by delta; evaluated again only where the
-   *  engine could not take them so (an admission into a kept world). */
-  async apply(rofl: string, who: string, retract: string[]): Promise<void> {
-    let full = false;
-    for (const q of retract) full = (await this.port.send({ op: 'retract', session: this.session.id, query: q })).full !== null || full;
-    if (rofl) full = (await this.port.send({ op: 'load', session: this.session.id, rofl, who })).full !== null || full;
-    if (full) await this.evaluate();
+   *  whose results it reads, the books whose may_read rules it holds, every
+   *  rule text ever loaded and the rules switched on now (each behind its
+   *  guard fact, `guarded`). A world that knows it can take a batch, a rule
+   *  or a grant by delta. */
+  meta: { loaded: Set<string>; wanted: Set<string>; results: Set<string>; mayRead: Set<string>; texts: Set<string>; on: Set<string>; ranging: boolean } | null = null;
+  /** Load facts and rules and take base rows out, by delta; evaluated again
+   *  only where the engine could not take them so. Returns why it was
+   *  evaluated again, or null if every part went by delta. */
+  async apply(rofl: string, who: string, retract: string[]): Promise<string | null> {
+    let full: string | null = null;
+    if (retract.length) full = (await this.port.send({ op: 'edit', session: this.session.id, out: retract })).full ?? null;
+    if (rofl) full = (await this.port.send({ op: 'load', session: this.session.id, rofl, who })).full ?? full;
+    if (full !== null) await this.evaluate();
+    return full;
   }
   async evaluate(): Promise<void> {
     const e = await this.session.evaluate();
@@ -531,12 +549,13 @@ export class World {
     this.holes = this.partial ? (await this.session.ask('hole(W, Why)')).rows.map((r) => `${decodeCell(r[1]!)} at ${r[0]}`) : [];
   }
   async ask(q: string) { return engineCall(() => this.session.ask(q)); }
+  /** The world's clock moved: the old clock fact out and the new in, one
+   *  edit by delta — a grant's expiry costs the rows it hid, not the world. */
   async setClock(sec: number): Promise<void> {
     const a = await this.session.ask(`clock[${SYSTEM_BOOK}](T)`);
     if (a.rows.length === 1 && Number(a.rows[0]![0]) === sec) return;
-    for (const r of a.rows) await this.port.send({ op: 'retract', session: this.session.id, query: `clock[${SYSTEM_BOOK}](${r[0]})` });
-    await this.session.assert(`clock[${SYSTEM_BOOK}](${sec}).`);
-    await this.evaluate();
+    const r = await this.port.send({ op: 'edit', session: this.session.id, out: a.rows.map((x) => `clock[${SYSTEM_BOOK}](${x[0]})`), rofl: `clock[${SYSTEM_BOOK}](${sec}).\n` });
+    if (r.full !== null && r.full !== undefined) await this.evaluate();
   }
   async explain(op: 'why' | 'whynot', q: string): Promise<{ holds: boolean; text: string }> {
     return explainOne(this.port, this.session.id, op, q);

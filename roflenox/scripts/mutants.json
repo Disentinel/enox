@@ -5298,12 +5298,84 @@
    "file": "src/node.ts",
    "edits": [
     [
-     "if (drops || !m || c.w.partial",
-     "if (true || drops || !m || c.w.partial"
+     "      if (why) {\n        await c.w.close()",
+     "      if (true) {\n        await c.w.close()"
     ]
    ],
    "red": [
-    "a subscriber to red(P, X) is sent the whole answer, then +2 on the update and −1 on an acceptance; the journal says why"
+    "a subscriber to red(P, X) is sent the whole answer, then +2 on the update and −1 on an acceptance; the journal says why",
+    "a rule added, retired and switched on again, and a grant it reads by revoked, given and expired, reach a subscriber as deltas"
+   ]
+  },
+  {
+   "id": "MB1",
+   "title": "rule worlds: a rule new to a kept world gets its guard but its text is never loaded",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "(m.texts.has(t) ? '' : guarded(t))",
+     "(m.texts.has(t) ? '' : '')"
+    ]
+   ],
+   "red": [
+    "a rule added, retired and switched on again, and a grant it reads by revoked, given and expired, reach a subscriber as deltas"
+   ]
+  },
+  {
+   "id": "MB2",
+   "title": "rule worlds: a rule switched off keeps its guard (retired rules go on deriving)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (off.length) await c.w.apply",
+     "if (false && off.length) await c.w.apply"
+    ]
+   ],
+   "red": [
+    "a rule added, retired and switched on again, and a grant it reads by revoked, given and expired, reach a subscriber as deltas"
+   ]
+  },
+  {
+   "id": "MB3",
+   "title": "rule worlds: a batch's control rows (grant revoked) are not carried into a kept world",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "          retract.push(...plan.retract);",
+     "          void plan.retract;"
+    ]
+   ],
+   "red": [
+    "a rule added, retired and switched on again, and a grant it reads by revoked, given and expired, reach a subscriber as deltas"
+   ]
+  },
+  {
+   "id": "MB4",
+   "title": "rule worlds: the clock is not moved in a kept world (an expired grant still lets rows in)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (clock !== c.clock) { await c.w.setClock(clock); c.clock = clock; }",
+     "if (false) { await c.w.setClock(clock); c.clock = clock; }"
+    ]
+   ],
+   "red": [
+    "a rule added, retired and switched on again, and a grant it reads by revoked, given and expired, reach a subscriber as deltas"
+   ]
+  },
+  {
+   "id": "MB5",
+   "title": "subscriptions: every reader is sent the answer whole after a batch that moves access, as before",
+   "file": "src/subscribe.ts",
+   "edits": [
+    [
+     "      if (sig(scope) !== sig(sub.scope)) {",
+     "      if (access || sig(scope) !== sig(sub.scope)) {"
+    ]
+   ],
+   "red": [
+    "a rule added, retired and switched on again, and a grant it reads by revoked, given and expired, reach a subscriber as deltas",
+    "an author's first rules: a world where there was none, its rows sent as added, saying the world was built whole"
    ]
   },
   {

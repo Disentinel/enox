@@ -30,7 +30,7 @@ import {
 } from './identity.ts';
 import { Log, writeFileAtomic, type Fault, type Receipt } from './log.ts';
 import {
-  answeredRule, bookRules, Collect, DEFAULT_ROFL_BIN, Engine, FOREVER, mayReadRules, parseLiteral, parseQuery, resultRule, sortRows, splitArgs, SYSTEM_BOOK,
+  answeredRule, bookRules, Collect, DEFAULT_ROFL_BIN, Engine, FOREVER, guarded, mayReadRules, ruleGuard, parseLiteral, parseQuery, resultRule, sortRows, splitArgs, SYSTEM_BOOK,
   type AskAnswer, type AskOptions, type AskRow, type BookScope, type Explanation, type QueryLiteral, type Unknown, type World,
 } from './engine.ts';
 import { DomainVouch, type DomainTransport } from './domain.ts';
@@ -311,7 +311,11 @@ export class RoflenoxNode {
   private readonly userRules = new Map<string, Map<string, string>>();  // author → rule fact id → compiled rule
   /** Who signed a rule that runs as another's (a session's rule, run as the owner's). */
   private readonly ruleBy = new Map<string, string>();
-  private readonly worlds = new Map<string, { w: World; version: number; clock: number; rules: string }>();
+  /** A kept rule world: its rules (the key they were last reconciled at), and
+   *  `stale`: a batch since could have moved which books it reads. */
+  private readonly worlds = new Map<string, { w: World; version: number; clock: number; rules: string; stale: boolean }>();
+  /** Why an author's rule world was last built whole (said in its subscribers' full frames). */
+  private readonly rebuiltWhy = new Map<string, string>();
   /** The current assertion of every fact, per identity (src/assertions.ts). */
   private readonly assertions = new Assertions();
   private version = 0;
@@ -374,6 +378,15 @@ export class RoflenoxNode {
       },
       ask: (q, r) => this.askNow(q, r, null, {}),
       world: async (a) => (await this.ruleWorld(a))?.session.id ?? null,
+      worldRows: async (a, rel, b, args) => {
+        const w = await this.ruleWorld(a);
+        if (!w) return null;
+        try { return (await w.ask(`${rel}[${b}](${args.join(', ')})`)).rows.map((r) => r.map(decodeCell)); } catch (e) {
+          if (this.engine.dead) throw e;
+          return null;
+        }
+      },
+      rebuilt: (a) => this.rebuiltReason(a),
       head: () => this.log.head(),
       now: () => Math.floor(this.now() / 1000),
     });
@@ -1047,7 +1060,7 @@ export class RoflenoxNode {
     }
     await staged.commit();
     this.record(v, this.log.receipts.length - 1, mode !== 'post', seq, plan);
-    await this.afterAdmission(v, seq, plan.before, fresh);
+    await this.afterAdmission(v, seq, plan, fresh);
     return receipt;
   }
 
@@ -1056,45 +1069,52 @@ export class RoflenoxNode {
    *  that came and went; the journals. Nothing here can un-admit the batch:
    *  a failure is said on stderr, and an engine that died is rebuilt by the
    *  next operation, its subscribers sent their answers whole. */
-  private async afterAdmission(v: Verified, seq: number, before: Map<string, Current | null>, fresh: boolean): Promise<void> {
+  private async afterAdmission(v: Verified, seq: number, plan: { before: Map<string, Current | null>; load: string; retract: string[] }, fresh: boolean): Promise<void> {
     try {
-      await this.advanceWorlds(v, seq, before, fresh);
+      await this.advanceWorlds(v, seq, plan);
       const access = fresh || v.rules.length > 0 || v.facts.some((f) => MOVES_ACCESS.has(f.relation));
       await this.hub.settle(v.manifest.digest, access);
       if (v.manifest.identity === this.identity?.name && v.facts.some((f) => f.relation === JOURNAL)) await this.configureJournals();
       this.drainJournals();
-      this.armExpiry();
+      await this.armExpiry();
     } catch (e) {
       if (!this.engine.dead) process.stderr.write(`roflenox: subscriptions after ${v.manifest.digest}: ${(e as Error).message}\n`);
     }
   }
 
   /** THE RULE WORLDS BY DELTA (r_subscribe): a kept rule world takes an
-   *  admitted batch as a delta — its facts, its current assertions — instead
-   *  of being built again from every fact it reads. A batch that could change
-   *  which rules run or which books a world reads (a rule, a trust, a grant,
-   *  an export, a delegation, a follow, a book a rule names arriving for the
-   *  first time) still drops the world: the next read builds it whole. */
-  private async advanceWorlds(v: Verified, seq: number, before: Map<string, Current | null>, fresh: boolean): Promise<void> {
+   *  admitted batch as a delta — its facts, its current assertions, the
+   *  control rows (grant, delegation, export, trust, follow) it switches on
+   *  and off — instead of being built again from every fact it reads. What the
+   *  batch could change beyond its book's rows (which rules run, which books
+   *  a world reads) is reconciled by delta too, when the world is next read
+   *  (ruleWorld): a batch that moves it only marks the world stale. A world is
+   *  built whole only when it fell behind, ran out of its budget, or the
+   *  engine refused what it was sent. */
+  private async advanceWorlds(v: Verified, seq: number, plan: { before: Map<string, Current | null>; load: string; retract: string[] }): Promise<void> {
     if (this.worlds.size === 0) return;
     const id = v.manifest.identity;
     const book = bookOf(id);
-    const drops = v.rules.length > 0 || v.facts.some((f) => MOVES_ACCESS.has(f.relation));
+    const moves = v.rules.length > 0 || v.facts.some((f) => MOVES_ACCESS.has(f.relation)) || !this.chains.has(id) || this.chains.get(id)!.length === 1;
     const res = v.facts.filter((f) => f.relation === RESULT);
     const cur = this.assertions.of(id);
     for (const [author, c] of [...this.worlds]) {
       const m = c.w.meta;
-      if (drops || !m || c.w.partial || c.version !== this.version - 1 || (m.wanted.has(book) && !m.loaded.has(book))) {
+      const why = !m ? 'it was built before it knew its parts' : c.w.partial ? `it ran out of its budget (${c.w.holes.join('; ')})` : c.version !== this.version - 1 ? 'it fell behind the log' : null;
+      if (why) {
         await c.w.close().catch(() => {});
         this.worlds.delete(author);
+        this.rebuiltWhy.set(author, why);
         continue;
       }
+      if (moves) c.stale = true;
       try {
         let text = '';
         const retract: string[] = [];
-        if (m.loaded.has(book)) {
-          text = programOf(v, seq);
-          for (const [F, old] of before) {
+        if (m!.loaded.has(book)) {
+          text = programOf(v, seq) + plan.load;
+          retract.push(...plan.retract);
+          for (const [F, old] of plan.before) {
             const now = cur.get(F);
             const was = old ? assertedRow(book, F, old) : null;
             const is = now ? assertedRow(book, F, now) : null;
@@ -1106,18 +1126,18 @@ export class RoflenoxNode {
           text = toRofl(res, book, seq);
         }
         if (text || retract.length) await c.w.apply(text, id, retract);
-        if (res.length && !m.results.has(id)) {
+        if (res.length && !m!.results.has(id)) {
           await c.w.apply(resultRule(book, id), 'roflenox', []);
-          m.results.add(id);
+          m!.results.add(id);
         }
         c.version = this.version;
       } catch (e) {
         if (this.engine.dead) throw e;
         await c.w.close().catch(() => {});
         this.worlds.delete(author);
+        this.rebuiltWhy.set(author, `the engine refused the batch's delta (${(e as Error).message.split('\n')[0]!.slice(0, 200)})`);
       }
     }
-    void fresh;
   }
 
   // ---- subscriptions --------------------------------------------------------
@@ -1131,7 +1151,7 @@ export class RoflenoxNode {
       if (lits.length !== 1 || lits[0]!.neg) throw new Refusal(400, 'bad_query', 'a subscription is to one positive literal, rel(Args) or rel[book](Args)');
       await this.requireBook(query, requester, await this.scopeFor(requester), false);
       const n = await this.hub.add(query, requester, sink);
-      this.armExpiry();
+      await this.armExpiry();
       return n;
     });
     return () => this.serial(() => this.hub.remove(id));
@@ -1144,17 +1164,31 @@ export class RoflenoxNode {
     return this.serial(async () => {
       await this.hub.settle('clock', false);
       this.drainJournals();
-      this.armExpiry();
+      await this.armExpiry();
     });
   }
 
-  private armExpiry(): void {
+  /** The node's timer, set to the next time a subscription's rows can move
+   *  by the clock alone: a subscriber's own grant running out, or a grant a
+   *  kept rule world reads by (its author's), so the rows it let in leave by
+   *  delta when it expires, not at the next batch. */
+  private async armExpiry(): Promise<void> {
     if (this.expiryTimer) { clearTimeout(this.expiryTimer); this.expiryTimer = null; }
-    const t = this.hub.nextExpiry();
+    const now = Math.floor(this.now() / 1000);
+    let t = this.hub.nextExpiry();
+    if (this.hub.size) {
+      for (const author of this.worlds.keys()) {
+        for (const r of await this.engine.sysRows(`readable_until[${SYSTEM_BOOK}](${roflString(author)}, B, U)`)) {
+          const u = Number(r[1]);
+          if (u > now && u < FOREVER && (t === null || u < t)) t = u;
+        }
+      }
+    }
     if (t === null) return;
     this.expiryTimer = setTimeout(() => { this.expiryTimer = null; this.tick().catch(() => {}); }, Math.min(Math.max(0, t * 1000 - this.now()) + 1000, 2 ** 31 - 1));
     this.expiryTimer.unref();
   }
+
 
   /** A view (r_subscribe): the literal `owner` names `name` by — the latest
    *  live {source: name, relation: "roflenox:view", target: literal} in its
@@ -2052,54 +2086,126 @@ export class RoflenoxNode {
     return out;
   }
 
-  /** The author's rule world, rebuilt when anything was admitted since, and
-   *  re-evaluated when the clock (grant expiry) moved. */
+  /** The author's rule world, kept current: built once, then carried by
+   *  delta (advanceWorlds) and reconciled here with the rules that run now and
+   *  the books they read, and with the clock (grant expiry). Built whole again
+   *  only when there is none to carry. */
   private async ruleWorld(author: string): Promise<World | null> {
-    const rules = await this.runnableRules(author);
+    const rules = [...new Set(await this.runnableRules(author))];
+    const cached = this.worlds.get(author);
     if (!rules.length) {
-      const stale = this.worlds.get(author);
-      if (stale) { await stale.w.close(); this.worlds.delete(author); }
+      if (cached) {
+        // Its rules' rows go by delta first (a subscriber is sent them as removed), then the world.
+        await this.reconcile(author, cached, rules, cached.clock).catch(() => {});
+        await cached.w.close().catch(() => {});
+        this.worlds.delete(author);
+      }
       return null;
     }
     const clock = Math.floor(this.now() / 1000);
-    const cached = this.worlds.get(author);
     const key = rules.join('\n');
-    if (cached && cached.version === this.version && cached.rules === key) {
-      if (cached.clock !== clock) { await cached.w.setClock(clock); cached.clock = clock; }
-      return cached.w;
+    if (cached && cached.version === this.version) {
+      try {
+        await this.reconcile(author, cached, rules, clock);
+        return cached.w;
+      } catch (e) {
+        if (this.engine.dead) throw e;
+        await cached.w.close().catch(() => {});
+        this.worlds.delete(author);
+        this.rebuiltWhy.set(author, `the engine refused a rule or a book by delta (${(e as Error).message.split('\n')[0]!.slice(0, 200)})`);
+      }
+    } else if (cached) {
+      await cached.w.close().catch(() => {});
+      this.worlds.delete(author);
+      this.rebuiltWhy.set(author, 'it fell behind the log');
     }
-    if (cached) { await cached.w.close(); this.worlds.delete(author); }
     const w = await this.buildWorld(author, rules, clock);
-    this.worlds.set(author, { w, version: this.version, clock, rules: key });
+    this.worlds.set(author, { w, version: this.version, clock, rules: key, stale: false });
     return w;
+  }
+
+  /** Why `author`'s rule world was last built whole, if it was (src/subscribe.ts says it in a full frame). */
+  rebuiltReason(author: string): string | null { return this.rebuiltWhy.get(author) ?? null; }
+
+  /** The books a rule world for `author`'s `rules` reads at `clock`: its own,
+   *  every book a rule names, and — when a rule ranges over books — every
+   *  book the author holds a live grant for. */
+  private async booksFor(author: string, rules: string[], clock: number): Promise<{ own: string; foreign: string[]; ranging: boolean }> {
+    const own = bookOf(author);
+    const named = [...new Set([...rules.join('\n').matchAll(/\[(b_[0-9a-f]{16})\]/g)].map((m) => m[1]!))];
+    const ranging = rules.some((r) => /may_read_book\[/.test(r));
+    const granted = ranging
+      ? (await this.engine.sysRows(`readable_until[${SYSTEM_BOOK}](${roflString(author)}, B, U)`)).filter((r) => clock < Number(r[1])).map((r) => String(r[0]))
+      : [];
+    return { own, foreign: [...new Set([...named, ...granted])].filter((b) => b !== own), ranging };
+  }
+
+  /** A book's facts and current assertions, as a rule world loads them. */
+  private bookText(id: string, b: string): string {
+    return (this.programs.get(id) ?? []).map((p) => zlib.inflateRawSync(p).toString('utf8')).join('') + this.assertions.lines(id, b, true);
+  }
+
+  /** Bring a kept world to `rules` and the books they read, by delta: a rule
+   *  new to the world is loaded (the engine adds rules by delta), one switched
+   *  off has its guard taken out, one switched on again its guard put back; a
+   *  book it now reads is loaded; the clock moved by one edit. A book it no
+   *  longer reads stays: every premise over another's book is behind
+   *  may_read, which its grant rows (kept by delta) decide. */
+  private async reconcile(author: string, c: { w: World; clock: number; rules: string; stale: boolean }, rules: string[], clock: number): Promise<void> {
+    const m = c.w.meta!;
+    const key = rules.join('\n');
+    if (key !== c.rules) {
+      const want = new Set(rules);
+      const off = [...m.on].filter((t) => !want.has(t));
+      const on = rules.filter((t) => !m.on.has(t));
+      if (off.length) await c.w.apply('', author, off.map(ruleGuard));
+      const text = on.map((t) => (m.texts.has(t) ? '' : guarded(t)) + `${ruleGuard(t)}.\n`).join('');
+      if (text) await c.w.apply(text, author, []);
+      for (const t of off) m.on.delete(t);
+      for (const t of on) { m.on.add(t); m.texts.add(t); }
+      c.rules = key;
+      c.stale = true;
+    }
+    if (c.stale || (m.ranging && clock !== c.clock)) {
+      const { own, foreign, ranging } = await this.booksFor(author, rules, clock);
+      const owners = new Map([...this.chains.keys()].map((id) => [bookOf(id), id]));
+      for (const b of [own, ...foreign]) {
+        m.wanted.add(b);
+        const id = owners.get(b);
+        if (!id) continue;
+        if (!m.loaded.has(b)) {
+          const text = this.bookText(id, b);
+          if (text) await c.w.apply(text, id, []);
+          m.loaded.add(b);
+        }
+        if ((b !== own || ranging) && !m.mayRead.has(b)) {
+          await c.w.apply(mayReadRules(b, id), 'roflenox', []);
+          m.mayRead.add(b);
+        }
+      }
+      m.ranging = ranging;
+      c.stale = false;
+    }
+    if (clock !== c.clock) { await c.w.setClock(clock); c.clock = clock; }
   }
 
   /** A rule world for `author`'s `rules`, evaluated once at `clock`. `extra`:
    *  a batch not yet admitted, loaded into the author's book (the admission
    *  trial, r_owner_rules). */
   private async buildWorld(author: string, rules: string[], clock: number, extra = ''): Promise<World> {
-    const own = bookOf(author);
+    const { own, foreign, ranging } = await this.booksFor(author, rules, clock);
     const owners = new Map([...this.chains.keys()].map((id) => [bookOf(id), id]));
-    const named = [...new Set([...rules.join('\n').matchAll(/\[(b_[0-9a-f]{16})\]/g)].map((m) => m[1]!))];
-    // A rule with a book VARIABLE reads every book its author may read: load
-    // each one with a live grant (the rule's may_read_book premise still
-    // decides, at the world's clock).
-    const ranging = rules.some((r) => /may_read_book\[/.test(r));
-    const granted = ranging
-      ? (await this.engine.sysRows(`readable_until[${SYSTEM_BOOK}](${roflString(author)}, B, U)`)).filter((r) => clock < Number(r[1])).map((r) => String(r[0]))
-      : [];
-    const foreign = [...new Set([...named, ...granted])].filter((b) => b !== own);
     const w = await this.engine.world(this.ruleBudget);
-    w.meta = { loaded: new Set(), wanted: new Set([own, ...foreign]), results: new Set(this.results.keys()) };
+    w.meta = { loaded: new Set(), wanted: new Set([own, ...foreign]), results: new Set(this.results.keys()), mayRead: new Set(), texts: new Set(rules), on: new Set(rules), ranging };
     await w.session.load(`clock[${SYSTEM_BOOK}](${clock}).\n`, 'roflenox');
     if (!owners.has(own) && extra) owners.set(own, author);
     for (const b of [own, ...foreign]) {
       const id = owners.get(b);
       if (!id) continue;
-      const text = (this.programs.get(id) ?? []).map((p) => zlib.inflateRawSync(p).toString('utf8')).join('') + this.assertions.lines(id, b, true) + (b === own ? extra : '');
+      const text = this.bookText(id, b) + (b === own ? extra : '');
       if (text) await w.session.load(text, id);
       w.meta.loaded.add(b);
-      if (b !== own || ranging) await w.session.load(mayReadRules(b, id), 'roflenox');
+      if (b !== own || ranging) { await w.session.load(mayReadRules(b, id), 'roflenox'); w.meta.mayRead.add(b); }
     }
     for (const [id, lines] of this.results) {
       if (id !== author && !foreign.includes(bookOf(id))) await w.session.load(lines.join(''), id);
@@ -2107,7 +2213,7 @@ export class RoflenoxNode {
     }
     await w.session.load(answeredRule(own), 'roflenox');
     try {
-      await w.session.load(rules.map((r) => `${r}\n`).join(''), author);
+      await w.session.load(rules.map((r) => guarded(r) + `${ruleGuard(r)}.\n`).join(''), author);
       this.fault('engine:world');
       await w.evaluate();
     } catch (e) {
