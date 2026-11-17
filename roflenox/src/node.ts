@@ -22,7 +22,7 @@ import * as v8 from 'node:v8';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import * as zlib from 'node:zlib';
 import { canonicalize } from './jcs.ts';
-import { batchDigest, decodeCell, DELEGATE, EMBEDDER, EXPORT, factId, GRANT, isSalt, newSalt, parseJsonl, Refusal, roflString, SEARCH, sha256hex, toJsonl, toRofl, type Fact } from './facts.ts';
+import { APPEARED, batchDigest, decodeCell, DELEGATE, EMBEDDER, EXPORT, JOURNAL, VANISHED, VIEW, factId, GRANT, isSalt, newSalt, parseJsonl, Refusal, roflString, SEARCH, sha256hex, toJsonl, toRofl, type Fact } from './facts.ts';
 import {
   bookOf, canonicalOrNull, CHECKPOINT_CONTEXT, checkIdentityDoc, checkManifest, docHash, docSignedBy, FEED_CONTEXT, isTime, keyValidAt, LocalIdentity,
   REATTEST_CONTEXT, verifyIdentityDoc, verifyManifestSig, verifySigned,
@@ -31,13 +31,14 @@ import {
 import { Log, writeFileAtomic, type Fault, type Receipt } from './log.ts';
 import {
   answeredRule, bookRules, Collect, DEFAULT_ROFL_BIN, Engine, FOREVER, mayReadRules, parseLiteral, parseQuery, resultRule, sortRows, splitArgs, SYSTEM_BOOK,
-  type AskAnswer, type AskOptions, type BookScope, type Explanation, type QueryLiteral, type Unknown, type World,
+  type AskAnswer, type AskOptions, type AskRow, type BookScope, type Explanation, type QueryLiteral, type Unknown, type World,
 } from './engine.ts';
 import { DomainVouch, type DomainTransport } from './domain.ts';
 import { verifyRequest } from './httpsig.ts';
 import { compileRule, RULE } from './rules.ts';
 import { RESULT } from './executor.ts';
-import { Assertions, match, oneValue, type Current, type View } from './assertions.ts';
+import { assertedRow, Assertions, match, oneValue, type Current, type View } from './assertions.ts';
+import { Hub, type Frame, type Sink } from './subscribe.ts';
 import { whyNotDelegated, whyNotReadable } from './expiry.ts';
 import { open as openSealed, type Envelope } from './seal.ts';
 import { OAuth, type OAuthOptions } from './oauth.ts';
@@ -201,6 +202,29 @@ interface Verified {
   rules: { F: string; text: string; author: string }[];
 }
 
+/** Relations whose facts can change who reads what or which rules run: a
+ *  batch carrying one re-reads every subscriber's access and rebuilds the
+ *  rule worlds (r_subscribe). */
+const MOVES_ACCESS = new Set([RULE, 'roflenox:trust_rules', GRANT, DELEGATE, EXPORT, 'roflenox:follow']);
+
+/** A row of a literal's answer as the ground literal it stands for: each
+ *  variable (and `_`) filled from the row's cells in the order ask gives them. */
+export function groundLiteral(rel: string, book: string, args: string[], cells: (string | number)[]): string {
+  const bound = new Map<string, string | number>();
+  let i = 0;
+  const out = args.map((x) => {
+    const a = x.trim();
+    if (a === '_') return enc(cells[i++]!);
+    if (/^[A-Z_]/.test(a)) {
+      if (!bound.has(a)) bound.set(a, cells[i++]!);
+      return enc(bound.get(a)!);
+    }
+    return a;
+  });
+  return `${rel}[${book}](${out.join(', ')})`;
+}
+const enc = (v: string | number) => (typeof v === 'number' ? String(v) : roflString(v));
+
 /** The ROFL program a verified batch loads into the MAIN world: its facts.
  *  Its user rules run only in its author's rule world (r_rule_budget). */
 function programOf(v: Verified, seq: number): string {
@@ -313,6 +337,13 @@ export class RoflenoxNode {
   private readonly recentLimit: number;
   /** RFC 9421 nonces seen on signed requests: nonce → expiry (ms). */
   private readonly requestNonces = new Map<string, number>();
+  // ---- subscriptions (r_subscribe, src/subscribe.ts) -----------------------
+  private readonly hub: Hub;
+  /** The node's journals: name → the literal it journals and its subscription. */
+  private readonly journals = new Map<string, { literal: string; id: number }>();
+  /** Frames the journals were sent, waiting to be turned into a signed batch. */
+  private readonly journalFrames: { name: string; literal: string; frame: Frame }[] = [];
+  private expiryTimer: NodeJS.Timeout | null = null;
 
   private constructor(o: NodeOptions) {
     this.dataDir = o.dataDir;
@@ -330,6 +361,22 @@ export class RoflenoxNode {
     this.silenceSec = o.silenceSec ?? DEFAULT_SILENCE_SEC;
     this.domainVouch = o.domainVouch ? new DomainVouch(o.domainVouch === true ? {} : o.domainVouch, () => this.now()) : null;
     this.checkpointWindowMs = (o.checkpointWindowSec ?? DEFAULT_CHECKPOINT_WINDOW_SEC) * 1000;
+    this.hub = new Hub({
+      mainSession: () => this.engine.mainSession,
+      watch: (session, rels, on) => this.engine.watch(session, rels, on),
+      settle: () => this.engine.ensure(),
+      scope: (r) => this.scopeFor(r),
+      expiry: async (r) => {
+        if (r === null || r === this.identity?.name) return null;
+        const now = Math.floor(this.now() / 1000);
+        const us = (await this.engine.sysRows(`readable_until[${SYSTEM_BOOK}](${roflString(r)}, B, U)`)).map((x) => Number(x[1])).filter((u) => u > now && u < FOREVER);
+        return us.length ? Math.min(...us) : null;
+      },
+      ask: (q, r) => this.askNow(q, r, null, {}),
+      world: async (a) => (await this.ruleWorld(a))?.session.id ?? null,
+      head: () => this.log.head(),
+      now: () => Math.floor(this.now() / 1000),
+    });
   }
 
   /** Open a node: read the log, re-verify every batch in it, and build the
@@ -343,8 +390,10 @@ export class RoflenoxNode {
     // A fresh engine first: identity decisions are made in throwaway forks of
     // it while the log is re-verified, and then the log is replayed into it.
     n.engine = await Engine.fresh(bin);
+    n.engine.changes = (s, c, by) => n.hub.changes(s, c, by);
     try {
       await n.load();
+      await n.serial(() => n.configureJournals());
       // A key rotated or recovered while the node was down ends every session.
       if (n.keyChangedOffline) await n.ownerKeyChanged();
     } catch (e) {
@@ -967,7 +1016,8 @@ export class RoflenoxNode {
     await this.checkDelegation(v.manifest, receivedAt, mode, pending);
     await this.trialRules(v, this.chains.get(v.manifest.identity)?.length ?? 0);
     const id = v.manifest.identity;
-    const rules = this.chains.has(id) ? null : this.rulesFor(id);
+    const fresh = !this.chains.has(id);
+    const rules = fresh ? this.rulesFor(id) : null;
     const seq = this.chains.get(id)?.length ?? 0;
     // Who may read is the owner's decision alone (r_session_no_access_control).
     if (this.isSession(id)) {
@@ -997,7 +1047,203 @@ export class RoflenoxNode {
     }
     await staged.commit();
     this.record(v, this.log.receipts.length - 1, mode !== 'post', seq, plan);
+    await this.afterAdmission(v, seq, plan.before, fresh);
     return receipt;
+  }
+
+  /** What an admitted batch moves beyond the log and the main world: the
+   *  rule worlds, carried forward by delta; every subscription, sent the rows
+   *  that came and went; the journals. Nothing here can un-admit the batch:
+   *  a failure is said on stderr, and an engine that died is rebuilt by the
+   *  next operation, its subscribers sent their answers whole. */
+  private async afterAdmission(v: Verified, seq: number, before: Map<string, Current | null>, fresh: boolean): Promise<void> {
+    try {
+      await this.advanceWorlds(v, seq, before, fresh);
+      const access = fresh || v.rules.length > 0 || v.facts.some((f) => MOVES_ACCESS.has(f.relation));
+      await this.hub.settle(v.manifest.digest, access);
+      if (v.manifest.identity === this.identity?.name && v.facts.some((f) => f.relation === JOURNAL)) await this.configureJournals();
+      this.drainJournals();
+      this.armExpiry();
+    } catch (e) {
+      if (!this.engine.dead) process.stderr.write(`roflenox: subscriptions after ${v.manifest.digest}: ${(e as Error).message}\n`);
+    }
+  }
+
+  /** THE RULE WORLDS BY DELTA (r_subscribe): a kept rule world takes an
+   *  admitted batch as a delta — its facts, its current assertions — instead
+   *  of being built again from every fact it reads. A batch that could change
+   *  which rules run or which books a world reads (a rule, a trust, a grant,
+   *  an export, a delegation, a follow, a book a rule names arriving for the
+   *  first time) still drops the world: the next read builds it whole. */
+  private async advanceWorlds(v: Verified, seq: number, before: Map<string, Current | null>, fresh: boolean): Promise<void> {
+    if (this.worlds.size === 0) return;
+    const id = v.manifest.identity;
+    const book = bookOf(id);
+    const drops = v.rules.length > 0 || v.facts.some((f) => MOVES_ACCESS.has(f.relation));
+    const res = v.facts.filter((f) => f.relation === RESULT);
+    const cur = this.assertions.of(id);
+    for (const [author, c] of [...this.worlds]) {
+      const m = c.w.meta;
+      if (drops || !m || c.w.partial || c.version !== this.version - 1 || (m.wanted.has(book) && !m.loaded.has(book))) {
+        await c.w.close().catch(() => {});
+        this.worlds.delete(author);
+        continue;
+      }
+      try {
+        let text = '';
+        const retract: string[] = [];
+        if (m.loaded.has(book)) {
+          text = programOf(v, seq);
+          for (const [F, old] of before) {
+            const now = cur.get(F);
+            const was = old ? assertedRow(book, F, old) : null;
+            const is = now ? assertedRow(book, F, now) : null;
+            if (was === is) continue;
+            if (was) retract.push(was);
+            if (is) text += `${is}.\n`;
+          }
+        } else if (res.length) {
+          text = toRofl(res, book, seq);
+        }
+        if (text || retract.length) await c.w.apply(text, id, retract);
+        if (res.length && !m.results.has(id)) {
+          await c.w.apply(resultRule(book, id), 'roflenox', []);
+          m.results.add(id);
+        }
+        c.version = this.version;
+      } catch (e) {
+        if (this.engine.dead) throw e;
+        await c.w.close().catch(() => {});
+        this.worlds.delete(author);
+      }
+    }
+    void fresh;
+  }
+
+  // ---- subscriptions --------------------------------------------------------
+
+  /** SUBSCRIBE (r_subscribe) to one literal, as `requester`, with the access
+   *  `ask` answers with: `sink` is sent the whole answer now, then after every
+   *  admission the rows that came and went. Returns the call that ends it. */
+  async subscribe(query: string, requester: string | null, sink: Sink): Promise<() => Promise<void>> {
+    const id = await this.serial(async () => {
+      const lits = parseQuery(query);
+      if (lits.length !== 1 || lits[0]!.neg) throw new Refusal(400, 'bad_query', 'a subscription is to one positive literal, rel(Args) or rel[book](Args)');
+      await this.requireBook(query, requester, await this.scopeFor(requester), false);
+      const n = await this.hub.add(query, requester, sink);
+      this.armExpiry();
+      return n;
+    });
+    return () => this.serial(() => this.hub.remove(id));
+  }
+
+  /** Carry every subscription to the node's clock: rows a grant's expiry
+   *  hides, an author's rules whose reads expired. The node's own timer calls
+   *  it at the next expiry; a test with an injected clock calls it itself. */
+  tick(): Promise<void> {
+    return this.serial(async () => {
+      await this.hub.settle('clock', false);
+      this.drainJournals();
+      this.armExpiry();
+    });
+  }
+
+  private armExpiry(): void {
+    if (this.expiryTimer) { clearTimeout(this.expiryTimer); this.expiryTimer = null; }
+    const t = this.hub.nextExpiry();
+    if (t === null) return;
+    this.expiryTimer = setTimeout(() => { this.expiryTimer = null; this.tick().catch(() => {}); }, Math.min(Math.max(0, t * 1000 - this.now()) + 1000, 2 ** 31 - 1));
+    this.expiryTimer.unref();
+  }
+
+  /** A view (r_subscribe): the literal `owner` names `name` by — the latest
+   *  live {source: name, relation: "roflenox:view", target: literal} in its
+   *  book — read as `requester`, with a literal naming no book put in the
+   *  owner's. Null if there is none `requester` can see. */
+  async viewLiteral(owner: string, name: string, requester: string | null): Promise<string | null> {
+    const b = bookOf(owner);
+    let a: AskAnswer;
+    try {
+      a = await this.ask(`live[${b}](F, ${roflString(name)}, ${roflString(VIEW)}, L)`, requester, null, { order: 'admission' });
+    } catch (e) {
+      if (e instanceof Refusal && (e.status === 403 || e.status === 404 || e.status === 410)) return null;
+      throw e;
+    }
+    const L = a.rows.at(-1)?.cells[1];
+    if (typeof L !== 'string') return null;
+    const { rel, book, args } = parseLiteral(L);
+    return book === null ? `${rel}[${b}](${args})` : L;
+  }
+
+  /** The journals the node's own book names — {source: name, relation:
+   *  "roflenox:journal", target: literal}, live — each a subscription as the
+   *  node itself. */
+  private async configureJournals(): Promise<void> {
+    const me = this.identity?.name;
+    if (!me || !this.chains.has(me)) return;
+    const rows = (await this.askNow(`live[${bookOf(me)}](F, N, ${roflString(JOURNAL)}, L)`, me, null, { order: 'admission' })).rows;
+    const want = new Map(rows.map((r) => [String(r.cells[1]), String(r.cells[2])]));
+    for (const [n, j] of [...this.journals]) {
+      if (want.get(n) === j.literal) continue;
+      await this.hub.remove(j.id);
+      this.journals.delete(n);
+    }
+    for (const [name, literal] of want) {
+      if (this.journals.has(name)) continue;
+      try {
+        const id = await this.hub.add(literal, me, (frame) => this.journalFrames.push({ name, literal, frame }));
+        this.journals.set(name, { literal, id });
+      } catch (e) {
+        process.stderr.write(`roflenox: journal ${name} of ${literal}: ${(e as Error).message}\n`);
+      }
+    }
+  }
+
+  /** Turn the journals' frames into one signed batch of the node's: a row
+   *  that appeared, one that vanished, each naming the batch that moved it.
+   *  A whole frame (the start, a rebuilt world) is compared with what the
+   *  journal last said of each row, so nothing is said twice or missed. The
+   *  batch is signed in the next serial slot, after this one. */
+  private drainJournals(): void {
+    if (this.journalFrames.length === 0) return;
+    const frames = this.journalFrames.splice(0);
+    const me = this.identity?.name;
+    if (!me) return;
+    void this.serial(async () => {
+      const facts: Fact[] = [];
+      for (const { name, literal, frame } of frames) {
+        const { rel, args } = parseLiteral(literal);
+        const a = splitArgs(args);
+        const lit = (r: AskRow) => groundLiteral(rel, bookOf(r.identity), a, r.cells);
+        const say = (r: AskRow, R: string, cause: string) => facts.push({ source: lit(r), relation: R, target: cause, perspective: `journal:${name}`, confidence: 1 });
+        if (frame.kind === 'delta') {
+          for (const r of frame.added ?? []) say(r, APPEARED, frame.cause ?? 'unknown');
+          for (const r of frame.removed ?? []) say(r, VANISHED, frame.cause ?? 'unknown');
+        } else if (frame.kind === 'full') {
+          const said = await this.journalSaid(me, name);
+          const now = new Set((frame.rows ?? []).map(lit));
+          const cause = frame.cause === 'start' || frame.cause === null || !/^[0-9a-f]{64}$/.test(frame.cause) ? frame.head ?? 'start' : frame.cause;
+          for (const r of frame.rows ?? []) if (said.get(lit(r)) !== APPEARED) say(r, APPEARED, cause);
+          for (const [row, R] of said) if (R === APPEARED && !now.has(row)) facts.push({ source: row, relation: VANISHED, target: cause, perspective: `journal:${name}`, confidence: 1 });
+        }
+      }
+      if (facts.length) await this.signNow(this.identity!, facts, {}, true);
+    }).catch((e) => process.stderr.write(`roflenox: journal batch: ${(e as Error).message}\n`));
+  }
+
+  /** What journal `name` last said of each row: appeared or vanished. */
+  private async journalSaid(me: string, name: string): Promise<Map<string, string>> {
+    const b = bookOf(me);
+    const cur = this.view(me);
+    const said: { row: string; R: string; N: number }[] = [];
+    for (const R of [APPEARED, VANISHED]) {
+      for (const r of (await this.engine.ask(`edge[${b}](F, S, ${roflString(R)}, C)`, new Map([[b, { identity: me, only: null }]]))).rows) {
+        const c = cur.get(String(r.cells[0]));
+        if (c?.P === `journal:${name}`) said.push({ row: String(r.cells[1]), R, N: c.N });
+      }
+    }
+    said.sort((x, y) => x.N - y.N);
+    return new Map(said.map((x) => [x.row, x.R]));
   }
 
   /** ENGINE CRASH RECOVERY (r_engine_crash_recovery): the engine is derived
@@ -1018,6 +1264,7 @@ export class RoflenoxNode {
   private async rebuildEngine(): Promise<void> {
     this.worlds.clear();
     const e = await Engine.fresh(this.bin);
+    e.changes = (s, c, by) => this.hub.changes(s, c, by);
     await e.replay(this.held());
     // A stale engine is alive (an aborted admission left it holding what the
     // log does not): it is stopped, or every abort would leave a whole engine
@@ -1026,6 +1273,7 @@ export class RoflenoxNode {
     this.engine = e;
     this.engineRestarts++;
     await old.stop().catch(() => {});
+    if (this.hub.size) await this.hub.rewatch();
   }
 
   /** The engine process id — for tests that kill it. */
@@ -1611,6 +1859,13 @@ export class RoflenoxNode {
         const G = this.assertions.valueOf(id!, m![3]!, 'enox:asserted_by');
         const by = G !== undefined ? (await this.engine.sysRows(`edge[${m![2]}](${roflString(G)}, S, R, T)`))[0]?.[2] : undefined;
         lines[i] += ` batch ${digest} (admission ${n}, ${id}'s batch ${c.S}${claimedAt ? `, claimed_at ${claimedAt}` : ''})${by !== undefined ? `, claimed_by ${JSON.stringify(String(by))}` : ''}`;
+        // A journal's transition names the batch that moved the row (r_subscribe).
+        const cause = /"roflenox:(?:appeared|vanished)","([0-9a-f]{64})"\) \[axiom\]/.exec(lines[i]!)?.[1];
+        const k = cause !== undefined ? this.log.receipts.findIndex((x) => x.kind === undefined && x.digest === cause) : -1;
+        if (k >= 0) {
+          const r2 = this.log.receipts[k]!;
+          lines[i] += `\n${m![1]}  caused by batch ${cause} (admission ${k}, ${r2.identity}'s batch ${this.chains.get(r2.identity)?.indexOf(cause) ?? -1})`;
+        }
       }
       e.text = lines.join('\n');
     }
@@ -1835,6 +2090,7 @@ export class RoflenoxNode {
       : [];
     const foreign = [...new Set([...named, ...granted])].filter((b) => b !== own);
     const w = await this.engine.world(this.ruleBudget);
+    w.meta = { loaded: new Set(), wanted: new Set([own, ...foreign]), results: new Set(this.results.keys()) };
     await w.session.load(`clock[${SYSTEM_BOOK}](${clock}).\n`, 'roflenox');
     if (!owners.has(own) && extra) owners.set(own, author);
     for (const b of [own, ...foreign]) {
@@ -1842,6 +2098,7 @@ export class RoflenoxNode {
       if (!id) continue;
       const text = (this.programs.get(id) ?? []).map((p) => zlib.inflateRawSync(p).toString('utf8')).join('') + this.assertions.lines(id, b, true) + (b === own ? extra : '');
       if (text) await w.session.load(text, id);
+      w.meta.loaded.add(b);
       if (b !== own || ranging) await w.session.load(mayReadRules(b, id), 'roflenox');
     }
     for (const [id, lines] of this.results) {
@@ -2347,6 +2604,7 @@ export class RoflenoxNode {
   }
 
   async close(): Promise<void> {
+    if (this.expiryTimer) clearTimeout(this.expiryTimer);
     await this.queue;
     for (const { w } of this.worlds.values()) await w.close().catch(() => {});
     await this.engine.stop();

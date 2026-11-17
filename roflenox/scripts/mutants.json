@@ -5249,6 +5249,62 @@
    "red": [
     "a session's grant, export, delegation, trust or follow is refused at admission, a stranger it named reads nothing, and the owner's grant still works"
    ]
+  },
+  {
+   "id": "MS1",
+   "title": "subscriptions: the fan-out drops removals",
+   "file": "src/subscribe.ts",
+   "edits": [
+    [
+     "[[c.added, 1], [c.removed, -1]] as const",
+     "[[c.added, 1]] as const"
+    ]
+   ],
+   "red": [
+    "a subscriber to red(P, X) is sent the whole answer, then +2 on the update and −1 on an acceptance; the journal says why"
+   ]
+  },
+  {
+   "id": "MS2",
+   "title": "subscriptions: a literal's constants are ignored",
+   "file": "src/subscribe.ts",
+   "edits": [
+    [
+     "const m = match(sub.args, values);",
+     "const m = { cells: values };"
+    ]
+   ],
+   "red": [
+    "a subscriber to red(P, X) is sent the whole answer, then +2 on the update and −1 on an acceptance; the journal says why"
+   ]
+  },
+  {
+   "id": "MS3",
+   "title": "subscriptions: a change in a book the reader may not see is sent anyway",
+   "file": "src/subscribe.ts",
+   "edits": [
+    [
+     "const sc = sub.scope.get(book);",
+     "const sc = sub.scope.get(book) ?? { identity: book, only: null };"
+    ]
+   ],
+   "red": [
+    "a subscriber sees only what it may read: no grant, nothing; a grant, the rows; the grant expired, nothing again"
+   ]
+  },
+  {
+   "id": "MS4",
+   "title": "rule worlds rebuilt whole on every batch instead of advanced by delta",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (drops || !m || c.w.partial",
+     "if (true || drops || !m || c.w.partial"
+    ]
+   ],
+   "red": [
+    "a subscriber to red(P, X) is sent the whole answer, then +2 on the update and −1 on an acceptance; the journal says why"
+   ]
   }
  ]
 }

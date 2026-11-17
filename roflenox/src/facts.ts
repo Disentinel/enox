@@ -42,10 +42,21 @@ export const EXPORT = 'roflenox:export';
 export const EMBEDDER = 'roflenox:embedder';
 export const SEARCH = 'roflenox:search';
 export const EMBEDDING = 'roflenox:embedding';
+/** Subscriptions (src/subscribe.ts), all as facts of the node's own book or an owner's:
+ *    {source: <view name>, relation: "roflenox:view", target: <literal>}
+ *      — a page at /view/<owner>/<name> shows the literal's rows live;
+ *    {source: <journal name>, relation: "roflenox:journal", target: <literal>}
+ *      — the node journals every row of the literal that appears or vanishes:
+ *    {source: <the row, a ground literal>, relation: "roflenox:appeared" | "roflenox:vanished", target: <the batch that moved it>}
+ *      — signed by the node, perspective journal:<name>. */
+export const VIEW = 'roflenox:view';
+export const JOURNAL = 'roflenox:journal';
+export const APPEARED = 'roflenox:appeared';
+export const VANISHED = 'roflenox:vanished';
 /** The node's own relations — a closed list: no other roflenox: relation is
  *  admitted, so none can slip past a rule that names them. */
 export const RESERVED = ['roflenox:rule', 'roflenox:trust_rules', GRANT, DELEGATE, EXPORT, 'roflenox:follow',
-  'roflenox:result', EMBEDDER, SEARCH, EMBEDDING] as const;
+  'roflenox:result', EMBEDDER, SEARCH, EMBEDDING, VIEW, JOURNAL, APPEARED, VANISHED] as const;
 /** What a wildcard export ("*") never covers: every node relation but the
  *  export rule itself. A search, a rule, a grant, a trust or a follow says
  *  what its author asked or allowed, not what they published — only an

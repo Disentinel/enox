@@ -222,6 +222,42 @@
    "kind": "who",
    "match": "createHmac",
    "why": "session keys (r_session_identity) are DERIVED from the owner's key and a grant by HMAC — key derivation, not a check of who someone is; nothing is stored"
+  },
+  {
+   "file": "src/http.ts",
+   "kind": "wire",
+   "match": "'content-type': 'text/event-stream'",
+   "why": "subscribe (r_subscribe): a literal's frames as server-sent events, each frame the same JSON an ask answers with"
+  },
+  {
+   "file": "src/http.ts",
+   "kind": "wire",
+   "match": "'content-type': 'text/html; charset=utf-8'",
+   "why": "a view's page (r_subscribe): one static page that opens the view's event stream"
+  },
+  {
+   "file": "src/view.ts",
+   "kind": "who",
+   "match": "Bearer",
+   "why": "a view's page sends the reader's operator token as the same bearer the node checks (callerOf); it checks nothing itself"
+  },
+  {
+   "file": "src/http.ts",
+   "kind": "wire",
+   "match": "text/event-stream",
+   "why": "subscribe (r_subscribe): a reader that accepts server-sent events is sent its frames as a stream; the same frames, the same JSON"
+  },
+  {
+   "file": "src/ops.ts",
+   "kind": "wire",
+   "match": "text/event-stream",
+   "why": "subscribe and view say how their stream is asked for (r_subscribe); the stream itself is http.ts's"
+  },
+  {
+   "file": "src/view.ts",
+   "kind": "wire",
+   "match": "text/event-stream",
+   "why": "a view's page asks its own path as an event stream (r_subscribe)"
   }
  ]
 }

@@ -216,12 +216,13 @@ export class Assertions {
   lines(identity: string, book: string, asserted = false): string {
     const m = this.by.get(identity);
     if (!m) return '';
-    return [...m].map(([F, c]) => `${asserted ? `${row(book, F, c)}.\n` : ''}${c.follow !== undefined && c.C > 0 ? `${followRow(book, c.follow)}.\n` : ''}${acting(c) ? `${c.ctl}.\n` : ''}`).join('');
+    return [...m].map(([F, c]) => `${asserted ? `${assertedRow(book, F, c)}.\n` : ''}${c.follow !== undefined && c.C > 0 ? `${followRow(book, c.follow)}.\n` : ''}${acting(c) ? `${c.ctl}.\n` : ''}`).join('');
   }
 }
 
 const followRow = (book: string, name: string) => `follows[${book}](${roflString(checkName(name))}, b_${sha256hex(checkName(name)).slice(0, 16)})`;
-const row = (book: string, F: string, c: Current) => `asserted[${book}](${roflString(F)}, ${roflString(c.P)}, ${c.C}, ${c.S})`;
+/** A current assertion's row, as a rule world holds it. */
+export const assertedRow = (book: string, F: string, c: Current) => `asserted[${book}](${roflString(F)}, ${roflString(c.P)}, ${c.C}, ${c.S})`;
 
 /** Match literal arguments (ROFL terms) against a row of values: variables
  *  bind (a repeated one must agree), `_` matches anything, constants compare.

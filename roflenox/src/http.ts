@@ -13,8 +13,10 @@ import * as http from 'node:http';
 import { Refusal } from './facts.ts';
 import { handleRpc } from './mcp.ts';
 import { serveOAuth } from './oauth.ts';
-import { callOp, isLocal, OPS, type Ctx, type Op } from './ops.ts';
+import { callOp, isLocal, OPS, viewQuery, type Ctx, type Op } from './ops.ts';
 import type { RoflenoxNode } from './node.ts';
+import type { Frame } from './subscribe.ts';
+import { VIEW_PAGE } from './view.ts';
 
 const MAX_BODY = 16 * 1024 * 1024;
 
@@ -112,7 +114,9 @@ function matchAlias(op: Op, method: string, path: string): Record<string, string
 
 export function createServer(node: RoflenoxNode): http.Server {
   const network = OPS.filter((o) => !isLocal(o));
-  return http.createServer(async (req, res) => {
+  // Open event streams end when the server closes: a subscriber never holds it open.
+  const streams = new Set<http.ServerResponse>();
+  const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? '/', 'http://local');
       const p = url.pathname;
@@ -168,14 +172,52 @@ export function createServer(node: RoflenoxNode): http.Server {
         }
       }
       if (!op) return send(res, 404, { error: 'not_found', message: `${method} ${p}` });
+      // A subscription's alias (r_subscribe): its page, or its stream, by what the reader accepts.
+      const accept = String(req.headers.accept ?? '');
+      if (op.stream && method === 'GET' && !p.startsWith('/op/')) {
+        if (op.stream.page && accept.includes('text/html')) {
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+          res.end(VIEW_PAGE);
+          return;
+        }
+        if (accept.includes('text/event-stream')) {
+          const who = callerOf(node, method, target, req.headers, raw);
+          return await stream(node, req, res, op.name === 'view' ? await viewQuery(node, args, who) : String(args.query ?? ''), who, streams);
+        }
+      }
       const caller = callerOf(node, method, target, req.headers, raw);
       const result = await callOp(op.name, args, ctx(caller), 'network');
       return send(res, op.http && !p.startsWith('/op/') ? op.http.status ?? 200 : 200, result);
     } catch (e) {
       if (e instanceof Refusal) return send(res, e.status, { error: e.reason, message: e.message, ...e.detail });
+      if (res.headersSent) { res.end(); return; }
       return send(res, 500, { error: 'internal', message: (e as Error).message });
     }
   });
+  const close = server.close.bind(server);
+  server.close = ((cb?: (err?: Error) => void) => { for (const r of streams) r.end(); return close(cb); }) as typeof server.close;
+  return server;
+}
+
+/** One subscription as server-sent events: `event: full|delta|refused`,
+ *  `data:` the frame as JSON (src/subscribe.ts). A refusal before the first
+ *  frame is an ordinary JSON error with its status. */
+async function stream(node: RoflenoxNode, req: http.IncomingMessage, res: http.ServerResponse, query: string, caller: string | null,
+  streams: Set<http.ServerResponse>): Promise<void> {
+  let open = false;
+  const held: Frame[] = [];
+  const write = (f: Frame) => {
+    res.write(`event: ${f.kind}\ndata: ${JSON.stringify(f)}\n\n`);
+    if (f.kind === 'refused') res.end();
+  };
+  const end = await node.subscribe(query, caller, (f) => { if (open) write(f); else held.push(f); });
+  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
+  open = true;
+  for (const f of held.splice(0)) write(f);
+  streams.add(res);
+  const close = () => { streams.delete(res); void end().catch(() => {}); };
+  req.on('close', close);
+  res.on('close', close);
 }
 
 export function listen(server: http.Server, port: number, host = '127.0.0.1'): Promise<string> {

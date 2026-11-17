@@ -115,6 +115,12 @@ export class Collect {
     return { vars, rows: this.buf.map((x) => x.r), window: { total: this.total, after: this.after } };
   }
 }
+/** A watched relation's rows that came and went in one engine answer: each row its arguments, as `rows` writes them. */
+export interface Change { rel: string; book: string; added: Term[][]; removed: Term[][] }
+export interface Term { k: string; v?: string | number; name?: string }
+/** A term of a change as an answer's cell is decoded (decodeCell). */
+export const termCell = (t: Term): string | number => (t.k === 's' ? String(t.v) : t.k === 'i' ? Number(t.v) : t.name ?? JSON.stringify(t));
+
 export interface Explanation { identity: string; holds: boolean; text: string; unknown?: { reason: string; budget: number; unit: string } }
 
 export class Engine {
@@ -132,7 +138,28 @@ export class Engine {
     // must not also crash this process. The package's port does not listen for
     // it, so the engine wrapper does.
     (port as unknown as { child: { stdin: NodeJS.WritableStream } }).child.stdin.on('error', () => {});
-    return new Engine(port, await port.fresh());
+    const e = new Engine(port, await port.fresh());
+    // Every answer of a watched session carries the rows its relations gained
+    // and lost (rofl serve `watch`): whatever op it answers, they are handed
+    // to `changes` here, once, at the port (src/subscribe.ts).
+    const send = port.send.bind(port);
+    port.send = (req: Record<string, unknown>) => send(req).then((r: Record<string, unknown>) => {
+      if (r.changes_by !== undefined) e.changes?.(req.session as number, r.changes as Change[] | undefined ?? [], r.changes_by as string);
+      return r;
+    });
+    return e;
+  }
+
+  /** Where the watched rows that moved go (src/subscribe.ts). */
+  changes: ((session: number, changes: Change[], by: string) => void) | null = null;
+
+  /** The main world's session: what a watch of a base or system relation names. */
+  get mainSession(): number { return this.session.id; }
+
+  /** Watch (or, `on` false, stop watching) relations of a session: from now
+   *  on its answers carry the rows of them that came and went. */
+  async watch(session: number, rels: { rel: string; book?: string }[], on = true): Promise<void> {
+    await this.port.send({ op: on ? 'watch' : 'unwatch', session, rels });
   }
 
   /** Load a program into a FORK of the world. Nothing is visible until
@@ -481,6 +508,18 @@ export class World {
   partial = false;
   holes: string[] = [];
   constructor(port: RoflPort, session: RoflSession) { this.port = port; this.session = session; }
+  /** What the node knows of what was loaded here (node.buildWorld): the
+   *  books whose facts it holds, the books its rules want, the identities
+   *  whose results it reads. A world that knows it can take a batch by delta. */
+  meta: { loaded: Set<string>; wanted: Set<string>; results: Set<string> } | null = null;
+  /** Load facts and take rows out, by delta; evaluated again only where the
+   *  engine could not take them so (an admission into a kept world). */
+  async apply(rofl: string, who: string, retract: string[]): Promise<void> {
+    let full = false;
+    for (const q of retract) full = (await this.port.send({ op: 'retract', session: this.session.id, query: q })).full !== null || full;
+    if (rofl) full = (await this.port.send({ op: 'load', session: this.session.id, rofl, who })).full !== null || full;
+    if (full) await this.evaluate();
+  }
   async evaluate(): Promise<void> {
     const e = await this.session.evaluate();
     this.partial = e.partial;

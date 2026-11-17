@@ -24,6 +24,7 @@ import type { RoflenoxNode } from './node.ts';
 import { edgeIdOf, ENOX_OPS } from './enox-ops.ts';
 import { explainEmpty } from './empty.ts';
 import { parseQuery, rowKey, type AskAnswer } from './engine.ts';
+import type { Frame } from './subscribe.ts';
 
 /** A property; no `type` means any JSON value. */
 export type Prop = { type?: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object'; description?: string; items?: unknown };
@@ -70,6 +71,10 @@ export interface Op {
   /** A wire alias. `:x` path segments and GET query parameters become args;
    *  `body` names the one property a raw body stands for. */
   http?: { method: 'GET' | 'POST'; path: string; body?: string; status?: number };
+  /** Its GET alias asked with `Accept: text/event-stream` is a stream of
+   *  frames (r_subscribe) instead of one answer; `page`: asked with
+   *  `Accept: text/html`, it is the view's page. */
+  stream?: { page?: true };
   run: (ctx: Ctx, args: Record<string, unknown>) => Promise<unknown>;
   /** How the CLI prints a result (default: `text`, then JSON). */
   say?: (result: any) => string;
@@ -80,6 +85,26 @@ export interface Op {
 const obj = (properties: Record<string, Prop>, required: string[] = []): Schema =>
   ({ type: 'object', required, properties, additionalProperties: false });
 const str = (description?: string): Prop => ({ type: 'string', ...(description ? { description } : {}) });
+
+/** The literal of a view, as `caller` may see it, or a refusal naming none. */
+export async function viewQuery(n: RoflenoxNode, a: Record<string, unknown>, caller: string | null): Promise<string> {
+  const L = await n.viewLiteral(String(a.owner), String(a.name), caller);
+  if (L === null) throw new Refusal(404, 'no_view', `no view ${String(a.name)} of ${String(a.owner)} that this reader can see`);
+  return L;
+}
+
+/** A subscription as one call: its whole answer, and the next frame within `wait` seconds. */
+async function oneFrame(n: RoflenoxNode, query: string, caller: string | null, wait: unknown): Promise<unknown> {
+  const frames: Frame[] = [];
+  let wake: (() => void) | null = null;
+  const end = await n.subscribe(query, caller, (f) => { frames.push(f); wake?.(); });
+  try {
+    const first = frames.shift()!;
+    const s = Math.min(Math.max(Number(wait ?? 0) || 0, 0), 60);
+    if (s > 0 && frames.length === 0) await new Promise<void>((r) => { wake = r; setTimeout(r, s * 1000); });
+    return { ...first, next: frames[0] ?? null };
+  } finally { await end(); }
+}
 
 function needNode(ctx: Ctx): RoflenoxNode {
   if (!ctx.node) throw new Refusal(500, 'no_node', 'this operation runs inside a node');
@@ -229,6 +254,17 @@ export const OPS: Op[] = [
       const { UNITS } = await import('./node.ts');
       return { ...(await needNode(ctx).schema(ctx.caller)), units: UNITS,
         asking: 'ask takes ONE literal, e.g. live(F, S, "supersedes", T): a variable starts with an upper-case letter or _, a constant is quoted (stored values are strings), and a book may be named, rel[b_<16 hex>](Args); its perspective argument restricts edge questions to facts asserted under it.' };
+    } },
+  { name: 'subscribe', description: 'Subscribe to one literal, e.g. red(P, X): its whole answer, then after every admitted batch only the rows that came and went, taken from the engine\'s delta, with the access ask answers with. As a stream: GET /subscribe?query=… with Accept: text/event-stream (server-sent events `full`, `delta`, `refused`, each frame JSON). As a call: one frame, the whole answer now — and with `wait` seconds, the next frame after it if one comes within that time (at most 60).',
+    input: obj({ query: str('one positive ROFL literal; quote constants: red("home", X)'), wait: { type: 'number', description: 'seconds to wait for the next frame (at most 60)' } }, ['query']),
+    access: 'anyone', positional: ['query'], http: { method: 'GET', path: '/subscribe' }, stream: {},
+    run: async (ctx, a) => oneFrame(needNode(ctx), String(a.query), ctx.caller, a.wait) },
+  { name: 'view', description: 'A view an identity published — {source: <name>, relation: "roflenox:view", target: <literal>} in its book — as a subscription to its literal, read as you. GET /view/<owner>/<name> is its page in a browser (Accept: text/html), its stream with Accept: text/event-stream, and as a call one frame like subscribe.',
+    input: obj({ owner: str('the identity whose book names the view'), name: str('the view\'s name'), wait: { type: 'number', description: 'seconds to wait for the next frame (at most 60)' } }, ['owner', 'name']),
+    access: 'anyone', positional: ['owner', 'name'], http: { method: 'GET', path: '/view/:owner/:name' }, stream: { page: true },
+    run: async (ctx, a) => {
+      const n = needNode(ctx);
+      return oneFrame(n, await viewQuery(n, a, ctx.caller), ctx.caller, a.wait);
     } },
   { name: 'why', description: 'Why a ground literal holds, in the books you may read whole.', input: obj({ literal: str() }, ['literal']),
     access: 'anyone', positional: ['literal'], say: explainSay, run: async (ctx, a) => needNode(ctx).why(await byEdgeId(ctx, a.literal), ctx.caller) },
