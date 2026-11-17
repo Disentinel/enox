@@ -289,6 +289,68 @@ Once no node is running on the data directory, delete the throwaway data:
 rm -rf "$DEMO"
 ```
 
+## 9. Subscribe to a question's conclusions, views, journals
+
+A node (FKTS, for people; `roflenox` on the wire) keeps a question answered as
+batches arrive. A **subscription** names one positive literal, e.g.
+`red(P, X)` or `red("home", X)` or `red[b_…](P, X)`; it is sent the whole
+answer once, then after every admitted batch only the rows that came and went.
+The rows come from the engine's own delta (`rofl serve` `watch`, which the
+pinned `@grafema/rofl` 1.5.0 does not have yet: set `ROFL_BIN` to a `rofl`
+built from Disentinel/rofl with `watch`), never from asking again, so a frame
+after a batch costs about the batch, not the relation (measured, `npm run perf`,
+test/perf/subscribe.test.ts: a one-fact batch reaches the subscriber in
+26–43 ms at 10, 10 000 and 100 000 rows, where asking whole takes 25 ms, 0.25 s
+and 3.7 s). Access is exactly `ask`'s: a reader sees only the books it may read.
+
+```sh
+# a stream of server-sent events: `event: full|delta|refused`, `data:` a JSON frame
+curl -N -H 'Accept: text/event-stream' -H "Authorization: Bearer $(./src/cli.ts operator_token)" \
+  'http://127.0.0.1:7380/subscribe?query=red(P,%20X)'
+# as a call (CLI, MCP tool `subscribe`, POST /op/subscribe): one frame, and the next within --wait seconds
+./src/cli.ts subscribe 'red(P, X)' --wait 30
+```
+
+A frame is `{kind, head, cause, vars?, rows?, added?, removed?, by?}`:
+`full` carries `rows` (as `ask` answers them), `delta` carries `added` and
+`removed`; `cause` is the digest of the batch that moved them (or `start`,
+`access`, `rebuilt`, `lost`, `clock`); `by` is how the engine took it (`delta`,
+`whole`, `diff`, or `reask`). A `full` frame is sent again whenever the rows
+cannot be carried over: the reader's access changed (a grant, an export, a
+rule, a new book; a grant that expired, which the node's timer or `tick()`
+notices), the rule world was rebuilt, or the engine was replaced. `refused`
+ends a subscription to a book the reader may no longer read. Relations the
+node answers itself (`live`, `conf`, `persp`, `asserted`, `admitted_at`,
+`answered`) are asked again after each batch and diffed (`by: reask`).
+
+**A view** is a fact in the owner's book; the node serves its page:
+
+```sh
+./src/cli.ts assert --facts '[{"source":"stale-pages","relation":"roflenox:view","target":"red(P, X)","perspective":"view","confidence":1}]'
+open "http://127.0.0.1:7380/view/node.example.org/stale-pages#token=<OPERATOR_TOKEN>"
+```
+
+The page is static HTML+JS: it opens its own path as an event stream with the
+token from `#token=` (kept in the page's memory only, or typed in) and lights
+rows up as they come and dims them as they go. A literal with no book is the
+owner's book. The same path answers `Accept: text/event-stream` (the stream)
+and a plain call (the `view` op: one frame).
+
+**A journal** is a fact in the node's own book; the node then signs, in its
+own book, one fact per transition of the literal's rows:
+
+```sh
+./src/cli.ts assert --facts '[{"source":"reds","relation":"roflenox:journal","target":"red(P, X)","perspective":"journal","confidence":1}]'
+./src/cli.ts ask 'edge(F, S, "roflenox:appeared", Batch)'     # and roflenox:vanished
+```
+
+Each is `{source: <the row, e.g. red[b_…]("home", "login@v1")>, relation:
+"roflenox:appeared" | "roflenox:vanished", target: <the batch that moved it>,
+perspective: "journal:<name>"}`, and `why` of one ends with `caused by batch
+<digest> (admission n, <identity>'s batch s)`. When a journal starts (or its
+rows had to be read whole), it compares the answer with what it last said of
+each row, so nothing is said twice or missed across a restart.
+
 ## Known defects (found while writing this guide)
 
 1. Fixed: running `stdio` beside `serve` on one data directory used to fork the
