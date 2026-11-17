@@ -258,6 +258,12 @@
    "kind": "wire",
    "match": "text/event-stream",
    "why": "a view's page asks its own path as an event stream (r_subscribe)"
+  },
+  {
+   "file": "src/viewlink.ts",
+   "kind": "who",
+   "match": "crypto.verify(",
+   "why": "a view link (r_view_link): an Ed25519 signature by the reader's own identity key, made ahead of the request because a browser cannot sign one; for one view on one node until a time"
   }
  ]
 }

@@ -155,11 +155,14 @@ export class Hub {
    *  reach it as the rows the rule world gained and lost. Only a reader whose
    *  own scope changed, or one watching a world the node had to build anew,
    *  is sent its answer whole. */
-  async settle(cause: string | null, access: boolean): Promise<void> {
+  async settle(cause: string | null, access: boolean, batch?: { book: string; facts: Set<string> }): Promise<void> {
     if (this.subs.size === 0) return;
     const now = this.host.now();
     for (const sub of [...this.subs.values()]) {
-      if (!access && (sub.until === null || sub.until > now)) continue;
+      // A reader who sees the batch's book only in part (an export) may see
+      // the batch's own facts: its scope is read again.
+      const partial = batch !== undefined && sub.scope.get(batch.book)?.only != null;
+      if (!access && !partial && (sub.until === null || sub.until > now)) continue;
       const scope = await this.host.scope(sub.requester);
       sub.until = await this.host.expiry(sub.requester);
       if (sub.book !== null && !scope.has(sub.book)) {
@@ -167,12 +170,17 @@ export class Hub {
         await this.remove(sub.id);
         continue;
       }
-      if (sig(scope) !== sig(sub.scope)) {
-        await this.detach(sub);
+      if (sig(scope) === sig(sub.scope)) continue;
+      if (batch && grownBy(sub.scope, scope, batch.facts)) {
+        // What it may now see more of is this batch's facts: they are among
+        // the changes, and reach it by delta.
         sub.scope = scope;
-        await this.attach(sub);
-        sub.owes = 'access';
+        continue;
       }
+      await this.detach(sub);
+      sub.scope = scope;
+      await this.attach(sub);
+      sub.owes = 'access';
     }
     // Every rule world a subscription is watched in, carried forward. One
     // whose author has no rules left was emptied by delta before it closed:
@@ -336,6 +344,20 @@ export class Hub {
     }
     sub.reask = new Set(now.keys());
   }
+}
+
+/** Does `next` differ from `was` only by facts of `facts` now visible in a
+ *  book `was` already showed in part? */
+function grownBy(was: Map<string, BookScope>, next: Map<string, BookScope>, facts: Set<string>): boolean {
+  if (was.size !== next.size) return false;
+  for (const [b, n] of next) {
+    const w = was.get(b);
+    if (!w || (w.only === null) !== (n.only === null)) return false;
+    if (w.only === null) continue;
+    for (const F of w.only) if (!n.only!.has(F)) return false;
+    for (const F of n.only!) if (!w.only.has(F) && !facts.has(F)) return false;
+  }
+  return true;
 }
 
 /** A scope's shape, to tell whether it changed. */

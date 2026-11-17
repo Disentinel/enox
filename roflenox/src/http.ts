@@ -17,6 +17,7 @@ import { callOp, isLocal, OPS, viewQuery, type Ctx, type Op } from './ops.ts';
 import type { RoflenoxNode } from './node.ts';
 import type { Frame } from './subscribe.ts';
 import { VIEW_PAGE } from './view.ts';
+import { linkOf, type ViewLinkClaims } from './viewlink.ts';
 
 const MAX_BODY = 16 * 1024 * 1024;
 
@@ -71,6 +72,7 @@ export function targetsOf(node: RoflenoxNode, req: http.IncomingMessage): string
  *  identity through its grant (r_mcp_oauth). Nowhere else. */
 export function callerOf(node: RoflenoxNode, method: string, target: string | readonly string[], headers: http.IncomingHttpHeaders, raw: Buffer | null, mcp = false): string | null {
   const auth = headers.authorization;
+  if (linkOf(auth) !== null) throw new Refusal(401, 'bad_view_link', 'a view link opens only the view it names, at GET /view/<owner>/<name>');
   if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
     const presented = auth.slice('Bearer '.length).trim();
     const given = Buffer.from(presented);
@@ -172,6 +174,14 @@ export function createServer(node: RoflenoxNode): http.Server {
         }
       }
       if (!op) return send(res, 404, { error: 'not_found', message: `${method} ${p}` });
+      // A view link (src/viewlink.ts) is a caller only at the GET of the view it names.
+      const token = linkOf(req.headers.authorization);
+      let link: ViewLinkClaims | null = null;
+      if (token !== null) {
+        if (op.name !== 'view' || method !== 'GET' || p.startsWith('/op/')) callerOf(node, method, target, req.headers, raw);
+        link = await node.viewLink(token, String(args.owner), String(args.name));
+      }
+      const who = () => (link ? link.iss : callerOf(node, method, target, req.headers, raw));
       // A subscription's alias (r_subscribe): its page, or its stream, by what the reader accepts.
       const accept = String(req.headers.accept ?? '');
       if (op.stream && method === 'GET' && !p.startsWith('/op/')) {
@@ -181,11 +191,11 @@ export function createServer(node: RoflenoxNode): http.Server {
           return;
         }
         if (accept.includes('text/event-stream')) {
-          const who = callerOf(node, method, target, req.headers, raw);
-          return await stream(node, req, res, op.name === 'view' ? await viewQuery(node, args, who) : String(args.query ?? ''), who, streams);
+          const caller = who();
+          return await stream(node, req, res, op.name === 'view' ? await viewQuery(node, args, caller) : String(args.query ?? ''), caller, streams, link);
         }
       }
-      const caller = callerOf(node, method, target, req.headers, raw);
+      const caller = who();
       const result = await callOp(op.name, args, ctx(caller), 'network');
       return send(res, op.http && !p.startsWith('/op/') ? op.http.status ?? 200 : 200, result);
     } catch (e) {
@@ -203,7 +213,7 @@ export function createServer(node: RoflenoxNode): http.Server {
  *  `data:` the frame as JSON (src/subscribe.ts). A refusal before the first
  *  frame is an ordinary JSON error with its status. */
 async function stream(node: RoflenoxNode, req: http.IncomingMessage, res: http.ServerResponse, query: string, caller: string | null,
-  streams: Set<http.ServerResponse>): Promise<void> {
+  streams: Set<http.ServerResponse>, link: ViewLinkClaims | null = null): Promise<void> {
   let open = false;
   const held: Frame[] = [];
   const write = (f: Frame) => {
@@ -215,7 +225,15 @@ async function stream(node: RoflenoxNode, req: http.IncomingMessage, res: http.S
   open = true;
   for (const f of held.splice(0)) write(f);
   streams.add(res);
-  const close = () => { streams.delete(res); void end().catch(() => {}); };
+  // A stream opened by a view link ends when the link does: at its expiry, or when its issuer revokes it.
+  const ends: (() => void)[] = [];
+  if (link) {
+    const over = (error: string, message: string) => { if (!res.writableEnded) write({ kind: 'refused', head: null, cause: null, error, message }); };
+    const t = setTimeout(() => over('link_expired', 'the view link has expired'), Math.max(0, link.exp * 1000 - node.clockMs()));
+    t.unref();
+    ends.push(() => clearTimeout(t), node.onLinkRevoked(link.iss, link.jti, () => over('link_revoked', 'the view link was revoked by its issuer')));
+  }
+  const close = () => { streams.delete(res); for (const e of ends.splice(0)) e(); void end().catch(() => {}); };
   req.on('close', close);
   res.on('close', close);
 }

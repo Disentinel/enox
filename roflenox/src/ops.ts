@@ -25,6 +25,7 @@ import { edgeIdOf, ENOX_OPS } from './enox-ops.ts';
 import { explainEmpty } from './empty.ts';
 import { parseQuery, rowKey, type AskAnswer } from './engine.ts';
 import type { Frame } from './subscribe.ts';
+import { mintViewLink, VIEW_LINK_DEFAULT_SEC, VIEW_LINK_MAX_SEC } from './viewlink.ts';
 
 /** A property; no `type` means any JSON value. */
 export type Prop = { type?: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object'; description?: string; items?: unknown };
@@ -39,6 +40,8 @@ export interface Ctx {
   dataDir: string | null;
   /** Reach another op: in-node directly, or over HTTP signed as the local identity. */
   call: (op: string, args: Record<string, unknown>) => Promise<unknown>;
+  /** The node's URL the CLI calls (--url), when there is one. */
+  url?: string;
   now: () => number;
   /** The name the calling client goes by when the transport knows one: the
    *  OAuth client the owner approved. An Enox write that names no author
@@ -384,6 +387,18 @@ export const OPS: Op[] = [
       const { invitationLink } = await import('./client.ts');
       const me = localIdentity(ctx);
       return { identity: me.name, link: invitationLink(a.at as string, me) };
+    } },
+  { name: 'view_link', description: `A link that opens a view's page in a browser as this identity, with exactly the access ask gives it: signed by the key on this machine, for one view on one node, for --ttl seconds (default ${VIEW_LINK_DEFAULT_SEC}, at most ${VIEW_LINK_MAX_SEC}). The link is in the URL's fragment, which a browser never sends; to revoke it before it expires, assert {source: <its jti>, relation: "roflenox:revoke_link", target: "revoked"}.`,
+    input: obj({ owner: str('the identity whose book names the view'), name: str('the view\'s name'), at: str('the URL readers reach the node at (default: --url)'), ttl: { type: 'number', description: 'seconds the link lives' } }, ['owner', 'name']),
+    access: { local: 'it signs with the private key on this machine' }, positional: ['owner', 'name'],
+    say: (r) => `${r.link}\n(expires ${r.expires}; revoke: jti ${r.jti})`,
+    run: async (ctx, a) => {
+      const me = localIdentity(ctx);
+      const aud = ((await ctx.call('health', {})) as { identity: string | null }).identity;
+      if (!aud) throw new Refusal(404, 'no_identity', 'the node has no identity a link could be for');
+      const { token, claims } = mintViewLink(me, aud, a.owner as string, a.name as string, ctx.now(), (a.ttl as number | undefined) ?? VIEW_LINK_DEFAULT_SEC);
+      const at = String(a.at ?? ctx.url ?? '').replace(/\/+$/, '');
+      return { link: `${at}/view/${encodeURIComponent(claims.owner)}/${encodeURIComponent(claims.name)}#link=${token}`, jti: claims.jti, expires: new Date(claims.exp * 1000).toISOString(), node: aud };
     } },
   { name: 'rotate', signs: true, alone: true, description: 'A new key, signed over by the current one.', input: obj({}),
     access: { local: 'it replaces the private key on this machine' }, say: (r) => `rotated ${r.identity}'s key`,

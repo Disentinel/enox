@@ -1,10 +1,12 @@
 // The page of a view (r_subscribe): static, the same for every view. It reads
 // its owner and name from its own path, opens its own path as an event stream
-// with the reader's bearer token (from #token=…, or typed into the page; held
-// in the page's memory only), and shows the rows of the view's literal lighting up as they come
+// with the reader's bearer token (#token=…) or a view link a grantee minted
+// with its own key (#link=…, src/viewlink.ts) — from the fragment, which the
+// browser never sends, or typed into the page; held in the page's memory
+// only and sent in the Authorization header — and shows the rows of the view's literal lighting up as they come
 // and going out as they go. Plain HTML and JS: no build step.
 export const VIEW_PAGE = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer">
 <title>FKTS view</title>
 <style>
 :root { --bg:#fff; --fg:#1d1d1f; --mute:#6e6e73; --line:#e5e5ea; --on:#d8f5dd; --off:#fbe0e0; }
@@ -17,13 +19,14 @@ tr.on { background:var(--on); transition:background 2s; } tr.off { background:va
 form { margin:12px 0; display:none; } input { font:inherit; padding:4px; width:22em; max-width:100%; }
 </style></head><body>
 <h1 id="title"></h1><div id="lit"></div><div id="status">connecting…</div>
-<form id="auth"><input id="tok" type="password" placeholder="operator token"> <button>open</button></form>
+<form id="auth"><input id="tok" type="password" placeholder="operator token or view link"> <button>open</button></form>
 <table><thead id="head"></thead><tbody id="rows"></tbody></table>
 <script>
 const [, , owner, name] = location.pathname.split('/').map(decodeURIComponent);
 document.getElementById('title').textContent = name + ' — ' + owner;
 const $ = (id) => document.getElementById(id);
-let token = new URLSearchParams(location.hash.slice(1)).get('token');
+const given = new URLSearchParams(location.hash.slice(1));
+let token = given.get('token') || given.get('link');
 if (location.hash) history.replaceState(null, '', location.pathname);
 const rows = new Map();
 const key = (r) => JSON.stringify([r.identity, r.cells]);
@@ -45,7 +48,7 @@ function frame(f) {
   for (const r of f.added || []) { if (rows.has(key(r))) continue; const t = tr(r); $('rows').appendChild(t); rows.set(key(r), t); light(t); }
 }
 async function open() {
-  const res = await fetch(location.pathname, { headers: { accept: 'text/event-stream', ...(token ? { authorization: 'Bearer ' + token } : {}) } });
+  const res = await fetch(location.pathname, { headers: { accept: 'text/event-stream', ...(token ? { authorization: (token.includes('.') ? 'RoflenoxView ' : 'Bearer ') + token } : {}) } });
   if (!res.ok) { const b = await res.json().catch(() => ({})); $('status').textContent = res.status + ' ' + (b.message || b.error || ''); $('auth').style.display = 'block'; return; }
   $('auth').style.display = 'none';
   const rd = res.body.getReader(); const dec = new TextDecoder(); let buf = '';

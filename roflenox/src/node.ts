@@ -42,6 +42,7 @@ import { Hub, type Frame, type Sink } from './subscribe.ts';
 import { whyNotDelegated, whyNotReadable } from './expiry.ts';
 import { open as openSealed, type Envelope } from './seal.ts';
 import { OAuth, type OAuthOptions } from './oauth.ts';
+import { checkViewLink, REVOKE_LINK, type ViewLinkClaims } from './viewlink.ts';
 
 export const DEFAULT_FRESHNESS_SEC = 300;
 
@@ -348,6 +349,8 @@ export class RoflenoxNode {
   /** Frames the journals were sent, waiting to be turned into a signed batch. */
   private readonly journalFrames: { name: string; literal: string; frame: Frame }[] = [];
   private expiryTimer: NodeJS.Timeout | null = null;
+  /** Open streams read by a view link, by issuer and jti: ended when the issuer revokes the link. */
+  private readonly linkEnds = new Map<string, Set<() => void>>();
 
   private constructor(o: NodeOptions) {
     this.dataDir = o.dataDir;
@@ -669,21 +672,51 @@ export class RoflenoxNode {
   /** Who signed this request (RFC 9421), or null for an unsigned one. */
   authenticate(method: string, uri: string | readonly string[], headers: Record<string, string | string[] | undefined>, body: Buffer | null): string | null {
     return verifyRequest(method, uri, headers, body, {
-      lookup: (keyId) => {
-        if (this.identity && keyId === this.identity.keyId) {
-          return { identity: this.identity.name, key: this.identity.identityDoc().doc.keys.find((k) => k.key_id === keyId)! };
-        }
-        for (const [identity, docs] of this.idDocs) {
-          const key = docs[docs.length - 1]!.doc.keys.find((k) => k.key_id === keyId);
-          if (key && keyValidAt(key, this.now())) return { identity, key };
-        }
-        return null;
-      },
+      lookup: (keyId) => this.keyFor(keyId),
       nowMs: this.now(),
       windowMs: this.freshnessMs,
       seen: this.requestNonces,
     });
   }
+
+  /** The identity a key signs for here, while the key is valid now. */
+  private keyFor(keyId: string): { identity: string; key: KeyEntry } | null {
+    if (this.identity && keyId === this.identity.keyId) {
+      return { identity: this.identity.name, key: this.identity.identityDoc().doc.keys.find((k) => k.key_id === keyId)! };
+    }
+    for (const [identity, docs] of this.idDocs) {
+      const key = docs[docs.length - 1]!.doc.keys.find((k) => k.key_id === keyId);
+      if (key && keyValidAt(key, this.now())) return { identity, key };
+    }
+    return null;
+  }
+
+  /** A VIEW LINK (src/viewlink.ts) checked for `owner`'s view `name` on
+   *  this node now: its claims, whose `iss` the view is then read as; a 401
+   *  otherwise. */
+  viewLink(token: string, owner: string, name: string): Promise<ViewLinkClaims> {
+    return this.serial(async () => {
+      if (!this.identity) throw new Refusal(404, 'no_identity', 'this node has no identity a link could be for');
+      return checkViewLink(token, {
+        lookup: (k) => this.keyFor(k), audience: this.identity.name, owner, name, nowMs: this.now(),
+        revoked: async (iss, jti) => this.chains.has(iss) && (await this.engine.sysRows(`edge[${bookOf(iss)}](F, ${roflString(jti)}, ${roflString(REVOKE_LINK)}, T)`))
+          .some((r) => (this.assertions.of(iss).get(String(r[0]))?.C ?? 0) > 0),
+      });
+    });
+  }
+
+  /** The node's clock, in ms. */
+  clockMs(): number { return this.now(); }
+
+  /** Call `end` when `iss` revokes its link `jti`; returns the call that stops watching. */
+  onLinkRevoked(iss: string, jti: string, end: () => void): () => void {
+    const k = `${iss}\0${jti}`;
+    const s = this.linkEnds.get(k) ?? new Set();
+    s.add(end);
+    this.linkEnds.set(k, s);
+    return () => { s.delete(end); if (s.size === 0) this.linkEnds.delete(k); };
+  }
+
 
   /** `mirrored`: the batch came by a feed or an envelope, not from its author
    *  posting here — its rules are inert until trusted (r_foreign_rules_opt_in). */
@@ -1073,10 +1106,14 @@ export class RoflenoxNode {
     try {
       await this.advanceWorlds(v, seq, plan);
       const access = fresh || v.rules.length > 0 || v.facts.some((f) => MOVES_ACCESS.has(f.relation));
-      await this.hub.settle(v.manifest.digest, access);
+      await this.hub.settle(v.manifest.digest, access, { book: bookOf(v.manifest.identity), facts: new Set(v.facts.map(factId)) });
       if (v.manifest.identity === this.identity?.name && v.facts.some((f) => f.relation === JOURNAL)) await this.configureJournals();
       this.drainJournals();
       await this.armExpiry();
+      for (const f of v.facts) {
+        if (f.relation !== REVOKE_LINK || f.confidence <= 0) continue;
+        for (const end of [...this.linkEnds.get(`${v.manifest.identity}\0${f.source}`) ?? []]) end();
+      }
     } catch (e) {
       if (!this.engine.dead) process.stderr.write(`roflenox: subscriptions after ${v.manifest.digest}: ${(e as Error).message}\n`);
     }

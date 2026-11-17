@@ -5447,6 +5447,104 @@
    "red": [
     "pods: the coordinator subscriber equals the whole world after a load, a local edit, a cross-file edit and a deletion"
    ]
+  },
+  {
+   "id": "MC1",
+   "title": "view links: expiry not checked",
+   "file": "src/viewlink.ts",
+   "edits": [
+    [
+     "  if (now >= k.exp) throw bad('has expired');",
+     "  if (false) throw bad('has expired');"
+    ]
+   ],
+   "red": [
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line"
+   ]
+  },
+  {
+   "id": "MC2",
+   "title": "view links: a link for another node accepted",
+   "file": "src/viewlink.ts",
+   "edits": [
+    [
+     "  if (k.aud !== c.audience) throw",
+     "  if (false) throw"
+    ]
+   ],
+   "red": [
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line"
+   ]
+  },
+  {
+   "id": "MC3",
+   "title": "view links: a link for another view accepted",
+   "file": "src/viewlink.ts",
+   "edits": [
+    [
+     "  if (k.owner !== c.owner || k.name !== c.name) throw",
+     "  if (false) throw"
+    ]
+   ],
+   "red": [
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line"
+   ]
+  },
+  {
+   "id": "MC4",
+   "title": "view links: the signature not checked",
+   "file": "src/viewlink.ts",
+   "edits": [
+    [
+     "  if (!ok) throw bad('does not verify');",
+     "  void ok;"
+    ]
+   ],
+   "red": [
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line"
+   ]
+  },
+  {
+   "id": "MC5",
+   "title": "view links: an issuer's revocation not checked",
+   "file": "src/viewlink.ts",
+   "edits": [
+    [
+     "  if (await c.revoked(k.iss, k.jti)) throw",
+     "  if (false) throw"
+    ]
+   ],
+   "red": [
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line"
+   ]
+  },
+  {
+   "id": "MC6",
+   "title": "view links: a stream opened by a link is not ended when the link is revoked",
+   "file": "src/http.ts",
+   "edits": [
+    [
+     "() => over('link_revoked', 'the view link was revoked by its issuer')",
+     "() => {}"
+    ]
+   ],
+   "red": [
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line"
+   ]
+  },
+  {
+   "id": "MC7",
+   "title": "subscriptions: a reader who sees a book in part (an export) is not sent that book's new facts",
+   "file": "src/subscribe.ts",
+   "edits": [
+    [
+     "      const partial = batch !== undefined && sub.scope.get(batch.book)?.only != null;",
+     "      const partial = false;"
+    ]
+   ],
+   "red": [
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line"
+   ]
   }
  ]
 }

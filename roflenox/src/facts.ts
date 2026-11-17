@@ -53,10 +53,13 @@ export const VIEW = 'roflenox:view';
 export const JOURNAL = 'roflenox:journal';
 export const APPEARED = 'roflenox:appeared';
 export const VANISHED = 'roflenox:vanished';
+/** {source: <a view link's jti>, relation: "roflenox:revoke_link", target: <anything>}
+ *  in the link issuer's own book: the link opens nothing from then on (src/viewlink.ts). */
+export const REVOKE_LINK = 'roflenox:revoke_link';
 /** The node's own relations — a closed list: no other roflenox: relation is
  *  admitted, so none can slip past a rule that names them. */
 export const RESERVED = ['roflenox:rule', 'roflenox:trust_rules', GRANT, DELEGATE, EXPORT, 'roflenox:follow',
-  'roflenox:result', EMBEDDER, SEARCH, EMBEDDING, VIEW, JOURNAL, APPEARED, VANISHED] as const;
+  'roflenox:result', EMBEDDER, SEARCH, EMBEDDING, VIEW, JOURNAL, APPEARED, VANISHED, REVOKE_LINK] as const;
 /** What a wildcard export ("*") never covers: every node relation but the
  *  export rule itself. A search, a rule, a grant, a trust or a follow says
  *  what its author asked or allowed, not what they published — only an

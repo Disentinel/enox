@@ -45,6 +45,8 @@ export interface Running {
   dir: string;
   me: LocalIdentity;
   clock: Clock;
+  /** The HTTP server, for a test that watches the requests it receives. */
+  server?: http.Server;
   stop: () => Promise<void>;
 }
 
@@ -73,7 +75,7 @@ export async function start(dir: string, name: string, o: Partial<NodeOptions> &
   clocks.set(url, clock);
   if (o.publicUrl) origins.set(url, new URL(o.publicUrl).origin);
   return {
-    node, url, dir, me, clock,
+    node, url, dir, me, clock, server,
     stop: async () => {
       await new Promise<void>((r) => server.close(() => r()));
       await node.close();
