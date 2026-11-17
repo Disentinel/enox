@@ -351,6 +351,100 @@ perspective: "journal:<name>"}`, and `why` of one ends with `caused by batch
 rows had to be read whole), it compares the answer with what it last said of
 each row, so nothing is said twice or missed across a restart.
 
+## 10. Pods: each node holds only its files, a coordinator holds the question
+
+A **pod** is a node of its own identity beside an engine that holds one
+program (the JS model of `@grafema/rofl`, or any ROFL files) over **only its
+files** of a corpus, plus the corpus's core (the facts a scan writes naming no
+file: the listing, the strings). A **coordinator** is a plain node that
+follows the pods' feeds and holds the cross-file rules and the question; a
+subscriber on it (step 9) is sent each pod's edit as a delta. `src/federation.ts`.
+
+```
+  pod-0 (files A)                 pod-1 (files B)
+  engine: program + core + A      engine: program + core + B
+  watch(escapes) -> rows +/-      watch(escapes) -> rows +/-
+  node pod-0: signed batches      node pod-1: signed batches
+        \  roflenox:follow (pull)  /
+         v                        v
+   coordinator: decode rules (one per escape) + cross-file rules
+   GET /subscribe?query=exports_name(F, Name, File)  -> full, then deltas
+```
+
+**What crosses** is decided by the coordinator's rules, not by a model's
+names: every relation their bodies read, and the question's own relation
+(`escapesOf`), narrowed by the constants a premise spells
+(`ast_node(E, "export_all_declaration", File)` lets only those rows cross; a
+premise with no constant, or under `not`, lets all of them). A row of `R` is
+published as one fact per cell, `{source: <row id>, relation: "row:R#i",
+target: <cell>}`; a row that goes is re-asserted at confidence 0. The
+coordinator reads them back with one rule per escape (`decodeRules`), over
+every book it follows (`follows(N, B)`), through each fact's current assertion.
+
+Run it (needs `ROFL_BIN`, a `rofl` with `watch`; nothing to build):
+
+```sh
+export ROFL_BIN=/path/to/rofl            # Disentinel/rofl with watch
+node --experimental-strip-types --no-warnings --test test/pods.test.ts      # the oracle, ~13 s
+npm run mutants -- --only P1,P2,P3,P4                                         # its planted faults, all red
+node --experimental-strip-types --no-warnings scripts/pods-cost.ts DIR 3 --interleave   # the cost on a corpus
+```
+
+The test and the cost script stand the federation up with
+`test/pods-harness.ts` (`Federation.start(root, assign, pods)`): it scans the
+corpus with the pinned `@grafema/rofl`'s `rofl scan`, cuts the facts by file
+(`splitFacts`: a node id's prefix `n<16 hex>_` names its file), starts a node
+and a `Pod` per pod, grants the coordinator its books, publishes on the
+coordinator the rules (`RULES`: the JS model's three rules of `exports_name`
+that read another file and the two `[surface]` mirrors they read, books
+dropped; plus `decodeRules(ESCAPES)`) and a `roflenox:follow`
+per pod, and subscribes. To do it by hand, the same calls in this order:
+`Pod.start({program, escapes, publish}, core, files)` per pod (`publish` signs
+the facts as the pod's identity into its node); on each pod a
+`roflenox:grant` to the coordinator; on the coordinator one `roflenox:rule`
+per rule and decode rule and one `roflenox:follow` per pod (target: its
+invitation link), then `./src/cli.ts follow` (or `mirror`). An edit is
+`pod.edit(file, factsNow | null, coreNow)`: the pod takes the difference by
+delta (at most `DELTA_RETRACTS` facts out) or evaluates its files anew, and
+publishes only the rows that came and went.
+
+**The oracle** (`test/pods.test.ts`): the corpus scanned anew and evaluated in
+one engine answers the question; after the load, an edit that moves only its
+own file's rows, an edit on pod 0 that moves what files of pod 1 offer (a
+function renamed behind `export *`) and a deletion, the subscriber's rows equal
+it, row for row. The planted faults `P1` (a pod never retires a row), `P2` (an
+escape omitted), `P3` (constants misread), `P4` (anew forgets what went) turn it red.
+
+**`why` on the coordinator** reaches the pod's signed batch: the row's facts,
+their batch digest, admission and the pod's batch number, and the grant it
+reads by. Below that is the pod's own proof, which `pod.why(L)` answers in
+the pod's engine (down to the scanner's facts); the two are not stitched.
+
+**Measured** (vscode `src/vs/base/common`, 155 files, no tests; 3 pods by
+`--interleave`; the `fast` profile of rofl with watch; a shared laptop):
+
+| | whole world, one engine | pods (each) | coordinator |
+|---|---|---|---|
+| evaluation | 26.1 s | 4.3 – 6.8 s (52 files) | — |
+| engine memory | 2 208 MB | 551 – 736 MB (+17 MB its node) | 33 – 60 MB |
+| what it holds | 8.4 M facts | 628 – 830 rows published (1 767 – 2 404 facts) | the pods' 2 115 rows (5 989 facts) |
+| one file edited (an export added) | — | 215 ms by delta | frame 551 ms after the edit |
+| one function renamed behind `export *` | — | 6.8 s anew | frame 7.2 s |
+
+The answer (903 rows) equals the whole world's. On `observableInternal` (39
+files, 2 pods) with the follow executor at 50 ms: frames 284 ms (an export
+added) and 1.3 s (a rename, the pod anew).
+
+**What does not scale yet:** an edit that takes facts out costs the pod's
+whole evaluation, since the engine retracts one fact per request and each
+costs about two fifths of the pod's evaluation (115 facts of a rename: 39.5 s
+one by one, 1.8 s anew); every pod holds the whole corpus's core; the cut (which
+rules are the coordinator's) is given, not derived, and a model rule that
+crosses files through another relation (here `may_be_node`, behind
+`export { x }` of an imported `x`) must be among the coordinator's rules or the
+oracle goes red; a cell's type is lost on the wire (an atom and a string
+arrive as one text, an integer as its digits).
+
 ## Known defects (found while writing this guide)
 
 1. Fixed: running `stdio` beside `serve` on one data directory used to fork the

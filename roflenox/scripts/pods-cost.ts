@@ -1,10 +1,12 @@
 // THE COST OF PODS on a real corpus (src/federation.ts, test/pods-harness.ts):
 //
-//   node --experimental-strip-types --no-warnings scripts/pods-cost.ts DIR [PODS] [--each] [--interleave]
+//   node --experimental-strip-types --no-warnings scripts/pods-cost.ts DIR [PODS] [--each] [--interleave] [--executor]
 //
 // DIR is copied to a throwaway directory first (the run edits files). The
 // files, in path order, are cut into PODS contiguous ranges (2 by default;
 // --interleave deals them out in turn, so neighbours land on different pods).
+// The coordinator pulls each pod's feed after a step (one tick of the follow
+// executor), or with --executor runs the follow executor every 50 ms.
 // It prints, as one JSON object: the whole world (scan and evaluation in one
 // engine: ms, engine RSS, facts, rows); the federation's start (ms, each pod's
 // files, facts, published rows and engine RSS, the coordinator's engine RSS);
@@ -22,6 +24,7 @@ import { tmpDir } from '../test/helpers.ts';
 
 const each = process.argv.includes('--each');
 const interleave = process.argv.includes('--interleave');
+const executor = process.argv.includes('--executor');
 const [src, n = '2'] = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 if (!src) { console.error('usage: scripts/pods-cost.ts DIR [PODS]'); process.exit(1); }
 const pods = Number(n);
@@ -38,7 +41,7 @@ const out: Record<string, unknown> = { corpus: src, whole: { ms: ms(whole.ms), e
 const count = filesOf(scan(root), root).length;
 const per = Math.ceil(count / pods);
 const t0 = performance.now();
-const started = await Federation.start(root, (_f, k) => (interleave ? k % pods : Math.floor(k / per)), pods);
+const started = await Federation.start(root, (_f, k) => (interleave ? k % pods : Math.floor(k / per)), pods, executor ? { follow: 'executor', intervalMs: 50 } : {});
 const f = started.fed;
 try {
   await f.sub.next(100_000);
