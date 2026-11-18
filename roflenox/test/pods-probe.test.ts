@@ -8,7 +8,7 @@ import { tmpDir } from './helpers.ts';
 const CORPUS: Record<string, string> = {
   'lib/a.ts': 'export function f() { return 1; }\nexport function g() { return 2; }\n',
   'lib/b.ts': "export * from './a';\nexport function hb() { return 3; }\n",
-  'app/c.ts': "export * from '../lib/b';\n",
+  'app/c.ts': "export * from '../lib/b.js';\n",
   'app/d.ts': "export * from './c';\nexport const k = 1;\n",
 };
 // A: three pods, the chain a -> b -> c -> d crosses a pod at every hop.

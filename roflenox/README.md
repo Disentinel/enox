@@ -591,13 +591,34 @@ commit before as the control, run beside it; "listing" the `fs_*` facts,
 
 On base/common the pods' engines are 693 / 545 / 597 MB before and 701 / 549 /
 583 MB after (noise), the oracle equal at the end of both runs (891 rows); a
-new string reaches 1 pod, a new file all 3 (one directory). What a pod's
-listing still holds is the whole listing of every directory its imports walk
-into: `file_stem` reads a directory's every file to find a stem it cuts with
-`str_sub`, which no key can bind, so a pod that imports into
-`base/common` holds its listing whole (on base/common, one directory, the
-files share stays 73 – 96%). The share falls with the corpus where the
-directories walked into do not grow with it.
+new string reaches 1 pod, a new file all 3 (one directory).
+
+**Keyed through the builtins** (2026-11-18): `file_stem` finds a file by its
+stem, its name less the last extension, cut with `str_sub`, and the router
+keyed the listing by the directory alone, so a pod held the whole listing of
+every directory its imports walk into. The router now runs a rule's builtins
+FORWARD, with the engine's own (`evalStrOp`, `evalArith` of the pinned
+package): on a listing fact's name it computes the stem, on a pod's import
+segment the stem the import asks for (`./a.js` asks `a`), and lays a name only
+where the two meet. The program's own tables (`index_file`) are read before
+the listing they key, so `index.ts` keys by name, not by directory. Same
+corpus, same machine, the commit before as the control:
+
+| | core facts per pod | listing per pod | files listed per pod | route ms, all pods |
+|---|---|---|---|---|
+| base+platform+editor, 1 727 files, 13 pods | 10 328 – 20 565 → 10 136 – 20 092 | 5 – 29% → 5 – 20% | 12 – 66% → 9 – 29% | 1 579 → 1 586 |
+| base/common, 153 files, 3 pods (pods-cost) | 8 090 / 5 918 / 4 746 (the run before) → 8 056 / 5 859 / 4 695 | | | |
+
+A hand count of the files each pod's relative imports name, and its own files,
+is 9 – 24% at 1 727 files: what is left above it is the widening of the keys
+(a directory and a stem held separately, not as a pair), not the listing of a
+directory. On base/common every edit of pods-cost (a string, a new file
+beside, a rename) touches 1 pod of 3, the new file too (all 3 before: every
+pod walking the directory was given its listing), and the oracle is equal at
+the end. The
+stem is the only position of the JS model the router could not key and now
+does: a sweep of every premise over a core relation with a builtin-written
+variable bound beside it found no other.
 
 The oracle equal at the end of every run. At these sizes the core is under 1%
 of what a pod's engine holds and the pod's memory does not move (within the
@@ -608,11 +629,11 @@ about 1.06 KB a core fact. At 11 100 files the core is about 88 facts a file,
 strings (~110 facts a file of the pod) and the part of the listing its walks
 and the names reach (75% of it at 1 067 files, 64% at 1 727: ~15 000 facts at
 11 100): ~170 000 facts (~180 MB) with 8 pods, ~55 000 (~60 MB) with 32.
-What still grows with the corpus: the listing of the directories a pod's
-imports walk into (above; the keys no longer carry a name like `index.ts`
-into every directory holding one), and the router, which holds the whole core
-once beside the scanner and routes slower than with one set of values (1.6 s
-for 13 pods at 1 727 files, against 0.3 s).
+What still grows with the corpus: the router, which holds the whole core once
+beside the scanner and routes slower than with one set of values (1.6 s for 13
+pods at 1 727 files, against 0.3 s), and computes the stem once for each
+distinct segment a pod holds (40 803 at 1 727 files, ~0.2 s, kept for the
+next route).
 
 **What does not scale yet:** (an edit that takes facts out cost the pod's
 whole evaluation while the engine retracted one fact per request, 343 ms a

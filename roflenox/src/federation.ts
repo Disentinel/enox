@@ -32,7 +32,9 @@
 // demand flows from a rule's head to its premises in a sideways order (the
 // relations with no core facts first), a premise keyed at the positions the
 // head's demand or an earlier premise binds to a STORED value (one some base
-// fact holds, never one a builtin computed). Each keyed position knows where
+// fact holds) or to one the rule's builtins compute from a single bound value:
+// those the router computes FORWARD, on the pod's values and on the core
+// fact's (forwardEval: a file's stem from its name). Each keyed position knows where
 // its values come from: the places of base relations (through the derived
 // relations between) and constants. A core fact is laid in a pod when one of
 // its relation's keys holds, at each keyed position, a value the pod's world
@@ -56,7 +58,8 @@ import { DEFAULT_ROFL_BIN, termCell, type Change } from './engine.ts';
 import { roflString, type Fact } from './facts.ts';
 import { BUILTIN, splitTop } from './rules.ts';
 
-const PARSER = path.join(path.dirname(fileURLToPath(import.meta.resolve('@grafema/rofl/package.json'))), 'dist/src/parser.js');
+const ROFL_DIST = path.join(path.dirname(fileURLToPath(import.meta.resolve('@grafema/rofl/package.json'))), 'dist/src');
+const PARSER = path.join(ROFL_DIST, 'parser.js');
 
 export const ROW = 'row:';
 /** The walls of a pod's world: a corpus's program runs far past the engine's default rows. */
@@ -166,9 +169,162 @@ const valueOf = (t: Term): string | null => (t.k === 's' ? `s${t.v}` : t.k === '
 export interface Key { at: number[]; from: { sources: Set<string>; values: Set<string> }[];
   /** Every premise read by this key binds nothing else (its other places are `_`): a test that SOME fact holds the
    *  keyed values, so one fact of each such tuple, a witness, is all a derivation reads. */
-  exists: boolean }
-/** What the program reads of the core: per relation its keys; the sources a pod must track and every key's constants. */
-export interface Demand { keys: Map<string, Key[]>; sources: Set<string>; values: Set<string> }
+  exists: boolean;
+  /** Per position, where the key reads not the fact's value there but what the rule's builtins compute from it
+   *  (a file's stem from its name): the values compared are those. */
+  calc?: (Calc | undefined)[] }
+/** A value computed forward by a rule's builtins from one value: every value the rule could bind its variable to. */
+export interface Calc { id: string; fn: (cell: string) => string[] }
+/** What the program reads of the core: per relation its keys; the sources a pod must track and every key's constants;
+ *  the computed sources (`~id`): what a Calc gives of the values held at its input sources. */
+export interface Demand { keys: Map<string, Key[]>; sources: Set<string>; values: Set<string>; calc: Map<string, { calc: Calc; input: Set<string> }> }
+
+type Subst = Map<string, Term>;
+/** A rule body's builtins run FORWARD from one variable's value, with the engine's own builtins (the package's
+ *  evalStrOp, evalArith): `calc(els, x, v)` is the function giving every value `x` can take when `v` holds a
+ *  value, or null when the builtins do not determine `x` from `v` alone. A derived premise that binds a variable a
+ *  builtin needs is unfolded (its rules, to depth 2); every other premise is taken to hold, so the values given are
+ *  a superset of what the engine derives, never fewer: a filter (`N > 1`) drops a value only where the engine's
+ *  same builtin fails for every derivation through it. */
+async function forwardEval(rules: Map<string, { head: Lit; body: Elem[] }[]>) {
+  const U = await import(path.join(ROFL_DIST, 'unify.js')) as {
+    walk: (t: Term, s: Subst) => Term; resolve: (t: Term, s: Subst) => Term; unify: (a: Term, b: Term, s: Subst) => Subst | null;
+    isGround: (t: Term) => boolean; canonTerm: (t: Term) => string; evalArith: (t: Term, s: Subst, fail?: { code: number }) => number | bigint | null;
+    mki: (v: number | bigint) => Term; mks: (v: string) => Term; mka: (n: string) => Term; ARITH_OPS: Set<string> };
+  const { evalStrOp, STR_ARITY } = await import(path.join(ROFL_DIST, 'reflect.js')) as {
+    evalStrOp: (t: Term, s: Subst, fail?: { code: number }) => Term | null | undefined; STR_ARITY: Map<string, number> };
+  const SYM: Term = { k: 'a', name: '\u0001sym' };
+  const known = (t: Term): boolean => t.k !== 'f' || ((U.ARITH_OPS.has(t.name) || STR_ARITY.has(t.name)) && t.args.every(known));
+  const ground = (t: Term, s: Subst): boolean => { const w = U.walk(t, s); return w.k !== 'v' && (w.k !== 'f' || w.args.every((a) => ground(a, s))); };
+  const hasSym = (t: Term): boolean => (t.k === 'a' && t.name === SYM.name) || (t.k === 'f' && t.args.some(hasSym));
+  /** A number or string a builtin side evaluates to, as the engine compares them; null where it fails. */
+  const side = (t: Term, s: Subst): bigint | null => {
+    const so = evalStrOp(t, s, { code: 0 });
+    if (so === undefined) { const n = U.evalArith(t, s, { code: 0 }); return n === null ? null : BigInt(n); }
+    return so !== null && so.k === 'i' ? BigInt(so.v) : null;
+  };
+  /** One builtin: a substitution, null (it fails: no derivation goes through), undefined (not yet evaluable). */
+  const step = (e: Elem & { t: 'bi' }, s: Subst, sym: boolean): Subst | null | undefined => {
+    const gl = ground(e.l, s), gr = ground(e.r, s);
+    if (e.op === 'is') {
+      if (!gr || !known(e.r)) return undefined;
+      if (sym) return gl ? s : U.unify(e.l, SYM, s);
+      const so = evalStrOp(e.r, s, { code: 0 });
+      let v: Term | null;
+      if (so === undefined) { const n = U.evalArith(e.r, s, { code: 0 }); v = n === null ? null : U.mki(n); } else v = so;
+      return v === null ? null : U.unify(e.l, v, s);
+    }
+    if (e.op === '=') return gl || gr ? (sym && gl && gr ? s : U.unify(e.l, e.r, s)) : undefined;
+    if (!gl || !gr) return undefined;
+    if (sym) return s;
+    if (e.op === '!=') return U.canonTerm(U.resolve(e.l, s)) !== U.canonTerm(U.resolve(e.r, s)) ? s : null;
+    if (!['<', '<=', '>', '>='].includes(e.op) || !known(e.l) || !known(e.r)) return undefined;
+    const a = side(e.l, s), b = side(e.r, s);
+    if (a === null || b === null) return null;
+    return (e.op === '<' ? a < b : e.op === '<=' ? a <= b : e.op === '>' ? a > b : a >= b) ? s : null;
+  };
+  let fresh = 0;
+  const rename = (t: Term, n: number): Term => (t.k === 'v' ? { k: 'v', name: `${t.name}'${n}` } : t.k === 'f' ? { ...t, args: t.args.map((a) => rename(a, n)) } : t);
+  const renameEl = (e: Elem, n: number): Elem => (e.t === 'bi' ? { ...e, l: rename(e.l, n), r: rename(e.r, n) }
+    : e.t === 'agg' ? { ...e, body: e.body.map((b) => renameEl(b, n)) } : { ...e, lit: { ...e.lit, args: e.lit.args.map((a) => rename(a, n)) } });
+  const varsIn = (t: Term, into: Set<string>) => { if (t.k === 'v') into.add(t.name); if (t.k === 'f') t.args.forEach((a) => varsIn(a, into)); };
+  /** The builtins, in the order they ran, of a symbolic run that unfolded nothing: a value's run is that order. */
+  let trace: number[] | null = null;
+  const solve = (els: Elem[], s: Subst, depth: number, sym: boolean, want: string, done: Set<number>): Subst[] => {
+    for (let i = 0; i < els.length; i++) {
+      const e = els[i]!;
+      if (done.has(i) || e.t !== 'bi') continue;
+      const r = step(e, s, sym);
+      if (r === undefined) continue;
+      if (r === null) return [];
+      trace?.push(i);
+      return solve(els, r, depth, sym, want, new Set(done).add(i));
+    }
+    // No builtin moves: unfold a derived premise holding a variable an open builtin (or the wanted one) needs.
+    const needed = new Set<string>([want]);
+    els.forEach((e, i) => { if (!done.has(i) && e.t === 'bi') { varsIn(e.l, needed); varsIn(e.r, needed); } });
+    for (let i = 0; i < els.length && depth > 0; i++) {
+      const e = els[i]!;
+      if (done.has(i) || e.t !== 'pos' || !rules.has(e.lit.rel)) continue;
+      const open = e.lit.args.filter((a) => a.k === 'v' && needed.has(a.name) && !ground(a, s));
+      if (open.length === 0 || !e.lit.args.some((a) => ground(a, s))) continue;
+      trace = null;
+      const out: Subst[] = [];
+      for (const r of rules.get(e.lit.rel)!) {
+        const n = ++fresh;
+        let s1: Subst | null = s;
+        r.head.args.forEach((h, j) => {
+          if (s1 === null) return;
+          const a = e.lit.args[j]!;
+          // Symbolically a value matches any constant of a head: the rule may hold for it.
+          if (sym && h.k !== 'v' && h.k !== 'f' && ground(a, s1) && hasSym(U.resolve(a, s1))) return;
+          s1 = U.unify(rename(h, n), a, s1);
+        });
+        if (s1 === null) continue;
+        const body = r.body.map((b) => renameEl(b, n));
+        for (const s2 of solve(body, s1, depth - 1, sym, '', new Set())) out.push(...solve(els, s2, depth, sym, want, new Set(done).add(i)));
+      }
+      return out;
+    }
+    return [s];
+  };
+  const memo = new Map<Elem[], Map<string, Calc | null>>();
+  let ids = 0;
+  return (els: Elem[], x: string, v: string): Calc | null => {
+    const m = memo.get(els) ?? new Map<string, Calc | null>();
+    memo.set(els, m);
+    const k = `${x}\0${v}`;
+    if (m.has(k)) return m.get(k)!;
+    trace = [];
+    const outs = solve(els, new Map([[v, SYM]]), 2, true, x, new Set());
+    const plan = trace as number[] | null;
+    trace = null;
+    const run = (cell: string): Subst[] => {
+      const s0: Subst = new Map([[v, termOfCell(cell, U)]]);
+      if (!plan) return solve(els, s0, 2, false, x, new Set());
+      let s: Subst | null | undefined = s0;
+      for (const i of plan) {
+        const e = els[i] as Elem & { t: 'bi' };
+        // An `is` writing a variable no step bound yet binds it in place; every other step as the engine runs it.
+        if (e.op === 'is' && e.l.k === 'v' && U.walk(e.l, s).k === 'v' && known(e.r) && ground(e.r, s)) {
+          const so = evalStrOp(e.r, s, { code: 0 });
+          let w: Term | null;
+          if (so === undefined) { const n = U.evalArith(e.r, s, { code: 0 }); w = n === null ? null : U.mki(n); } else w = so;
+          if (w === null) { s = null; break; }
+          s.set((U.walk(e.l, s) as { name: string }).name, w);
+          continue;
+        }
+        s = step(e, s, false);
+        if (!s) break;
+      }
+      return s === null ? [] : s === undefined ? solve(els, s0, 2, false, x, new Set()) : [s];
+    };
+    let c: Calc | null = null;
+    if (outs.length > 0 && outs.every((s) => ground({ k: 'v', name: x }, s))) {
+      const cache = new Map<string, string[]>();
+      c = { id: String(ids++), fn: (cell) => {
+        let got = cache.get(cell);
+        if (got) return got;
+        const vals = new Set<string>();
+        for (const s of run(cell)) {
+          const t = U.resolve({ k: 'v', name: x }, s);
+          const w = U.isGround(t) ? valueOf(t) : null;
+          // The analysis said the builtins bind x; a run that does not is a defect, not an answer.
+          if (w === null) throw new Error(`the router computed no value of ${x} from ${v}=${cell}`);
+          vals.add(w);
+        }
+        got = [...vals];
+        cache.set(cell, got);
+        return got;
+      } };
+    }
+    m.set(k, c);
+    return c;
+  };
+}
+/** A router value (valueOf) as a term. */
+const termOfCell = (c: string, U: { mki: (v: number | bigint) => Term; mks: (v: string) => Term; mka: (n: string) => Term }): Term =>
+  (c[0] === 's' ? U.mks(c.slice(1)) : c[0] === 'i' ? U.mki(BigInt(c.slice(1))) : U.mka(c.slice(1)));
 
 /** The program's demand on the relations of `homeless` (those the core holds facts of), from the escapes down;
  *  null where the program holds a construct the analysis does not model (then a pod is given the whole core). */
@@ -189,6 +345,7 @@ export async function coreDemand(program: string, roots: string[], homeless: Set
       rule({ rel: s.closure, args: [X!, Z!] }, [{ t: 'pos', lit: { rel: c.head.rel, args: [X!, Y!] } }, { t: 'pos', lit: { rel: s.closure, args: [Y!, Z!] } }]);
     } else if (s.kind !== 'function') return null;
   }
+  const forward = await forwardEval(rules);
   // Where a variable's values come from, as tokens: `b:R#j` the values facts of R hold at j in the pod's world,
   // `d:R#j` those a derived R holds at j (resolved below to the base tokens and constants its rules read), `c:V` V.
   const tok = (rel: string, j: number) => `${rules.has(rel) ? 'd' : 'b'}:${rel}#${j}`;
@@ -240,6 +397,11 @@ export async function coreDemand(program: string, roots: string[], homeless: Set
       derived.set(`${rel}#${j}`, from);
     });
   }
+  // `x:id` the values a rule's builtins compute from those of a bound variable (a Calc, run forward): resolved to
+  // the computed source `~id`, whose input is what that variable's tokens resolve to, and to the Calc's values of
+  // the input's constants.
+  const computed = new Map<string, { calc: Calc; tokens: Set<string> }>();
+  const calcs = new Map<string, { calc: Calc; input: Set<string> }>();
   const resolve = (tokens: Iterable<string>): { sources: Set<string>; values: Set<string> } => {
     const sources = new Set<string>(), values = new Set<string>(), seen = new Set<string>();
     const go = (t: string) => {
@@ -247,7 +409,16 @@ export async function coreDemand(program: string, roots: string[], homeless: Set
       seen.add(t);
       if (t.startsWith('c:')) values.add(t.slice(2));
       else if (t.startsWith('b:')) sources.add(t.slice(2));
-      else for (const u of derived.get(t.slice(2)) ?? []) go(u);
+      else if (t.startsWith('x:')) {
+        const id = t.slice(2), c = computed.get(id)!;
+        sources.add(`~${id}`);
+        if (!calcs.has(`~${id}`)) {
+          calcs.set(`~${id}`, { calc: c.calc, input: new Set() });
+          const input = resolve(c.tokens);
+          calcs.set(`~${id}`, { calc: c.calc, input: input.sources });
+          for (const v of input.values) for (const w of c.calc.fn(v)) values.add(w);
+        } else for (const v of resolve(c.tokens).values) for (const w of c.calc.fn(v)) values.add(w);
+      } else for (const u of derived.get(t.slice(2)) ?? []) go(u);
     };
     for (const t of tokens) go(t);
     return { sources, values };
@@ -262,20 +433,52 @@ export async function coreDemand(program: string, roots: string[], homeless: Set
       if (anchor.get(rel) && rs.some((r) => !r.body.some((e) => e.t === 'pos' && anchored(e.lit.rel)))) { anchor.set(rel, false); changed = true; }
     }
   }
+  // RIGID: the program's own facts, every derivation reading only rigid premises (a table such as index_file): no
+  // core fact is read through it, so it is read first, its constants keying the premises after it.
+  const rigid = new Map<string, boolean>([...rules.keys()].map((r) => [r, true]));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [rel, rs] of rules) {
+      if (rigid.get(rel) && rs.some((r) => r.body.some((e) => e.t !== 'bi' && (e.t !== 'pos' || !rigid.get(e.lit.rel))))) { rigid.set(rel, false); changed = true; }
+    }
+  }
   // Demand, from the escapes down: rel -> its keys ('' all of it), each position with the tokens its values come from.
   // Magic sets with each magic relation widened to the values its sources hold, one set per key position.
-  const alts = new Map<string, Map<string, { from: Set<string>[]; exists: boolean }>>();
-  const todo: [string, number[]][] = [];
-  const want = (rel: string, at: number[], from: Set<string>[], exists = false) => {
-    const a = alts.get(rel) ?? new Map<string, { from: Set<string>[]; exists: boolean }>();
+  type Alt = { at: number[]; calc: (Calc | undefined)[]; from: Set<string>[]; exists: boolean };
+  const alts = new Map<string, Map<string, Alt>>();
+  const todo: [string, string][] = [];
+  const want = (rel: string, at: number[], from: Set<string>[], exists = false, calc: (Calc | undefined)[] = []) => {
+    const a = alts.get(rel) ?? new Map<string, Alt>();
     alts.set(rel, a);
-    const k = at.join(',');
+    const k = at.map((j, i) => (calc[i] ? `${j}~${calc[i]!.id}` : j)).join(',');
     const was = a.get(k);
-    if (!was) { a.set(k, { from: from.map((s) => new Set(s)), exists }); todo.push([rel, at]); return; }
+    if (!was) { a.set(k, { at, calc, from: from.map((s) => new Set(s)), exists: exists && !calc.some(Boolean) }); todo.push([rel, k]); return; }
     was.exists &&= exists;
     let grew = false;
     from.forEach((s, i) => { for (const t of s) if (!was.from[i]!.has(t)) { was.from[i]!.add(t); grew = true; } });
-    if (grew) todo.push([rel, at]);
+    if (grew) todo.push([rel, k]);
+  };
+  const varsOf = (t: Term, into: Set<string>) => { if (t.k === 'v') into.add(t.name); if (t.k === 'f') t.args.forEach((a) => varsOf(a, into)); };
+  /** A variable an `is` writes, its values computed forward from one bound variable's: bound to a computed token. */
+  const compute = (els: Elem[], bound: Map<string, Set<string>>) => {
+    const used = new Set<string>();
+    for (const e of els) if (e.t === 'bi') { varsOf(e.l, used); varsOf(e.r, used); }
+    for (let more = true; more;) {
+      more = false;
+      for (const e of els) {
+        if (e.t !== 'bi' || e.op !== 'is' || e.l.k !== 'v' || bound.has(e.l.name)) continue;
+        for (const v of used) {
+          const c = bound.has(v) ? forward(els, e.l.name, v) : null;
+          if (!c) continue;
+          const x = computed.get(c.id) ?? { calc: c, tokens: new Set<string>() };
+          computed.set(c.id, x);
+          bound.get(v)!.forEach((t) => x.tokens.add(t));
+          bound.set(e.l.name, new Set([`x:${c.id}`]));
+          more = true;
+          break;
+        }
+      }
+    }
   };
   /** The variables written once in a rule: a premise's place it alone holds binds nothing. */
   const onceIn = (head: Lit, els: Elem[]) => {
@@ -291,17 +494,35 @@ export async function coreDemand(program: string, roots: string[], homeless: Set
     const keyed = (l: Lit) => l.args.flatMap((a, j) => ((a.k === 'v' && bound.has(a.name)) || valueOf(a) !== null ? [j] : []));
     const fromOf = (l: Lit, at: number[]) => at.map((j) => { const a = l.args[j]!; return a.k === 'v' ? bound.get(a.name)! : new Set([constTok(a)!]); });
     const only = (l: Lit, at: number[]) => l.args.every((a, j) => at.includes(j) || (a.k === 'v' && once.has(a.name)));
-    // Sideways, greedily: next a premise over an anchored relation, then one something already binds, then the one
-    // bound at most places; else the first written.
-    const rank = (e: Elem & { t: 'pos' }) => { const k = keyed(e.lit).length; return (anchored(e.lit.rel) ? 4 : 0) + (k > 0 ? 2 : 0) + k / 100; };
+    // Sideways, greedily: next a premise over an anchored relation, then one over a rigid one, then one something
+    // already binds, then the one bound at most places; else the first written.
+    const rank = (e: Elem & { t: 'pos' }) => { const k = keyed(e.lit).length; return (anchored(e.lit.rel) ? 4 : rigid.get(e.lit.rel) ? 3 : 0) + (k > 0 ? 2 : 0) + k / 100; };
+    // The variables a builtin of this body writes: one bound already (by the head's demand) and absent from a
+    // premise over base facts keys that premise at the place it is computed from.
+    const written = new Set(els.flatMap((e) => (e.t === 'bi' && e.op === 'is' && e.l.k === 'v' ? [e.l.name] : [])));
+    compute(els, bound);
     while (left.length) {
       let i = 0;
       for (let j = 1; j < left.length; j++) if (rank(left[j]!) > rank(left[i]!)) i = j;
       const e = left.splice(i, 1)[0]!;
-      const at = keyed(e.lit);
-      want(e.lit.rel, at, fromOf(e.lit, at), only(e.lit, at));
+      const at = keyed(e.lit), from = fromOf(e.lit, at), calc: (Calc | undefined)[] = at.map(() => undefined);
+      if (!rules.has(e.lit.rel)) {
+        const here = new Set<string>();
+        e.lit.args.forEach((a) => varsOf(a, here));
+        e.lit.args.forEach((a, j) => {
+          if (a.k !== 'v' || bound.has(a.name) || at.includes(j)) return;
+          for (const x of written) {
+            const c = bound.has(x) && !here.has(x) ? forward(els, x, a.name) : null;
+            if (!c) continue;
+            at.push(j); from.push(bound.get(x)!); calc.push(c);
+            return;
+          }
+        });
+      }
+      want(e.lit.rel, at, from, only(e.lit, at), calc);
       e.lit.args.forEach((a, j) => { if (a.k === 'v' && isStored(e.lit.rel, j) && !bound.has(a.name)) bound.set(a.name, new Set([tok(e.lit.rel, j)])); });
       equate(els, bound);
+      compute(els, bound);
     }
     for (const e of els) {
       if (e.t === 'neg') { const at = keyed(e.lit); want(e.lit.rel, at, fromOf(e.lit, at), only(e.lit, at)); }
@@ -310,8 +531,8 @@ export async function coreDemand(program: string, roots: string[], homeless: Set
   };
   for (const r of roots) want(r, [], []);
   while (todo.length) {
-    const [rel, at] = todo.pop()!;
-    const { from } = alts.get(rel)!.get(at.join(','))!;
+    const [rel, k] = todo.pop()!;
+    const { at, from } = alts.get(rel)!.get(k)!;
     for (const r of rules.get(rel) ?? []) {
       const bound = new Map<string, Set<string>>();
       at.forEach((j, i) => { const h = r.head.args[j]; if (h?.k === 'v') bound.set(h.name, new Set(from[i])); });
@@ -320,20 +541,31 @@ export async function coreDemand(program: string, roots: string[], homeless: Set
   }
   const keys = new Map<string, Key[]>();
   const sources = new Set<string>(), values = new Set<string>();
-  const covers = (o: Key, k: Key) => (!o.exists || k.exists) && o.at.length < k.at.length && o.at.every((j, i) => {
-    const m = k.at.indexOf(j);
+  const place = (k: Key) => k.at.map((j, i) => (k.calc?.[i] ? `${j}~${k.calc[i]!.id}` : String(j)));
+  const covers = (o: Key, k: Key) => (!o.exists || k.exists) && o.at.length < k.at.length && place(o).every((p, i) => {
+    const m = place(k).indexOf(p);
     return m >= 0 && [...k.from[m]!.sources].every((s) => o.from[i]!.sources.has(s)) && [...k.from[m]!.values].every((v) => o.from[i]!.values.has(v));
   });
   for (const rel of homeless) {
     const a = alts.get(rel);
     if (!a) continue;
-    const ks: Key[] = [...a].map(([k, { from, exists }]) => ({ at: k === '' ? [] : k.split(',').map(Number), from: from.map(resolve), exists }));
+    const ks: Key[] = [...a.values()].map(({ at, calc, from, exists }) => ({ at, from: from.map(resolve), exists, ...(calc.some(Boolean) ? { calc } : {}) }));
     // A key that another covers adds nothing: the smaller one already lays every fact the larger does.
     const kept = ks.filter((k) => !ks.some((o) => covers(o, k)));
     for (const k of kept) for (const f of k.from) { f.sources.forEach((s) => sources.add(s)); f.values.forEach((v) => values.add(v)); }
     keys.set(rel, kept);
   }
-  return { keys, sources, values };
+  // The computed sources a kept key reads, and their inputs down to the base sources, tracked as any source is.
+  const calc = new Map<string, { calc: Calc; input: Set<string> }>();
+  const need = [...sources].filter((s) => s.startsWith('~'));
+  while (need.length) {
+    const x = need.pop()!;
+    if (calc.has(x)) continue;
+    calc.set(x, calcs.get(x)!);
+    for (const s of calcs.get(x)!.input) if (s.startsWith('~')) need.push(s); else sources.add(s);
+  }
+  for (const s of sources) if (s.startsWith('~')) sources.delete(s);
+  return { keys, sources, values, calc };
 }
 
 const ESC: Record<string, string> = { n: '\n', t: '\t', r: '\r', '\\': '\\', '"': '"', b: '\b', f: '\f' };
@@ -371,6 +603,8 @@ export function cellsOf(line: string): { rel: string; cells: string[] } {
 }
 
 const NODE_CELL = /^an[0-9a-f]{16}_/;
+/** The values a key compares at its i-th position for a fact's value there: the value, or what its Calc computes. */
+const valuesAt = (k: Key, i: number, c: string): string[] => { const x = k.calc?.[i]; return x ? x.fn(c) : [c]; };
 /** The values held, per group of sources (one key position's): a value held at any source of a group is the group's. */
 type Held = Map<string, Set<string>>;
 
@@ -389,25 +623,46 @@ export class CoreRouter {
   /** a key position's sources as one group, and the groups each source is in */
   private readonly group = new Map<object, string>();
   private readonly groupsOf = new Map<string, string[]>();
+  /** a computed source's input sources as one group -> the computed sources it feeds */
+  private readonly feeds = new Map<string, { x: string; calc: Calc }[]>();
 
   constructor(d: Demand | null) {
     this.d = d;
+    // A group is named by a short id: it is part of every index key.
+    const ids = new Map<string, string>();
+    const id = (sources: Set<string>) => { const n = [...sources].sort().join(' '); if (!ids.has(n)) ids.set(n, `g${ids.size}`); return ids.get(n)!; };
+    for (const [x, { calc, input }] of d?.calc ?? []) {
+      const g = id(input);
+      const fs = this.feeds.get(g) ?? [];
+      fs.push({ x, calc });
+      this.feeds.set(g, fs);
+      for (const s of input) { const gs = this.groupsOf.get(s) ?? []; if (!gs.includes(g)) gs.push(g); this.groupsOf.set(s, gs); }
+    }
     for (const k of [...d?.keys.values() ?? []].flat()) {
       for (const from of k.from) {
-        const g = [...from.sources].sort().join(' ');
+        const g = id(from.sources);
         this.group.set(from, g);
         for (const s of from.sources) { const gs = this.groupsOf.get(s) ?? []; if (!gs.includes(g)) gs.push(g); this.groupsOf.set(s, gs); }
       }
     }
   }
 
+  /** per relation, the groups each of its places' values are held in */
+  private readonly placeGroups = new Map<string, (string[] | undefined)[]>();
+  private groupsAt(rel: string, n: number): (string[] | undefined)[] {
+    let gs = this.placeGroups.get(rel);
+    if (!gs || gs.length < n) { gs = Array.from({ length: n }, (_, j) => this.groupsOf.get(`${rel}#${j}`)); this.placeGroups.set(rel, gs); }
+    return gs;
+  }
   private keysOf(rel: string): Key[] | undefined { return this.d ? this.d.keys.get(rel) : [{ at: [], from: [], exists: false }]; }
   /** A key holds a fact when at each of its positions the fact's value is a constant of it or held at one of its sources. */
   private holds(k: Key, f: { rel: string; cells: string[] }, held: Held): boolean {
-    return k.at.every((j, i) => {
-      const c = f.cells[j]!, from = k.from[i]!;
-      return from.values.has(c) || held.get(this.group.get(from)!)?.has(c) === true;
-    });
+    for (let i = 0; i < k.at.length; i++) {
+      const from = k.from[i]!, h = held.get(this.group.get(from)!), x = k.calc?.[i], c = f.cells[k.at[i]!]!;
+      if (!x) { if (!from.values.has(c) && h?.has(c) !== true) return false; continue; }
+      if (!x.fn(c).some((v) => from.values.has(v) || h?.has(v) === true)) return false;
+    }
+    return true;
   }
   /** Some key holds the fact: the pod may lay it. */
   private passes(f: { rel: string; cells: string[] }, held: Held): boolean {
@@ -421,7 +676,7 @@ export class CoreRouter {
       if (!f) continue;
       this.facts.delete(l);
       this.free.delete(l);
-      for (const k of this.keysOf(f.rel) ?? []) for (const j of k.at) this.at.get(f.cells[j]!)?.delete(l);
+      for (const k of this.keysOf(f.rel) ?? []) k.at.forEach((j, i) => { for (const c of valuesAt(k, i, f.cells[j]!)) this.at.get(c)?.delete(l); });
       for (const p of this.pods.values()) if (p.laid.has(l)) p.dirty = true;
     }
     for (const l of added) {
@@ -429,7 +684,7 @@ export class CoreRouter {
       const f = cellsOf(l.replace(/\.$/, ''));
       this.facts.set(l, f);
       if ((this.keysOf(f.rel) ?? []).some((k) => k.at.length === 0)) this.free.add(l);
-      for (const k of this.keysOf(f.rel) ?? []) for (const j of k.at) { const s = this.at.get(f.cells[j]!) ?? new Set<string>(); s.add(l); this.at.set(f.cells[j]!, s); }
+      for (const k of this.keysOf(f.rel) ?? []) k.at.forEach((j, i) => { for (const c of valuesAt(k, i, f.cells[j]!)) { const s = this.at.get(c) ?? new Set<string>(); s.add(l); this.at.set(c, s); } });
       for (const p of this.pods.values()) if (!p.dirty && this.passes(f, p.held)) p.dirty = true;
     }
   }
@@ -478,14 +733,18 @@ export class CoreRouter {
     const laid = new Set<string>();
     const held: Held = new Map();
     const todo = [...this.d?.values ?? []];
-    const hold = (s: string, c: string) => {
-      let more = false;
-      for (const g of this.groupsOf.get(s) ?? []) {
+    const hold = (s: string, c: string) => holdIn(this.groupsOf.get(s), c);
+    const holdIn = (groups: string[] | undefined, c: string) => {
+      if (!groups) return;
+      let more = false, fed: { x: string; calc: Calc }[] | undefined;
+      for (const g of groups) {
         const h = held.get(g) ?? new Set<string>();
         held.set(g, h);
-        if (!h.has(c)) { h.add(c); more = true; }
+        if (!h.has(c)) { h.add(c); more = true; const f = this.feeds.get(g); if (f) fed = fed ? fed.concat(f) : f; }
       }
       if (more) todo.push(c);
+      // A value new at a computed source's inputs: what its Calc computes of it is held there.
+      for (const { x, calc } of fed ?? []) for (const v of calc.fn(c)) hold(x, v);
     };
     for (const [s, at] of p.values) for (const c of at.keys()) hold(s, c);
     /** the existence tuples a laid fact holds; the least fact for each wanted one no laid fact holds */
@@ -493,7 +752,9 @@ export class CoreRouter {
     const tuple = (ki: number, k: Key, f: { rel: string; cells: string[] }) => `${f.rel}\0${ki}\0${k.at.map((j) => f.cells[j]).join('\0')}`;
     const consider = (l: string, f: { rel: string; cells: string[] }) => {
       if (laid.has(l)) return;
-      for (const [ki, k] of (this.keysOf(f.rel) ?? []).entries()) {
+      const ks = this.keysOf(f.rel) ?? [];
+      for (let ki = 0; ki < ks.length; ki++) {
+        const k = ks[ki]!;
         if (!this.holds(k, f, held)) continue;
         if (!k.exists) { lay(l, f); return; }
         const t = tuple(ki, k, f);
@@ -503,7 +764,8 @@ export class CoreRouter {
     const lay = (l: string, f: { rel: string; cells: string[] }) => {
       laid.add(l);
       (this.keysOf(f.rel) ?? []).forEach((k, ki) => { if (k.exists) witness.add(tuple(ki, k, f)); });
-      f.cells.forEach((c, j) => hold(`${f.rel}#${j}`, c));
+      const gs = this.groupsAt(f.rel, f.cells.length);
+      for (let j = 0; j < f.cells.length; j++) holdIn(gs[j], f.cells[j]!);
     };
     for (const l of this.free) consider(l, this.facts.get(l)!);
     for (let more = true; more;) {

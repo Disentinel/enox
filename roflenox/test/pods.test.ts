@@ -86,7 +86,7 @@ const ROUTED: Record<string, string> = {
   'lib/a.ts': 'export function f() { return 1; }\n',
   'lib/x.ts': "export * from './a';\nexport function x1() { return 0; }\n",
   'lib/b.ts': "export * from './h';\n",
-  'app/c.ts': "export * from '../lib/a';\nexport * from '../lib/h';\n",
+  'app/c.ts': "export * from '../lib/a.js';\nexport * from '../lib/h';\n",
   'app/d.ts': 'export const k = 1;\n',
 };
 const strFacts = (fed: Federation, s: string) => [...fed.core.keys()].filter((l) => l.includes(`(${JSON.stringify(s)},`));

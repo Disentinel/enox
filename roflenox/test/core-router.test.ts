@@ -41,3 +41,27 @@ test('core routed by key: a name held at one key of the listing does not open th
   assert.deepEqual(names('other/index.ts'), [], 'nor of other/index.ts: its own index.ts is the name\'s witness');
   assert.ok(app.length < core.size, `${app.length} of the core's ${core.size}`);
 });
+
+// A DIRECTORY OF MANY FILES, ONE OF THEM IMPORTED: the JS model finds a file by its stem (file_stem, its name less
+// the last extension, computed by str_sub), and the router keys that position through the rule's builtins, run
+// forward on the listing's names and on the pod's import segments. The pod of app/ holds the listing of the two
+// files it imports, `../big/f3` (by stem) and `../big/f5.js` (by the stem of `f5.js`), and none of the other ten.
+// The planted fault is mutant P11 (the stem's position not keyed: the directory laid whole).
+test('core routed by key: a pod importing one file of a large directory holds that file\'s listing, not the directory\'s', async () => {
+  const root = tmpDir('core-router-big');
+  const corpus: Record<string, string> = { 'app/main.ts': "export * from '../big/f3';\nexport * from '../big/f5.js';\n" };
+  for (let i = 0; i < 12; i++) corpus[`big/f${i}.ts`] = `export const v${i} = ${i};\n`;
+  for (const [f, t] of Object.entries(corpus)) { fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true }); fs.writeFileSync(path.join(root, f), t); }
+  const files = Object.keys(corpus).sort();
+  const scans = new Map(files.map((f) => [f, scanOne(root, f)]));
+  const core = new Set([...scans.values()].flatMap((s) => [...s.core]));
+  const d = await coreDemand(MODEL, ESCAPES.map((e) => e.rel), new Set([...core].map((l) => cellsOf(l).rel)));
+  assert.ok(d, 'the JS model is analysed');
+  const r = new CoreRouter(d);
+  r.core(core, []);
+  for (const f of files) r.files(f.startsWith('app/') ? 1 : 0, scans.get(f)!.facts, []);
+  r.route();
+  const app = [...r.share(1)].filter((l) => cellsOf(l).rel === 'fs_file_in');
+  const listed = app.map((l) => cellsOf(l).cells[2]!.slice(1)).filter((f) => f.startsWith('big/')).sort();
+  assert.deepEqual(listed, ['big/f3.ts', 'big/f5.ts'], `the pod of app/ lists of big/ ${listed.join(', ')}`);
+});
