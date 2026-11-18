@@ -70,6 +70,8 @@ jobs:
     outputs: { plan: '${{ steps.cut.outputs.plan }}', jobs: '${{ steps.cut.outputs.jobs }}' }
     steps:
       - uses: actions/checkout@v4
+      # No npm ci here: without the directory the cache's tar cannot unpack, and the cut is made on guessed costs.
+      - run: mkdir -p node_modules/.cache/roflenox-mutants
       - uses: actions/cache/restore@v4
         with: { path: roflenox/node_modules/.cache/roflenox-mutants, key: 'mutant-costs-${{ github.run_id }}', restore-keys: mutant-costs- }
       - uses: actions/setup-node@v4
@@ -127,6 +129,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - run: mkdir -p roflenox/node_modules/.cache/roflenox-mutants
       - uses: actions/cache/restore@v4
         with: { path: roflenox/node_modules/.cache/roflenox-mutants, key: 'mutant-costs-${{ github.run_id }}', restore-keys: mutant-costs- }
       - uses: actions/download-artifact@v4

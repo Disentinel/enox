@@ -36,11 +36,14 @@
 // mutant never measured is estimated by its file's measured ones, else by
 // COST below): a test file's mutants stay in one shard, so its setup is paid
 // once, unless they weigh more than a shard's share, and then they are dealt
-// out over the shards.
+// out over the shards. No shard is planned over CAP_MS: more shards are cut
+// than asked when the costs need them, and a mutant alone over it fails the
+// cut, named (scripts/shard-cut.ts).
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { cut } from './shard-cut.ts';
 
 const ROOT = path.join(import.meta.dirname, '..');
 const BUDGET_MS = 300_000;
@@ -48,6 +51,9 @@ const BUDGET_MS = 300_000;
  *  the budget left to the shard's baseline (a pods shard's: ~40 s under load) and to load. */
 const SHARD_BUDGET_MS = 120_000;
 const TARGET_MS = 60_000;
+/** What a shard's planned mutants may cost: the budget less its baseline (every red test once, ~40 s for a pods
+ *  shard under load). */
+const CAP_MS = SHARD_BUDGET_MS - 40_000;
 /** What one ordinary mutant costs when nothing was measured (2026-09-27). */
 const UNIT_MS = 1_700;
 const COSTS = path.join(ROOT, 'node_modules', '.cache', 'roflenox-mutants', 'costs.json');
@@ -114,26 +120,17 @@ function byFileOf(list: Mutant[]): Map<string, Mutant[]> {
   return byFile;
 }
 
-/** Split mutants into `n` shards by the test file of their first red test: heaviest first onto the lightest shard,
- *  so shards come out even and deterministic. A file whose mutants weigh more than a shard's share is dealt out
- *  mutant by mutant. */
-function shardOf(list: Mutant[], n: number): Map<Mutant, number> {
+/** Split mutants into shards by the test file of their first red test (scripts/shard-cut.ts): at least `n`, each
+ *  planned under CAP_MS by the kept costs, heaviest first onto the lightest shard, so shards come out even and
+ *  deterministic. */
+function shardsOf(list: Mutant[], n: number): { parts: Mutant[][]; ms: number[]; over: string[]; guessed: number } {
   const byFile = byFileOf(list);
   const cost = costsOf(list, byFile);
-  const share = [...cost.values()].reduce((a, b) => a + b, 0) / n;
-  const units: [string, Mutant[], number][] = [];
-  for (const [f, ms] of byFile) {
-    const w = ms.reduce((a, m) => a + cost.get(m)!, 0);
-    if (w <= share) units.push([f, ms, w]); else for (const m of ms) units.push([`${f}#${m.id}`, [m], cost.get(m)!]);
-  }
-  const weight = Array.from({ length: n }, () => 0);
-  const out = new Map<Mutant, number>();
-  for (const [, ms, w] of units.sort((x, y) => y[2] - x[2] || (x[0] < y[0] ? -1 : 1))) {
-    const k = weight.indexOf(Math.min(...weight));
-    weight[k] += w;
-    for (const m of ms) out.set(m, k + 1);
-  }
-  return out;
+  const measured = readCosts();
+  const units = [...byFile].map(([f, ms]) => ({ key: f, ids: ms.map((m) => m.id), ms: ms.map((m) => cost.get(m)!) }));
+  const c = cut(units, n, CAP_MS);
+  const byId = new Map(list.map((m) => [m.id, m]));
+  return { parts: c.shards.map((ids) => ids.map((id) => byId.get(id)!)), ms: c.ms, over: c.over, guessed: list.filter((m) => measured[m.id] === undefined).length };
 }
 
 /** Every shard as its own process, in parallel, each given its mutants by id (cut here once, so every shard reads
@@ -314,20 +311,33 @@ async function main(): Promise<number> {
     const live = all.filter((m) => !m.survivor);
     const total = [...costsOf(live, byFileOf(live)).values()].reduce((a, b) => a + b, 0);
     // More shards than twice the cores only slow each other down.
-    const n = shards === 'auto' ? Math.max(2, Math.min(2 * os.cpus().length, Math.ceil(total / TARGET_MS))) : shards;
-    const of = shardOf(live, n);
-    const parts = Array.from({ length: n }, (_, k) => live.filter((m) => of.get(m) === k + 1));
+    const asked = shards === 'auto' ? Math.max(2, Math.min(2 * os.cpus().length, Math.ceil(total / TARGET_MS))) : shards;
+    const { parts, ms, over, guessed } = shardsOf(live, asked);
+    const n = parts.length;
     parts[0]!.push(...all.filter((m) => m.survivor));
+    const s = (x: number) => (x / 1000).toFixed(0);
+    process.stdout.write(`${live.length} mutants cut into ${n} shards (${asked} asked), each planned at most ${s(CAP_MS)} s: ${ms.map(s).join(' ')} s; `
+      + `${live.length - guessed} costs kept, ${guessed} guessed\n`);
+    // A guessed cost is a file's default: the cut is only as even as the costs it was given.
+    if (guessed > live.length / 2) process.stdout.write(`*** MOST COSTS GUESSED (${guessed} of ${live.length}): the kept costs were not read ***\n`);
+    if (over.length) {
+      process.stdout.write(`*** ${over.join(', ')}: a mutant alone planned over ${s(CAP_MS)} s, its shard cannot hold the budget — the gate FAILS ***\n`);
+      return 1;
+    }
     if (plan) {
       fs.writeFileSync(plan, `${JSON.stringify({ shards: parts.map((p) => p.map((m) => m.id)) })}\n`);
-      const cost = costsOf(live, byFileOf(live));
-      const w = parts.map((p) => p.reduce((a, m) => a + (cost.get(m) ?? 0), 0) / 1000);
-      process.stdout.write(`${all.length} mutants in ${n} shards, written to ${plan}; by the kept costs ${Math.min(...w).toFixed(0)}–${Math.max(...w).toFixed(0)} s each\n`);
+      process.stdout.write(`written to ${plan}\n`);
       return 0;
     }
     return runShards(parts, passOn);
   }
-  if (shard) { const of = shardOf(all.filter((m) => !m.survivor), shard[1]); all = all.filter((m) => (of.get(m) ?? 1) === shard[0]); }
+  if (shard) {
+    const { parts } = shardsOf(all.filter((m) => !m.survivor), shard[1]);
+    // More shards than asked: the mutants past the last would run nowhere.
+    if (parts.length > shard[1]) throw new Error(`the kept costs need ${parts.length} shards under ${CAP_MS / 1000} s each, not ${shard[1]}`);
+    const mine = new Set(parts[shard[0] - 1]);
+    all = all.filter((m) => m.survivor ? shard[0] === 1 : mine.has(m));
+  }
   const survivors = all.filter((m) => m.survivor);
   const queue = all.filter((m) => !m.survivor);
   // The baseline: every named red test, once, on the unmutated tree — and in

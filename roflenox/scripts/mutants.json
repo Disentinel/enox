@@ -5311,6 +5311,20 @@
    ]
   },
   {
+   "id": "MS5",
+   "title": "the mutant cut takes its units in the order of their files, not heaviest first: more shards than the costs need, or a shard over its budget",
+   "file": "scripts/shard-cut.ts",
+   "edits": [
+    [
+     "for (const [, ids, w] of parts.sort((x, y) => y[2] - x[2] || (x[0] < y[0] ? -1 : 1))) {",
+     "for (const [, ids, w] of parts) {"
+    ]
+   ],
+   "red": [
+    "mutant cut: two shards asked cannot hold 120 s of mutants under 45 s each; three are cut, heaviest first, each under it"
+   ]
+  },
+  {
    "id": "MB1",
    "title": "rule worlds: a rule new to a kept world, or switched on again, is never loaded",
    "file": "src/node.ts",
