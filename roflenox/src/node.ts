@@ -2297,12 +2297,9 @@ export class RoflenoxNode {
       const want = new Set(rules);
       const off = [...m.on].filter((t) => !want.has(t));
       const on = rules.filter((t) => !m.on.has(t));
-      // The rules off go (the engine takes a rule out by its text, by delta)
-      // and those on are loaded. Where one goes, every rule still wanted is
-      // loaded after it: two texts the engine reads as one rule are one rule
-      // there, and one of them retired must not take the other's (a rule
-      // loaded that the world holds costs its parse).
-      if (off.length || on.length) await c.w.apply(off.length ? rules.map(ruleText).join('') : on.map(ruleText).join(''), author, off);
+      // the rules off go by their text and those on are loaded, by delta (a rule's text is written by the node in
+      // one spelling, so two texts are two rules to the engine as well)
+      if (off.length || on.length) await c.w.apply(on.map(ruleText).join(''), author, off);
       for (const t of off) m.on.delete(t);
       for (const t of on) m.on.add(t);
       c.rules = key;

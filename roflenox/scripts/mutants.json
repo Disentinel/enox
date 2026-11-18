@@ -5310,12 +5310,12 @@
   },
   {
    "id": "MB1",
-   "title": "rule worlds: a rule new to a kept world gets its guard but its text is never loaded",
+   "title": "rule worlds: a rule new to a kept world, or switched on again, is never loaded",
    "file": "src/node.ts",
    "edits": [
     [
-     "const text = on.map((t) => (m.texts.has(t) ? '' : guarded(t))",
-     "const text = on.map((t) => (m.texts.has(t) ? '' : '')"
+     "await c.w.apply(on.map(ruleText).join(''), author, off);",
+     "await c.w.apply('', author, off);"
     ]
    ],
    "red": [
@@ -5324,12 +5324,12 @@
   },
   {
    "id": "MB2",
-   "title": "rule worlds: a rule switched off keeps its guard (retired rules go on deriving)",
+   "title": "rule worlds: a rule switched off is not taken out (retired rules go on deriving)",
    "file": "src/node.ts",
    "edits": [
     [
-     "if (off.length) await c.w.apply",
-     "if (false && off.length) await c.w.apply"
+     "await c.w.apply(on.map(ruleText).join(''), author, off);",
+     "await c.w.apply(on.map(ruleText).join(''), author, []);"
     ]
    ],
    "red": [
