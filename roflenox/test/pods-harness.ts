@@ -181,7 +181,7 @@ export class Federation {
   rows(): Set<string> { return new Set([...this.sub.rows.values()].map((r) => rowKey(r.cells))); }
 
   /** Take frames until the subscriber holds `want` (the whole world's rows), or say how it differs. */
-  async converge(want: Set<string>, since: number, ms = 30_000): Promise<{ ms: number; frames: number }> {
+  async converge(want: Set<string>, since: number, ms = 15_000): Promise<{ ms: number; frames: number }> {
     let frames = 0;
     const t0 = Date.now();
     for (;;) {

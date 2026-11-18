@@ -65,15 +65,18 @@ function args(): { only: Set<string> | null; extra: string | null; workers: numb
 /** What one mutant of a file costs, in ordinary mutants, where none of the
  *  file's mutants was ever measured (a fresh clone): the durability file kills
  *  and restarts child processes (2026-09-27); a pods mutant stands up a
- *  federation of engines and waits out the oracle's 30 s (2026-11-18). */
-const COST: Record<string, number> = { 'test/durability.test.ts': 3, 'test/pods.test.ts': 18, 'test/pods-probe.test.ts': 18 };
+ *  federation of engines and waits out the oracle's 15 s (2026-11-18). */
+const COST: Record<string, number> = { 'test/durability.test.ts': 3, 'test/pods.test.ts': 15, 'test/pods-probe.test.ts': 15 };
 
 function readCosts(): Record<string, number> {
   try { return JSON.parse(fs.readFileSync(COSTS, 'utf8')) as Record<string, number>; } catch { return {}; }
 }
 function writeCosts(measured: Map<string, number>): void {
   if (measured.size === 0) return;
-  const all = { ...readCosts(), ...Object.fromEntries(measured) };
+  // Smoothed: a run on a loaded machine measures every mutant slower, and taken whole it would cut more shards,
+  // which load the machine more.
+  const all = readCosts();
+  for (const [id, ms] of measured) all[id] = all[id] === undefined ? ms : Math.round((all[id] + ms) / 2);
   fs.mkdirSync(path.dirname(COSTS), { recursive: true });
   const tmp = `${COSTS}.${process.pid}`;
   fs.writeFileSync(tmp, `${JSON.stringify(all, null, 1)}\n`);
@@ -288,7 +291,8 @@ async function main(): Promise<number> {
     // baseline and to load.
     const live = all.filter((m) => !m.survivor);
     const total = [...costsOf(live, byFileOf(live)).values()].reduce((a, b) => a + b, 0);
-    const n = shards === 'auto' ? Math.max(2, Math.ceil(total / TARGET_MS)) : shards;
+    // More shards than twice the cores only slow each other down.
+    const n = shards === 'auto' ? Math.max(2, Math.min(2 * os.cpus().length, Math.ceil(total / TARGET_MS))) : shards;
     const of = shardOf(live, n);
     const parts = Array.from({ length: n }, (_, k) => live.filter((m) => of.get(m) === k + 1));
     parts[0]!.push(...all.filter((m) => m.survivor));
