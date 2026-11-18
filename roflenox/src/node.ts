@@ -30,7 +30,7 @@ import {
 } from './identity.ts';
 import { Log, writeFileAtomic, type Fault, type Receipt } from './log.ts';
 import {
-  answeredRule, bookRules, Collect, DEFAULT_ROFL_BIN, Engine, FOREVER, guarded, mayReadRules, ruleGuard, parseLiteral, parseQuery, resultRule, sortRows, splitArgs, SYSTEM_BOOK,
+  answeredRule, bookRules, Collect, DEFAULT_ROFL_BIN, Engine, FOREVER, mayReadRules, parseLiteral, parseQuery, resultRule, sortRows, splitArgs, SYSTEM_BOOK,
   type AskAnswer, type AskOptions, type AskRow, type BookScope, type Explanation, type QueryLiteral, type Unknown, type World,
 } from './engine.ts';
 import { DomainVouch, type DomainTransport } from './domain.ts';
@@ -231,6 +231,8 @@ export function groundLiteral(rel: string, book: string, args: string[], cells: 
   });
   return `${rel}[${book}](${out.join(', ')})`;
 }
+/** A rule's text as a world loads it, one clause a line. */
+const ruleText = (t: string) => `${t.trimEnd()}\n`;
 const enc = (v: string | number) => (typeof v === 'number' ? String(v) : roflString(v));
 
 /** The ROFL program a verified batch loads into the MAIN world: its facts.
@@ -2283,8 +2285,8 @@ export class RoflenoxNode {
   }
 
   /** Bring a kept world to `rules` and the books they read, by delta: a rule
-   *  new to the world is loaded (the engine adds rules by delta), one switched
-   *  off has its guard taken out, one switched on again its guard put back; a
+   *  new to the world, or switched on again, is loaded and one switched off
+   *  taken out (the engine adds and takes out rules by delta, as facts); a
    *  book it now reads is loaded; the clock moved by one edit. A book it no
    *  longer reads stays: every premise over another's book is behind
    *  may_read, which its grant rows (kept by delta) decide. */
@@ -2295,11 +2297,14 @@ export class RoflenoxNode {
       const want = new Set(rules);
       const off = [...m.on].filter((t) => !want.has(t));
       const on = rules.filter((t) => !m.on.has(t));
-      if (off.length) await c.w.apply('', author, off.map(ruleGuard));
-      const text = on.map((t) => (m.texts.has(t) ? '' : guarded(t)) + `${ruleGuard(t)}.\n`).join('');
-      if (text) await c.w.apply(text, author, []);
+      // The rules off go (the engine takes a rule out by its text, by delta)
+      // and those on are loaded. Where one goes, every rule still wanted is
+      // loaded after it: two texts the engine reads as one rule are one rule
+      // there, and one of them retired must not take the other's (a rule
+      // loaded that the world holds costs its parse).
+      if (off.length || on.length) await c.w.apply(off.length ? rules.map(ruleText).join('') : on.map(ruleText).join(''), author, off);
       for (const t of off) m.on.delete(t);
-      for (const t of on) { m.on.add(t); m.texts.add(t); }
+      for (const t of on) m.on.add(t);
       c.rules = key;
       c.stale = true;
     }
@@ -2333,7 +2338,7 @@ export class RoflenoxNode {
     const { own, foreign, ranging } = await this.booksFor(author, rules, clock);
     const owners = new Map([...this.chains.keys()].map((id) => [bookOf(id), id]));
     const w = await this.engine.world(this.ruleBudget);
-    w.meta = { loaded: new Set(), wanted: new Set([own, ...foreign]), results: new Set(this.results.keys()), mayRead: new Set(), texts: new Set(rules), on: new Set(rules), ranging };
+    w.meta = { loaded: new Set(), wanted: new Set([own, ...foreign]), results: new Set(this.results.keys()), mayRead: new Set(), on: new Set(rules), ranging };
     await w.session.load(`clock[${SYSTEM_BOOK}](${clock}).\n`, 'roflenox');
     if (!owners.has(own) && extra) owners.set(own, author);
     for (const b of [own, ...foreign]) {
@@ -2350,7 +2355,7 @@ export class RoflenoxNode {
     }
     await w.session.load(answeredRule(own), 'roflenox');
     try {
-      await w.session.load(rules.map((r) => guarded(r) + `${ruleGuard(r)}.\n`).join(''), author);
+      await w.session.load(rules.map(ruleText).join(''), author);
       this.fault('engine:world');
       await w.evaluate();
     } catch (e) {
@@ -2382,7 +2387,7 @@ export class RoflenoxNode {
       const m = kept.w.meta;
       w = await kept.w.fork();
       try {
-        const add = rules.filter((t) => !m.on.has(t)).map((t) => (m.texts.has(t) ? '' : guarded(t)) + `${ruleGuard(t)}.\n`).join('');
+        const add = rules.filter((t) => !m.on.has(t)).map(ruleText).join('');
         if (own || add) await w.apply(own + add, op, []);
       } catch (e) {
         await w.close().catch(() => {});

@@ -1,6 +1,5 @@
 // The engine: `rofl serve` through the RoflPort of @grafema/rofl. Everything here is
 // DERIVED — rebuilt from the log by replay, and only that way.
-import * as crypto from 'node:crypto';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -515,18 +514,6 @@ export function mayReadRules(book: string, owner: string): string {
     + `may_read_book[${SYSTEM_BOOK}](R, ${book}) :- may_read[${SYSTEM_BOOK}](R, ${b}).\n`;
 }
 
-/** A user rule as a rule world loads it: behind a guard fact of its own,
- *  rule_on[sys]("g_<hash of its text>"), so that switching the rule off (it
- *  was retired, its author lost trust, its session's delegation ended) is the
- *  guard taken out by delta, and switching it on again the guard put back —
- *  the engine takes facts out by delta, never rules. */
-export const ruleGuard = (text: string) => `rule_on[${SYSTEM_BOOK}](${roflString(`g_${sha256(text).slice(0, 16)}`)})`;
-export function guarded(text: string): string {
-  const t = text.trimEnd();
-  return `${t.slice(0, -1)}, ${ruleGuard(text)}.\n`;
-}
-const sha256 = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
-
 /** A separate world with its own step budget: an author's rules run here and
  *  nowhere else, so a rule that does not terminate costs only its author's
  *  answers (r_rule_budget). */
@@ -538,14 +525,14 @@ export class World {
   constructor(port: RoflPort, session: RoflSession) { this.port = port; this.session = session; }
   /** What the node knows of what was loaded here (node.buildWorld): the
    *  books whose facts it holds, the books its rules want, the identities
-   *  whose results it reads, the books whose may_read rules it holds, every
-   *  rule text ever loaded and the rules switched on now (each behind its
-   *  guard fact, `guarded`). A world that knows it can take a batch, a rule
-   *  or a grant by delta. */
-  meta: { loaded: Set<string>; wanted: Set<string>; results: Set<string>; mayRead: Set<string>; texts: Set<string>; on: Set<string>; ranging: boolean } | null = null;
-  /** Load facts and rules and take base rows out, by delta; evaluated again
-   *  only where the engine could not take them so. Returns why it was
-   *  evaluated again, or null if every part went by delta. */
+   *  whose results it reads, the books whose may_read rules it holds, and the
+   *  rules it runs now. A world that knows it can take a batch, a rule or a
+   *  grant by delta. */
+  meta: { loaded: Set<string>; wanted: Set<string>; results: Set<string>; mayRead: Set<string>; on: Set<string>; ranging: boolean } | null = null;
+  /** Load facts and rules and take base rows and rules out (a rule named by
+   *  its text: the engine takes a rule out as it takes a fact out), by delta;
+   *  evaluated again only where the engine could not take them so. Returns
+   *  why it was evaluated again, or null if every part went by delta. */
   async apply(rofl: string, who: string, retract: string[]): Promise<string | null> {
     let full: string | null = null;
     if (retract.length) full = (await this.port.send({ op: 'edit', session: this.session.id, out: retract })).full ?? null;

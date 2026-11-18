@@ -19,7 +19,7 @@ import type { LocalIdentity } from '../src/identity.ts';
 import { signRequest } from '../src/httpsig.ts';
 import type { Fact } from '../src/facts.ts';
 import type { Frame } from '../src/subscribe.ts';
-import { ruleGuard, type World } from '../src/engine.ts';
+import type { World } from '../src/engine.ts';
 import { asked, DAY, fact, grant, identityAt, iso, oracle, rebuilt, rowKeyOf, start, subscribe, T0, tmpDir, vouch, type Running } from './helpers.ts';
 
 const TOY = path.join(import.meta.dirname, 'fixtures/invariants');
@@ -168,11 +168,11 @@ test('the rebuild oracle says no where ask says yes: a kept rule world that lost
     const s = await subscribe(n.url, subPath(q), asOperator(n));
     assert.equal((await s.next()).rows!.length, 2);
     await oracle(n, s, q);
-    // The planted fault: the red rule's guard taken out of the kept world, as a
-    // wrong delta would; then a batch the world takes as usual.
+    // The planted fault: the red rule taken out of the kept world, as a wrong
+    // delta would; then a batch the world takes as usual.
     const kept = (n.node as unknown as { worlds: Map<string, { w: World }> }).worlds.get(n.me.name)!.w;
     const red = [...kept.meta!.on].find((t) => t.startsWith('red'))!;
-    await kept.apply('', n.me.name, [ruleGuard(red)]);
+    await kept.apply('', n.me.name, [red]);
     await pubAs(n, n.me, [fact('note', 'says', 'nothing')]);
     delta(await s.next(), [], [['home', 'login@v1'], ['settings', 'login@v1']], n.me.name);
     const have = [...s.rows.keys()].sort();
