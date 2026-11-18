@@ -1,6 +1,6 @@
 // THE COST OF PODS on a real corpus (src/federation.ts, test/pods-harness.ts):
 //
-//   node --experimental-strip-types --no-warnings scripts/pods-cost.ts DIR [PODS] [--each] [--interleave] [--executor]
+//   node --experimental-strip-types --no-warnings scripts/pods-cost.ts DIR [PODS] [--each] [--interleave] [--executor] [--whole-core]
 //
 // DIR is copied to a throwaway directory first (the run edits files). The
 // files, in path order, are cut into PODS contiguous ranges (2 by default;
@@ -9,13 +9,16 @@
 // executor), or with --executor runs the follow executor every 50 ms.
 // It prints, as one JSON object: the whole world (scan and evaluation in one
 // engine: ms, engine RSS, facts, rows); the federation's start (ms, each pod's
-// files, facts, published rows and engine RSS, the coordinator's engine RSS);
-// then two edits of a file of pod 0 — one that moves only its own rows, and,
-// where the corpus has one, one that moves a conclusion about another pod's
-// file — each with the pod's engine and publish ms and the ms until the
+// files, core facts, facts, published rows and engine RSS, the coordinator's
+// engine RSS); then edits of a file of pod 0 — one that moves only its own
+// rows, one that adds a string (the core moves), a file added beside it (the
+// listing moves) and, where the corpus has one, one that moves a conclusion
+// about another pod's file — each with the pod's engine and publish ms, the
+// core facts moved, the pods the edit touched and the ms until the
 // coordinator's subscriber is sent the frame. The subscriber is held to the
 // whole world, row for row, at the end (with --each, after every step).
-// Needs ROFL_BIN, a `rofl` with `watch`.
+// --whole-core gives every pod the corpus's whole core, as pods did before the core was routed (the measure's
+// control). Needs ROFL_BIN, a `rofl` with `watch`.
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Federation, filesOf, rssOf, scan, wholeWorld } from '../test/pods-harness.ts';
@@ -25,6 +28,7 @@ import { tmpDir } from '../test/helpers.ts';
 const each = process.argv.includes('--each');
 const interleave = process.argv.includes('--interleave');
 const executor = process.argv.includes('--executor');
+const wholeCore = process.argv.includes('--whole-core');
 const [src, n = '2'] = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 if (!src) { console.error('usage: scripts/pods-cost.ts DIR [PODS]'); process.exit(1); }
 const pods = Number(n);
@@ -41,7 +45,7 @@ const out: Record<string, unknown> = { corpus: src, whole: { ms: ms(whole.ms), e
 const count = filesOf(scan(root), root).length;
 const per = Math.ceil(count / pods);
 const t0 = performance.now();
-const started = await Federation.start(root, (_f, k) => (interleave ? k % pods : Math.floor(k / per)), pods, executor ? { follow: 'executor', intervalMs: 50 } : {});
+const started = await Federation.start(root, (_f, k) => (interleave ? k % pods : Math.floor(k / per)), pods, { ...(executor ? { follow: 'executor', intervalMs: 50 } as const : {}), wholeCore });
 const f = started.fed;
 try {
   await f.sub.next(100_000);
@@ -49,8 +53,9 @@ try {
   out.start = {
     ms_to_subscriber_equal: ms(c0.ms),
     coordinator_engine_mb: mb(rssOf(engineOf(f.coord))),
+    corpus_core_facts: f.core.size,
     pods: f.pods.map((p, i) => ({
-      files: p.files.length, published_rows: p.pod.published, published_facts: started.initial.pods[i]!.facts,
+      files: p.files.length, core_facts: f.router.share(i).size, published_rows: p.pod.published, published_facts: started.initial.pods[i]!.facts,
       engine_ms: ms(started.initial.pods[i]!.ms.engine), publish_ms: ms(started.initial.pods[i]!.ms.publish),
       model_engine_mb: mb(rssOf(p.pod.pid)), node_engine_mb: mb(rssOf(engineOf(p.node))),
     })),
@@ -60,7 +65,7 @@ try {
   const local = f.pods[0]!.files.find((x) => !x.endsWith('.js')) ?? f.pods[0]!.files[0]!;
   const edits: unknown[] = [];
   const step = async (file: string, kind: string, change: (text: string) => string) => {
-    const text = fs.readFileSync(path.join(root, file), 'utf8');
+    const text = fs.existsSync(path.join(root, file)) ? fs.readFileSync(path.join(root, file), 'utf8') : '';
     const e = await f.edit(file, change(text));
     // The frame the edit causes; with --each the whole world is asked again after it, else once at the end.
     // An edit whose rows net to nothing on the coordinator sends no frame: it is said, not waited for.
@@ -68,10 +73,13 @@ try {
     const ms_ = frame.none ? NaN : performance.now() - e.t0;
     if (each) await f.converge((await wholeWorld(root)).rows, e.t0, 100_000);
     edits.push({ kind, file, by: e.pod.by, facts_moved: e.pod.moved, pod_engine_ms: ms(e.pod.ms.engine), pod_publish_ms: ms(e.pod.ms.publish), rows_published_added: e.pod.added, rows_published_removed: e.pod.removed,
-      core_moved_on_other_pods: e.others.length, other_pods_engine_ms: e.others.map((o) => ms(o.ms.engine)), ms_to_frame: ms(ms_),
-      frame: { added: frame.added?.length ?? 0, removed: frame.removed?.length ?? 0, about_other_pods_files: [...(frame.added ?? []), ...(frame.removed ?? [])].filter((r) => !f.pods.find((p) => p.files.includes(file))!.files.includes(String(r.cells[2]))).length } });
+      core_facts_moved: e.core, pods_touched: 1 + e.others.length, core_facts_per_pod: f.pods.map((_p, i) => f.router.share(i).size), other_pods_engine_ms: e.others.map((o) => ms(o.ms.engine)), ms_to_frame: ms(ms_),
+      frame: { added: frame.added?.length ?? 0, removed: frame.removed?.length ?? 0, about_other_pods_files: [...(frame.added ?? []), ...(frame.removed ?? [])].filter((r) => !(f.pods.find((p) => p.files.includes(file)) ?? f.pods[0]!).files.includes(String(r.cells[2]))).length } });
   };
   await step(local, 'local', (t) => `${t}\nexport function podsCostProbe() { return 0; }\n`);
+  // Edits that move the core: a string no other file holds, and a file new to the listing beside the edited one.
+  await step(local, 'core: a string added', (t) => `${t}\nexport const podsCostString = "pods-cost-probe";\n`);
+  await step(path.join(path.dirname(local), 'podsCostNew.ts'), 'core: a file added', () => 'export function podsCostNew() { return 1; }\n');
   const podOf = new Map(f.pods.flatMap((p, i) => p.files.map((x) => [filePrefix(x), [x, i] as const])));
   // A function one pod's file declares and another pod's file offers: renaming it moves a conclusion about the other pod's file.
   const own = new Set<string>();
