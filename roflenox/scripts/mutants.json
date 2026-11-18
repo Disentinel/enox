@@ -4179,8 +4179,9 @@
      "`ulimit -t ${cpu}; exec \"$0\" \"$@\"`"
     ]
    ],
+   "on": ["linux"],
    "red": [
-    "an ask answers within one second while an executor saturates its CPU budget"
+    "an executor over its CPU budget is stopped by the soft limit's SIGXCPU, not the hard limit's SIGKILL"
    ]
   },
   {

@@ -22,6 +22,12 @@
 //   npm run mutants -- --shard 1/2         one shard: half of the mutants by their cost (read from the costs kept now)
 //   npm run mutants -- --shards 2          every shard at once, each its own process (1 worker) with its own budget,
 //                                          cut once here and each given its mutants by id
+//   npm run mutants -- --shards 18 --plan P.json      the cut alone, written to P.json: each shard's mutant ids
+//   npm run mutants -- --from P.json --job 2/6        the shards of P.json whose number is 2 modulo 6, at once as above:
+//                                          one job of a CI matrix (.github/workflows/fkts.yml), every job the same cut
+//
+// A mutant with `on: ["linux"]` breaks what only that kernel shows; elsewhere
+// it is listed as not judged here, with the reason, and not run.
 //
 // Budget: the whole run prints its duration and must stay under 300 s, and a
 // shard under 120 s (the repo's limit on one run). `npm run mutants` runs the
@@ -48,18 +54,22 @@ const COSTS = path.join(ROOT, 'node_modules', '.cache', 'roflenox-mutants', 'cos
 /** A shard tells the run that started it what each mutant cost, on its stdout, by this tag. */
 const COST_TAG = 'mutant-cost ';
 
-interface Mutant { id: string; title: string; file: string; edits: ([string, string] | [string, string, string])[]; red?: string[]; survivor?: string }
+interface Mutant { id: string; title: string; file: string; edits: ([string, string] | [string, string, string])[]; red?: string[]; survivor?: string; on?: string[] }
 
-function args(): { only: Set<string> | null; extra: string | null; workers: number; suite: string; shard: [number, number] | null; part: string | null; shards: number | 'auto' | null } {
+function args(): { only: Set<string> | null; extra: string | null; workers: number; suite: string; shard: [number, number] | null; part: string | null; shards: number | 'auto' | null;
+  plan: string | null; from: string | null; job: [number, number] | null } {
   const a = process.argv.slice(2);
   const get = (k: string) => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] ?? null : null; };
   const only = get('--only');
   const sh = get('--shard')?.split('/').map(Number);
+  const jb = get('--job')?.split('/').map(Number);
   return { only: only !== null ? new Set(only.split(',').filter(Boolean)) : null, extra: get('--extra'), suite: a.includes('--perf') ? 'perf' : get('--suite') ?? 'test',
     workers: Number(get('--workers') ?? Math.max(1, Math.min(2, Math.floor(os.cpus().length / 4)))),
     part: get('--part'),
     shard: sh && sh.length === 2 && sh[0]! >= 1 && sh[0]! <= sh[1]! ? [sh[0]!, sh[1]!] : null,
-    shards: get('--shards') === 'auto' ? 'auto' : get('--shards') !== null ? Number(get('--shards')) : null };
+    shards: get('--shards') === 'auto' ? 'auto' : get('--shards') !== null ? Number(get('--shards')) : null,
+    plan: get('--plan'), from: get('--from'),
+    job: jb && jb.length === 2 && jb[0]! >= 1 && jb[0]! <= jb[1]! ? [jb[0]!, jb[1]!] : null };
 }
 
 /** What one mutant of a file costs, in ordinary mutants, where none of the
@@ -128,10 +138,10 @@ function shardOf(list: Mutant[], n: number): Map<Mutant, number> {
 
 /** Every shard as its own process, in parallel, each given its mutants by id (cut here once, so every shard reads
  *  the same costs); fails if any shard fails. */
-async function runShards(parts: Mutant[][], passOn: string[]): Promise<number> {
-  const n = parts.length;
+async function runShards(parts: Mutant[][], passOn: string[], numbers = parts.map((_, i) => i), n = parts.length): Promise<number> {
   const measured = new Map<string, number>();
-  const codes = await Promise.all(parts.map((part, i) => new Promise<number>((ok) => {
+  const codes = await Promise.all(parts.map((part, k) => new Promise<number>((ok) => {
+    const i = numbers[k]!;
     const c = spawn(process.execPath, ['--experimental-strip-types', '--no-warnings', path.join(ROOT, 'scripts', 'mutants.ts'),
       ...passOn, '--only', part.map((m) => m.id).join(','), '--part', `${i + 1}/${n}`, '--workers', '1', '--tell-costs'], { stdio: ['ignore', 'pipe', 'inherit'] });
     let out = '';
@@ -145,13 +155,14 @@ async function runShards(parts: Mutant[][], passOn: string[]): Promise<number> {
   })));
   writeCosts(measured);
   const bad = codes.filter((c) => c !== 0).length;
-  process.stdout.write(`\n${n - bad}/${n} shards passed\n`);
+  process.stdout.write(`\n${parts.length - bad}/${parts.length} shards passed\n`);
   return bad === 0 ? 0 : 1;
 }
 
 function load(extra: string | null): Mutant[] {
   const list = (JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts', 'mutants.json'), 'utf8')) as { mutants: Mutant[] }).mutants;
   if (extra) list.push(...(JSON.parse(fs.readFileSync(extra, 'utf8')) as { mutants: Mutant[] }).mutants);
+  for (const m of list) if (m.on && !m.on.includes(process.platform)) m.survivor ??= `not judged on ${process.platform}: judged on ${m.on.join(', ')} only`;
   return list;
 }
 
@@ -280,7 +291,18 @@ async function judge(tree: string, m: Mutant): Promise<Verdict> {
 
 async function main(): Promise<number> {
   const t0 = Date.now();
-  const { only, extra, workers, suite, shard, part, shards } = args();
+  const { only, extra, workers, suite, shard, part, shards, plan, from, job } = args();
+  const cut = new Set(['--shards', '--only', '--plan', '--from', '--job']);
+  const passOn = process.argv.slice(2).filter((x, i, a) => !cut.has(x) && !cut.has(a[i - 1]!));
+  if (from) {
+    if (!job) throw new Error('--from needs --job J/N');
+    const ids = (JSON.parse(fs.readFileSync(from, 'utf8')) as { shards: string[][] }).shards;
+    const byId = new Map(load(extra).map((m) => [m.id, m]));
+    const mine = ids.map((_, i) => i).filter((i) => i % job[1] === job[0] - 1);
+    // A shard naming a mutant the list no longer has was cut from another tree: it would test nothing.
+    const parts = mine.map((i) => ids[i]!.map((id) => byId.get(id) ?? (() => { throw new Error(`${from} names ${id}, which scripts/mutants.json does not have`); })()));
+    return runShards(parts, passOn, mine, ids.length);
+  }
   // One gate per suite, each within the budget: the mutants whose red tests
   // live in test/perf (a 200 000-fact log), in test/hermetic5 (five nested
   // runs), and everything else.
@@ -296,8 +318,14 @@ async function main(): Promise<number> {
     const of = shardOf(live, n);
     const parts = Array.from({ length: n }, (_, k) => live.filter((m) => of.get(m) === k + 1));
     parts[0]!.push(...all.filter((m) => m.survivor));
-    const cut = new Set(['--shards', '--only']);
-    return runShards(parts, process.argv.slice(2).filter((x, i, a) => !cut.has(x) && !cut.has(a[i - 1]!)));
+    if (plan) {
+      fs.writeFileSync(plan, `${JSON.stringify({ shards: parts.map((p) => p.map((m) => m.id)) })}\n`);
+      const cost = costsOf(live, byFileOf(live));
+      const w = parts.map((p) => p.reduce((a, m) => a + (cost.get(m) ?? 0), 0) / 1000);
+      process.stdout.write(`${all.length} mutants in ${n} shards, written to ${plan}; by the kept costs ${Math.min(...w).toFixed(0)}–${Math.max(...w).toFixed(0)} s each\n`);
+      return 0;
+    }
+    return runShards(parts, passOn);
   }
   if (shard) { const of = shardOf(all.filter((m) => !m.survivor), shard[1]); all = all.filter((m) => (of.get(m) ?? 1) === shard[0]); }
   const survivors = all.filter((m) => m.survivor);

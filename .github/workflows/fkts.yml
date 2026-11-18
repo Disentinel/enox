@@ -1,0 +1,132 @@
+# FKTS (roflenox/): the suite and the mutant gate on every push to the FKTS branch. Removing it is this one file.
+name: fkts
+
+on:
+  push:
+    branches: [claude/project-thread-hhlo1w]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: { contents: read }
+
+env:
+  ROFL_REPO: Disentinel/rofl
+  ROFL_REF: claude/project-thread-hhlo1w
+  ROFL_TOOLCHAIN: 1.95.0
+  # mutant shards cut once by `plan`, dealt out over the matrix of `mutants`: SHARDS / JOBS run at once on a job
+  SHARDS: 18
+  JOBS: 6
+
+jobs:
+  # The unreleased engine FKTS needs (`watch`, `edit`): built once per rofl commit, kept by that commit.
+  engine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: '${{ env.ROFL_REPO }}', ref: '${{ env.ROFL_REF }}', path: rofl }
+      - id: sha
+        run: echo "sha=$(git -C rofl rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - id: bin
+        uses: actions/cache@v4
+        with: { path: bin/rofl, key: 'rofl-bin-${{ runner.os }}-${{ env.ROFL_TOOLCHAIN }}-${{ steps.sha.outputs.sha }}' }
+      - if: steps.bin.outputs.cache-hit != 'true'
+        uses: dtolnay/rust-toolchain@1.95.0
+      - if: steps.bin.outputs.cache-hit != 'true'
+        uses: Swatinem/rust-cache@v2
+        with: { workspaces: rofl/rust, key: 'fast-${{ env.ROFL_TOOLCHAIN }}' }
+      - if: steps.bin.outputs.cache-hit != 'true'
+        env: { CARGO_INCREMENTAL: 0 }
+        run: |
+          cd rofl/rust && cargo build --profile fast -p rofl --bin rofl
+          mkdir -p "$GITHUB_WORKSPACE/bin" && cp target/fast/rofl "$GITHUB_WORKSPACE/bin/rofl"
+      - run: echo "rofl ${{ steps.sha.outputs.sha }}" && ls -l bin/rofl
+      - uses: actions/upload-artifact@v4
+        with: { name: rofl, path: bin/rofl, retention-days: 3 }
+
+  suite:
+    needs: engine
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults: { run: { working-directory: roflenox } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm, cache-dependency-path: roflenox/package-lock.json }
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with: { name: rofl, path: '${{ runner.temp }}/rofl' }
+      - run: chmod +x "$RUNNER_TEMP/rofl/rofl"
+      - run: npm test
+        env: { ROFL_BIN: '${{ runner.temp }}/rofl/rofl' }
+
+  # The cut of the mutant gate, once, by what each mutant cost in the last run here: every job of the matrix reads it.
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults: { run: { working-directory: roflenox } }
+    outputs: { plan: '${{ steps.cut.outputs.plan }}', jobs: '${{ steps.cut.outputs.jobs }}' }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        with: { path: roflenox/node_modules/.cache/roflenox-mutants, key: 'mutant-costs-${{ github.run_id }}', restore-keys: mutant-costs- }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - id: cut
+        run: |
+          node --experimental-strip-types --no-warnings scripts/mutants.ts --shards "$SHARDS" --plan "$RUNNER_TEMP/plan.json"
+          echo "plan=$(cat "$RUNNER_TEMP/plan.json")" >> "$GITHUB_OUTPUT"
+          echo "jobs=$(node -e 'console.log(JSON.stringify(Array.from({ length: +process.env.JOBS }, (_, i) => i + 1)))')" >> "$GITHUB_OUTPUT"
+
+  mutants:
+    needs: [engine, plan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix: { job: '${{ fromJSON(needs.plan.outputs.jobs) }}' }
+    defaults: { run: { working-directory: roflenox } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm, cache-dependency-path: roflenox/package-lock.json }
+      - run: npm ci
+      - uses: actions/cache/restore@v4
+        with: { path: roflenox/node_modules/.cache/roflenox-mutants, key: 'mutant-costs-${{ github.run_id }}', restore-keys: mutant-costs- }
+      - uses: actions/download-artifact@v4
+        with: { name: rofl, path: '${{ runner.temp }}/rofl' }
+      - run: chmod +x "$RUNNER_TEMP/rofl/rofl"
+      - run: echo "$PLAN" > "$RUNNER_TEMP/plan.json"
+        env: { PLAN: '${{ needs.plan.outputs.plan }}' }
+      - run: node --experimental-strip-types --no-warnings scripts/mutants.ts --from "$RUNNER_TEMP/plan.json" --job "${{ matrix.job }}/$JOBS"
+        env: { ROFL_BIN: '${{ runner.temp }}/rofl/rofl' }
+      - if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with: { name: 'costs-${{ matrix.job }}', path: roflenox/node_modules/.cache/roflenox-mutants/costs.json, retention-days: 3, if-no-files-found: ignore }
+
+  # What each mutant cost here, for the next run's cut: each job's measurements of its own shards, kept.
+  costs:
+    needs: [plan, mutants]
+    if: success() || failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/cache/restore@v4
+        with: { path: roflenox/node_modules/.cache/roflenox-mutants, key: 'mutant-costs-${{ github.run_id }}', restore-keys: mutant-costs- }
+      - uses: actions/download-artifact@v4
+        with: { pattern: costs-*, path: jobs }
+      - run: |
+          node -e '
+            const fs = require("fs");
+            const plan = JSON.parse(process.env.PLAN).shards, jobs = Number(process.env.JOBS);
+            const read = (f) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return {}; } };
+            const kept = "roflenox/node_modules/.cache/roflenox-mutants/costs.json", all = read(kept);
+            plan.forEach((ids, i) => { const got = read(`jobs/costs-${i % jobs + 1}/costs.json`); for (const id of ids) if (got[id] !== undefined) all[id] = got[id]; });
+            fs.mkdirSync(require("path").dirname(kept), { recursive: true });
+            fs.writeFileSync(kept, JSON.stringify(all, null, 1) + "\n");
+            console.log(Object.keys(all).length + " mutant costs kept");'
+        env: { PLAN: '${{ needs.plan.outputs.plan }}' }
+      - uses: actions/cache/save@v4
+        with: { path: roflenox/node_modules/.cache/roflenox-mutants, key: 'mutant-costs-${{ github.run_id }}-${{ github.run_attempt }}' }
