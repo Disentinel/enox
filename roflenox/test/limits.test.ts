@@ -20,7 +20,7 @@ test('an answer longer than the limit is marked cut and the rest is fetched page
     const all = [...first.rows];
     let cur = first.cursor;
     let pages = 1;
-    while (cur) {
+    while (cur && pages < 10) {   // a cursor that never advances is a red, not a hang
       const p = await ask({ cursor: cur });
       all.push(...p.rows);
       cur = p.cut ? p.cursor : undefined;
