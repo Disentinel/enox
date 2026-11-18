@@ -5507,11 +5507,11 @@
   {
    "id": "MC5",
    "title": "view links: an issuer's revocation not checked",
-   "file": "src/viewlink.ts",
+   "file": "src/node.ts",
    "edits": [
     [
-     "  if (await c.revoked(k.iss, k.jti)) throw",
-     "  if (false) throw"
+     "      if (await this.linkRevoked(claims.iss, claims.jti)) throw bad(",
+     "      if (false) throw bad("
     ]
    ],
    "red": [
@@ -5521,15 +5521,16 @@
   {
    "id": "MC6",
    "title": "view links: a stream opened by a link is not ended when the link is revoked",
-   "file": "src/http.ts",
+   "file": "src/node.ts",
    "edits": [
     [
-     "() => over('link_revoked', 'the view link was revoked by its issuer')",
-     "() => {}"
+     "if (l.claims.iss === by && l.claims.jti === f.source) await this.endLink(",
+     "if (false) await this.endLink("
     ]
    ],
    "red": [
-    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line"
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line",
+    "a revoke queued behind a link's open ends the stream, and one queued before refuses the open: no slot between check and registration"
    ]
   },
   {
@@ -5544,6 +5545,108 @@
    ],
    "red": [
     "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line"
+   ]
+  },
+  {
+   "id": "MV1",
+   "title": "view links: a request path that normalises to another (//host, \\, dot segments) is routed as the path it normalises to",
+   "file": "src/http.ts",
+   "edits": [
+    [
+     "      if (!rawUrl.startsWith('/') || url.host !== 'local' || url.pathname !== rawUrl.split('?')[0]) {",
+     "      if (false) {"
+    ]
+   ],
+   "red": [
+    "a request path that is not one single-slash absolute path is refused: the view page is never served under //host"
+   ]
+  },
+  {
+   "id": "MV2",
+   "title": "view links: the page fetches its own path as given (location.pathname), not the URL it builds from its origin",
+   "file": "src/view.ts",
+   "edits": [
+    [
+     "  const res = await fetch(target.href, {",
+     "  const res = await fetch(location.pathname, {"
+    ],
+    [
+     "  if (!here) { $('status')",
+     "  if (false) { $('status')"
+    ]
+   ],
+   "red": [
+    "the view page fetches only its own origin, from the view's owner and name, under a CSP that holds its own script"
+   ]
+  },
+  {
+   "id": "MV3",
+   "title": "view links: the page's CSP lets it connect anywhere",
+   "file": "src/view.ts",
+   "edits": [
+    [
+     " connect-src 'self';",
+     ""
+    ]
+   ],
+   "red": [
+    "the view page fetches only its own origin, from the view's owner and name, under a CSP that holds its own script"
+   ]
+  },
+  {
+   "id": "MV4",
+   "title": "view links: a link opens the view's latest definition, whatever it was signed for",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (viewLit(L) !== claims.lit) throw bad(",
+     "      if (false) throw bad("
+    ]
+   ],
+   "red": [
+    "a link is bound to the view's definition: redefined, its open stream ends and the link opens nothing"
+   ]
+  },
+  {
+   "id": "MV5",
+   "title": "view links: a redefinition leaves open the streams of links to the old definition",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        if (L === null || viewLit(L) !== l.claims.lit) await this.endLink(",
+     "        if (false) await this.endLink("
+    ]
+   ],
+   "red": [
+    "a link is bound to the view's definition: redefined, its open stream ends and the link opens nothing"
+   ]
+  },
+  {
+   "id": "MV6",
+   "title": "view links: the revocation is checked in a serial slot before the one that registers the stream (the review's race)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    const id = await this.serial(async () => {\n      if (this.keyFor(claims.kid)?.identity !== claims.iss) throw bad('is signed by a key not valid here for its issuer');\n      if (await this.linkRevoked(claims.iss, claims.jti)) throw bad('was revoked by its issuer');",
+     "    if (await this.serial(() => this.linkRevoked(claims.iss, claims.jti))) throw bad('was revoked by its issuer');\n    const id = await this.serial(async () => {\n      if (this.keyFor(claims.kid)?.identity !== claims.iss) throw bad('is signed by a key not valid here for its issuer');"
+    ]
+   ],
+   "red": [
+    "a revoke queued behind a link's open ends the stream, and one queued before refuses the open: no slot between check and registration"
+   ]
+  },
+  {
+   "id": "MV8",
+   "title": "view links: a non-canonical base64url spelling of a link accepted",
+   "file": "src/viewlink.ts",
+   "edits": [
+    [
+     "  if (m.slice(1).some((p) => Buffer.from(p, 'base64url').toString('base64url') !== p)) throw",
+     "  if (false) throw"
+    ]
+   ],
+   "red": [
+    "a link has one spelling: a non-canonical base64url of its claims or signature is refused"
    ]
   }
  ]
