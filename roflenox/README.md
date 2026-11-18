@@ -467,6 +467,16 @@ Run it (needs `ROFL_BIN`, a `rofl` with `watch`; nothing to build):
 export ROFL_BIN=/path/to/rofl            # Disentinel/rofl with watch
 node --experimental-strip-types --no-warnings --test test/pods.test.ts      # the oracle, ~13 s
 npm run mutants -- --only P1,P2,P3,P4,P5,P6,P7,P8,P9,P10                     # its planted faults, all red
+```
+
+The mutant gate cuts its shards by what each mutant cost when it last ran
+(kept in `node_modules/.cache/roflenox-mutants/costs.json`; a fresh clone
+estimates a pods mutant at ~30 s): a pods mutant stands up a federation and a
+red oracle waits out its 30 s, so the ten are dealt out over the shards (4 of
+86 – 109 s, measured 2026-11-18 with ~40 – 50 s of each in its baseline) and a
+shard over 120 s fails the gate.
+
+```sh
 node --experimental-strip-types --no-warnings scripts/pods-cost.ts DIR 3 --interleave   # the cost on a corpus
 ```
 
