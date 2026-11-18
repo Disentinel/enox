@@ -1,4 +1,4 @@
-# FKTS (roflenox/): the suite and the mutant gate on every push to the FKTS branch. Removing it is this one file.
+# FKTS (fkts/): the suite and the mutant gate on every push to the FKTS branch. Removing it is this one file.
 name: fkts
 
 on:
@@ -50,11 +50,11 @@ jobs:
     needs: engine
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    defaults: { run: { working-directory: roflenox } }
+    defaults: { run: { working-directory: fkts } }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '22', cache: npm, cache-dependency-path: roflenox/package-lock.json }
+        with: { node-version: '22', cache: npm, cache-dependency-path: fkts/package-lock.json }
       - run: npm ci
       - uses: actions/download-artifact@v4
         with: { name: rofl, path: '${{ runner.temp }}/rofl' }
@@ -66,12 +66,12 @@ jobs:
   plan:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    defaults: { run: { working-directory: roflenox } }
+    defaults: { run: { working-directory: fkts } }
     outputs: { plan: '${{ steps.cut.outputs.plan }}', jobs: '${{ steps.cut.outputs.jobs }}' }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache/restore@v4
-        with: { path: roflenox/node_modules/.cache/roflenox-mutants, key: 'mutant-costs-${{ github.run_id }}', restore-keys: mutant-costs- }
+        with: { path: fkts/node_modules/.cache/fkts-mutants, key: 'mutant-costs-${{ github.run_id }}', restore-keys: mutant-costs- }
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
       - id: cut
@@ -87,7 +87,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: { job: '${{ fromJSON(needs.plan.outputs.jobs) }}' }
-    defaults: { run: { working-directory: roflenox } }
+    defaults: { run: { working-directory: fkts } }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -95,20 +95,20 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: |
-            roflenox/package-lock.json
-            roflenox/executors/embedder/package-lock.json
+            fkts/package-lock.json
+            fkts/executors/embedder/package-lock.json
       - run: npm ci
       # the embedder's own mutants red its meaning test, which runs the learned model (~130 MB, fetched once, kept)
       - run: npm ci --onnxruntime-node-install-cuda=skip
-        working-directory: roflenox/executors/embedder
+        working-directory: fkts/executors/embedder
       - id: model
         uses: actions/cache@v4
-        with: { path: roflenox/executors/embedder/.models, key: embed-model-Xenova-multilingual-e5-small }
+        with: { path: fkts/executors/embedder/.models, key: embed-model-Xenova-multilingual-e5-small }
       - if: steps.model.outputs.cache-hit != 'true'
         run: npm run fetch-model
-        working-directory: roflenox/executors/embedder
+        working-directory: fkts/executors/embedder
       - uses: actions/cache/restore@v4
-        with: { path: roflenox/node_modules/.cache/roflenox-mutants, key: 'mutant-costs-${{ github.run_id }}', restore-keys: mutant-costs- }
+        with: { path: fkts/node_modules/.cache/fkts-mutants, key: 'mutant-costs-${{ github.run_id }}', restore-keys: mutant-costs- }
       - uses: actions/download-artifact@v4
         with: { name: rofl, path: '${{ runner.temp }}/rofl' }
       - run: chmod +x "$RUNNER_TEMP/rofl/rofl"
@@ -118,7 +118,7 @@ jobs:
         env: { ROFL_BIN: '${{ runner.temp }}/rofl/rofl' }
       - if: success() || failure()
         uses: actions/upload-artifact@v4
-        with: { name: 'costs-${{ matrix.job }}', path: roflenox/node_modules/.cache/roflenox-mutants/costs.json, retention-days: 3, if-no-files-found: ignore }
+        with: { name: 'costs-${{ matrix.job }}', path: fkts/node_modules/.cache/fkts-mutants/costs.json, retention-days: 3, if-no-files-found: ignore }
 
   # What each mutant cost here, for the next run's cut: each job's measurements of its own shards, kept.
   costs:
@@ -128,7 +128,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/cache/restore@v4
-        with: { path: roflenox/node_modules/.cache/roflenox-mutants, key: 'mutant-costs-${{ github.run_id }}', restore-keys: mutant-costs- }
+        with: { path: fkts/node_modules/.cache/fkts-mutants, key: 'mutant-costs-${{ github.run_id }}', restore-keys: mutant-costs- }
       - uses: actions/download-artifact@v4
         with: { pattern: costs-*, path: jobs }
       - run: |
@@ -136,11 +136,11 @@ jobs:
             const fs = require("fs");
             const plan = JSON.parse(process.env.PLAN).shards, jobs = Number(process.env.JOBS);
             const read = (f) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return {}; } };
-            const kept = "roflenox/node_modules/.cache/roflenox-mutants/costs.json", all = read(kept);
+            const kept = "fkts/node_modules/.cache/fkts-mutants/costs.json", all = read(kept);
             plan.forEach((ids, i) => { const got = read(`jobs/costs-${i % jobs + 1}/costs.json`); for (const id of ids) if (got[id] !== undefined) all[id] = got[id]; });
             fs.mkdirSync(require("path").dirname(kept), { recursive: true });
             fs.writeFileSync(kept, JSON.stringify(all, null, 1) + "\n");
             console.log(Object.keys(all).length + " mutant costs kept");'
         env: { PLAN: '${{ needs.plan.outputs.plan }}' }
       - uses: actions/cache/save@v4
-        with: { path: roflenox/node_modules/.cache/roflenox-mutants, key: 'mutant-costs-${{ github.run_id }}-${{ github.run_attempt }}' }
+        with: { path: fkts/node_modules/.cache/fkts-mutants, key: 'mutant-costs-${{ github.run_id }}-${{ github.run_attempt }}' }

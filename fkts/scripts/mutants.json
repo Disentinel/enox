@@ -1,0 +1,5852 @@
+{
+ "note": "Mutants of fkts and the tests that must go RED under each. Run: npm run mutants. A listed mutant that survives, or an anchor that no longer matches, fails the gate.",
+ "mutants": [
+  {
+   "id": "M1",
+   "title": "skip signature verify",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (!verifyManifestSig(m, key)) throw",
+     "if (false && !verifyManifestSig(m, key)) throw"
+    ]
+   ],
+   "red": [
+    "a batch with one byte changed is rejected",
+    "a batch inserted into the middle of a chain is rejected",
+    "a batch whose prev was rewritten after signing is rejected"
+   ]
+  },
+  {
+   "id": "M2",
+   "title": "skip chain check",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (m.prev !== head) {",
+     "if (false && m.prev !== head) {"
+    ]
+   ],
+   "red": [
+    "a batch inserted into the middle of a chain is rejected"
+   ]
+  },
+  {
+   "id": "M3",
+   "title": "trust offered identity doc over the pin (book scoping)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (pendingOk && !this.idDocs.has(identity) && docs.length === 1)",
+     "if (pendingOk && docs.length === 1)"
+    ],
+    [
+     "    if (cur) return { doc: cur, pin: null };",
+     "    if (cur && !pending) return { doc: cur, pin: null };"
+    ]
+   ],
+   "red": [
+    "a batch signed by B that writes into the book of A is refused",
+    "a rotation in the middle of a chain is followed without a warning",
+    "a backdated batch received after revocation is rejected",
+    "a node that swaps its key without rotation is refused with a whynot"
+   ]
+  },
+  {
+   "id": "M4",
+   "title": "skip freshness",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (skew > this.freshnessMs) {",
+     "if (false && skew > this.freshnessMs) {"
+    ]
+   ],
+   "red": [
+    "a batch claiming a time outside the window is marked stale and a re-attestation is requested",
+    "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused",
+    "a re-attested batch keeps its digest and gains a second, fresh signature",
+    "a live batch dated 301 seconds ahead of its receipt is refused as future-dated, while one dated 301 seconds behind is refused as stale with a request to re-attest"
+   ]
+  },
+  {
+   "id": "M5",
+   "title": "no quote escaping into ROFL",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "/[\\\\\"\\n\\t\\r]/g",
+     "/[\\\\\\n\\t\\r]/g"
+    ]
+   ],
+   "red": [
+    "a batch signed by B that writes into the book of A is refused"
+   ]
+  },
+  {
+   "id": "M7",
+   "title": "no digest check of JSONL",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (batchDigest(body.salt, jsonl) !== m.digest) {",
+     "      if (false) {"
+    ]
+   ],
+   "red": [
+    "a batch with one byte changed is rejected",
+    "a static host holding a private batch cannot decrypt it, a recipient can"
+   ]
+  },
+  {
+   "id": "M8",
+   "title": "jsonl file never written",
+   "file": "src/log.ts",
+   "edits": [
+    [
+     "    if (jsonl !== null) writeFileAtomic(this.batchPath(manifest.identity, manifest.digest, 'jsonl'), jsonl, this.fault, 'jsonl', false);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "delete everything except the log, restart, and every ask returns the same answers",
+    "a committed log file that cannot be read stops the node instead of an empty start",
+    "a node killed at each point of a later batch restarts with it or at the previous head"
+   ]
+  },
+  {
+   "id": "M9",
+   "title": "receipt committed before the manifest file",
+   "file": "src/log.ts",
+   "edits": [
+    [
+     "    writeFileAtomic(this.batchPath(manifest.identity, manifest.digest, 'manifest.json'), canonicalize(manifest), this.fault, 'manifest');\n    return this.commit({ received_at",
+     "    const r = this.commit({ received_at"
+    ],
+    [
+     "...extra });\n  }",
+     "...extra });\n    writeFileAtomic(this.batchPath(manifest.identity, manifest.digest, 'manifest.json'), canonicalize(manifest), this.fault, 'manifest');\n    return r;\n  }"
+    ]
+   ],
+   "red": [
+    "a node killed at each point of a later batch restarts with it or at the previous head"
+   ]
+  },
+  {
+   "id": "M10",
+   "title": "torn index tail not set aside",
+   "file": "src/log.ts",
+   "edits": [
+    [
+     "if (text.length > 0 && !text.endsWith('\\n')) {",
+     "if (false) {"
+    ]
+   ],
+   "red": [
+    "a node killed at each point of a later batch restarts with it or at the previous head"
+   ]
+  },
+  {
+   "id": "M11",
+   "title": "prev left out of the signed bytes (spec item 4 as first written)",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "const { sig, ...unsigned } = m;",
+     "const { sig, prev: _p, ...unsigned } = m;"
+    ],
+    [
+     "Buffer.from(BATCH_CONTEXT + canonicalize(unsigned)), this.key)",
+     "Buffer.from(BATCH_CONTEXT + canonicalize({ ...unsigned, prev: undefined })), this.key)"
+    ]
+   ],
+   "red": [
+    "a batch inserted into the middle of a chain is rejected",
+    "a batch whose prev was rewritten after signing is rejected"
+   ]
+  },
+  {
+   "id": "M14",
+   "title": "feed challenge not required",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (!this.challengeLive(nonce)) {",
+     "      if (false) {"
+    ]
+   ],
+   "red": [
+    "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused"
+   ]
+  },
+  {
+   "id": "M15",
+   "title": "attestation nonce not matched",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (a.nonce !== nonce) throw",
+     "if (false) throw"
+    ]
+   ],
+   "red": [
+    "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused"
+   ]
+  },
+  {
+   "id": "M16",
+   "title": "feed attestation freshness skipped",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      this.checkFresh(a.attested_at, receivedAt, 'the feed attestation', 'pull again with a fresh challenge');\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused"
+   ]
+  },
+  {
+   "id": "M17",
+   "title": "attested head not matched",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (a.head !== last) throw",
+     "if (false) throw"
+    ]
+   ],
+   "red": [
+    "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused"
+   ]
+  },
+  {
+   "id": "M18",
+   "title": "feed batches judged by their age",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (mode === 'post') {\n      if (reattest) {",
+     "    if (mode !== 'replay') {\n      if (reattest) {"
+    ]
+   ],
+   "red": [
+    "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused",
+    "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one",
+    "a rotation in the middle of a chain is followed without a warning"
+   ]
+  },
+  {
+   "id": "M19",
+   "title": "re-attestation signature not verified",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (!verifySigned(REATTEST_CONTEXT, r, rk)) throw",
+     "if (false) throw"
+    ]
+   ],
+   "red": [
+    "a re-attested batch keeps its digest and gains a second, fresh signature"
+   ]
+  },
+  {
+   "id": "M20",
+   "title": "re-attestation ignored for freshness",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (reattest) {\n        this.checkFresh(reattest",
+     "      if (false) {\n        this.checkFresh(reattest"
+    ]
+   ],
+   "red": [
+    "a re-attested batch keeps its digest and gains a second, fresh signature"
+   ]
+  },
+  {
+   "id": "M21",
+   "title": "feed attestation signature not verified",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (!verifySigned(FEED_CONTEXT, a, key)) throw",
+     "if (false) throw"
+    ]
+   ],
+   "red": [
+    "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused"
+   ]
+  },
+  {
+   "id": "M23",
+   "title": "every signed requester reads every book whole",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (whole.has(b)) scope.set",
+     "if (requester !== null) scope.set"
+    ]
+   ],
+   "red": [
+    "a request signed by an identity with no grant is refused and whynot names the missing grant",
+    "a fact with no export rule never appears in a published batch"
+   ]
+  },
+  {
+   "id": "M24",
+   "title": "explicit book not refused with whynot",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (sc && (sc.only === null || !whole)) return;",
+     "    return;"
+    ]
+   ],
+   "red": [
+    "a request signed by an identity with no grant is refused and whynot names the missing grant"
+   ]
+  },
+  {
+   "id": "M25",
+   "title": "request signature not verified",
+   "file": "src/httpsig.ts",
+   "edits": [
+    [
+     "if (!ok) throw bad('the request signature does not verify');",
+     ""
+    ]
+   ],
+   "red": [
+    "a request signed by an identity with no grant is refused and whynot names the missing grant",
+    "a request signed for the public https URL verifies at a node listening on plain http behind a proxy"
+   ]
+  },
+  {
+   "id": "M26",
+   "title": "request nonce replay allowed",
+   "file": "src/httpsig.ts",
+   "edits": [
+    [
+     "if (ctx.seen.has(params.nonce)) throw",
+     "if (false) throw"
+    ]
+   ],
+   "red": [
+    "a request signed by an identity with no grant is refused and whynot names the missing grant"
+   ]
+  },
+  {
+   "id": "M27",
+   "title": "content-digest not checked",
+   "file": "src/httpsig.ts",
+   "edits": [
+    [
+     "cd !== contentDigest(body ?? Buffer.alloc(0))",
+     "false"
+    ]
+   ],
+   "red": [
+    "a request signed by an identity with no grant is refused and whynot names the missing grant"
+   ]
+  },
+  {
+   "id": "M28",
+   "title": "feed export filter off (leak audit still on)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (s.jsonl === null || (sc?.only !== null && !parseJsonl(s.jsonl).every((f) => allowed(factId(f))))) {",
+     "if (s.jsonl === null) {"
+    ]
+   ],
+   "red": [
+    "a fact with no export rule never appears in a published batch",
+    "a guessed secret cannot be confirmed from a withheld manifest"
+   ]
+  },
+  {
+   "id": "M29",
+   "title": "leak audit off (filter still on)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    const out = batches.filter((b) => b.jsonl !== undefined);\n    if (out.length === 0",
+     "    const out = batches.filter((b) => b.jsonl !== undefined);\n    if (true"
+    ]
+   ],
+   "survivor": "Redundant by design: the leak audit sits behind the export filter and has no discriminating input while the filter is correct. Its ability to refuse is proven by M28 (filter off, audit on): the feed returns 500 leak_audit."
+  },
+  {
+   "id": "M30",
+   "title": "feed filter AND leak audit off",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (s.jsonl === null || (sc?.only !== null && !parseJsonl(s.jsonl).every((f) => allowed(factId(f))))) {",
+     "if (s.jsonl === null) {"
+    ],
+    [
+     "    const out = batches.filter((b) => b.jsonl !== undefined);\n    if (out.length === 0",
+     "    const out = batches.filter((b) => b.jsonl !== undefined);\n    if (true"
+    ]
+   ],
+   "red": [
+    "a fact with no export rule never appears in a published batch",
+    "a guessed secret cannot be confirmed from a withheld manifest"
+   ]
+  },
+  {
+   "id": "M31",
+   "title": "export audience ignored",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (a !== 'public' && a !== requester) continue;\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a fact with no export rule never appears in a published batch"
+   ]
+  },
+  {
+   "id": "M32",
+   "title": "a grant in any book opens every book",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (whole.has(b)) scope.set",
+     "if (whole.size > 0) scope.set"
+    ]
+   ],
+   "red": [
+    "a request signed by an identity with no grant is refused and whynot names the missing grant"
+   ]
+  },
+  {
+   "id": "M33",
+   "title": "recovery change not noticed",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (canonicalize(next.doc.recovery) !== canonicalize(cur.doc.recovery)) facts.push",
+     "if (false) facts.push"
+    ]
+   ],
+   "red": [
+    "a stolen current key cannot rotate the identity away from its recovery key"
+   ]
+  },
+  {
+   "id": "M34",
+   "title": "revocation by current key not noticed",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      facts.push(`revokes[${S}](${I}, ${seq}).`);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a stolen current key cannot rotate the identity away from its recovery key"
+   ]
+  },
+  {
+   "id": "M35",
+   "title": "revocation bound off (claimed_at trusted)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (key.revoked_at) {\n      const lastGood",
+     "    if (false) {\n      const lastGood"
+    ]
+   ],
+   "red": [
+    "a backdated batch received after revocation is rejected"
+   ]
+  },
+  {
+   "id": "M36",
+   "title": "follows always asserted",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (seq === cur.doc.seq + 1 && next.doc.prev === docHash(cur) && kept",
+     "    if (true || seq === cur.doc.seq + 1 && next.doc.prev === docHash(cur) && kept"
+    ]
+   ],
+   "red": [
+    "a rotation in the middle of a chain is followed without a warning",
+    "a node that swaps its key without rotation is refused with a whynot"
+   ]
+  },
+  {
+   "id": "M37",
+   "title": "update signature not verified",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (signer === null || !docSignedBy(next, signer)) {",
+     "if (signer === null) {"
+    ]
+   ],
+   "red": [
+    "a batch signed by B that writes into the book of A is refused",
+    "a stolen current key cannot rotate the identity away from its recovery key"
+   ]
+  },
+  {
+   "id": "M38",
+   "title": "valid_until ignored",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "&& !(key.valid_until && t >= Date.parse(key.valid_until))",
+     ""
+    ]
+   ],
+   "red": [
+    "a rotation in the middle of a chain is followed without a warning"
+   ]
+  },
+  {
+   "id": "M39",
+   "title": "current key accepted for any update (recovery-only rule dropped)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "`not changes_recovery[${S}](I, Seq), not revokes[${S}](I, Seq).`",
+     "`current_key[${S}](I, K).`"
+    ]
+   ],
+   "red": [
+    "a stolen current key cannot rotate the identity away from its recovery key"
+   ]
+  },
+  {
+   "id": "M40",
+   "title": "header not bound to the payload (no AAD)",
+   "file": "src/seal.ts",
+   "edits": [
+    [
+     "  c.setAAD(aad);\n",
+     ""
+    ],
+    [
+     "  d.setAAD(aad);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a static host holding a private batch cannot decrypt it, a recipient can"
+   ]
+  },
+  {
+   "id": "M41",
+   "title": "content key wrapped in the clear",
+   "file": "src/seal.ts",
+   "edits": [
+    [
+     "    const { iv, out } = gcmSeal(kek(shared, epk, r.enc_public_key), cek, Buffer.from(r.identity));\n    return { identity: r.identity, iv: b64(iv), wrapped: b64(out) };",
+     "    const { iv } = gcmSeal(kek(shared, epk, r.enc_public_key), cek, Buffer.from(r.identity));\n    return { identity: r.identity, iv: b64(iv), wrapped: b64(Buffer.concat([cek, crypto.randomBytes(16)])) };"
+    ]
+   ],
+   "red": [
+    "a static host holding a private batch cannot decrypt it, a recipient can"
+   ]
+  },
+  {
+   "id": "M42",
+   "title": "wrap key independent of the recipient's private key",
+   "file": "src/seal.ts",
+   "edits": [
+    [
+     "  return Buffer.from(crypto.hkdfSync('sha256', shared,",
+     "  return Buffer.from(crypto.hkdfSync('sha256', Buffer.alloc(32),"
+    ]
+   ],
+   "red": [
+    "a static host holding a private batch cannot decrypt it, a recipient can"
+   ]
+  },
+  {
+   "id": "M43",
+   "title": "future-dated documents and batches accepted",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (Date.parse(at) > Date.parse(receivedAt) + this.freshnessMs) {",
+     "    if (false) {"
+    ]
+   ],
+   "red": [
+    "a thief future-dating a rotation cannot lock out the recovery key",
+    "an identity document dated past the allowed skew is refused"
+   ]
+  },
+  {
+   "id": "M44",
+   "title": "recovery-signed document held to time order",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     " || next.key_id === cur.doc.recovery.key_id)) {",
+     ")) {"
+    ]
+   ],
+   "red": [
+    "a thief future-dating a rotation cannot lock out the recovery key"
+   ]
+  },
+  {
+   "id": "M45",
+   "title": "future-dated batch not checked",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    this.notFuture(m.claimed_at, receivedAt, 'the batch');\n",
+     ""
+    ]
+   ],
+   "red": [
+    "an identity document dated past the allowed skew is refused",
+    "a batch signed after its key's invalid_from is refused, and one dated 301 seconds past its receipt is refused as future-dated"
+   ]
+  },
+  {
+   "id": "M46",
+   "title": "salt dropped from the digest",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "createHash('sha256').update(Buffer.from(salt, 'base64url')).update(jsonl)",
+     "createHash('sha256').update(jsonl)"
+    ]
+   ],
+   "red": [
+    "a guessed secret cannot be confirmed from a withheld manifest",
+    "batch digest is SHA-256 of the salt followed by the JSONL bytes"
+   ]
+  },
+  {
+   "id": "M47",
+   "title": "salt served with withheld manifests",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "          return { manifest: s.manifest, withheld: true, ...extra };",
+     "          return { manifest: s.manifest, withheld: true, salt: s.salt ?? undefined, ...extra };"
+    ]
+   ],
+   "red": [
+    "a guessed secret cannot be confirmed from a withheld manifest"
+   ]
+  },
+  {
+   "id": "M48",
+   "title": "public URL ignored (scheme and Host from the request)",
+   "file": "src/http.ts",
+   "edits": [
+    [
+     "  const out = [`${node.publicUrl}${p}`];",
+     "  const out = [`http://${req.headers.host}${p}`];"
+    ]
+   ],
+   "red": [
+    "a request signed for the public https URL verifies at a node listening on plain http behind a proxy"
+   ]
+  },
+  {
+   "id": "M50",
+   "title": "checkpoint age not judged",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (age > this.checkpointWindowMs) {",
+     "    if (false) {"
+    ]
+   ],
+   "red": [
+    "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one"
+   ]
+  },
+  {
+   "id": "M51",
+   "title": "checkpoint signature not verified",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (!verifySigned(CHECKPOINT_CONTEXT, c, key)) throw",
+     "if (false) throw"
+    ]
+   ],
+   "red": [
+    "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one"
+   ]
+  },
+  {
+   "id": "M52",
+   "title": "checkpoint head not matched",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (c.head !== last) throw",
+     "if (false) throw"
+    ]
+   ],
+   "red": [
+    "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one"
+   ]
+  },
+  {
+   "id": "M53",
+   "title": "offline content judged by freshness",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (mode === 'post') {\n      if (reattest)",
+     "    if (mode === 'post' || mode === 'offline') {\n      if (reattest)"
+    ]
+   ],
+   "red": [
+    "a sealed batch opened a day later is admitted, and one signed by a key revoked before it was sealed is refused"
+   ]
+  },
+  {
+   "id": "M54",
+   "title": "revoked key trusted until the reader has seen last_good",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     ": lastGood !== null && (m.digest === lastGood || upcoming.includes(lastGood));",
+     ": lastGood !== null && !(this.chains.get(m.identity) ?? []).includes(lastGood);"
+    ]
+   ],
+   "red": [
+    "a sealed batch opened a day later is admitted, and one signed by a key revoked before it was sealed is refused"
+   ]
+  },
+  {
+   "id": "M55",
+   "title": "key validity at claimed_at not checked",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (!keyValidAt(key, Date.parse(m.claimed_at))) {",
+     "    if (false) {"
+    ]
+   ],
+   "red": [
+    "a rotation in the middle of a chain is followed without a warning",
+    "a sealed batch opened a day later is admitted, and one signed by a key revoked before it was sealed is refused"
+   ]
+  },
+  {
+   "id": "M56",
+   "title": "gate counts a surviving mutant as killed",
+   "file": "scripts/mutants.ts",
+   "edits": [
+    [
+     "if (alive.length) return { id: m.id, ok: false,",
+     "if (alive.length) return { id: m.id, ok: true,"
+    ]
+   ],
+   "red": [
+    "the mutation gate fails when a listed mutant survives"
+   ]
+  },
+  {
+   "id": "M57",
+   "title": "gate skips the anchor check",
+   "file": "scripts/mutants.ts",
+   "edits": [
+    [
+     "      if (n !== 1) {\n",
+     "      if (false) {\n"
+    ]
+   ],
+   "red": [
+    "the mutation gate fails when a listed mutant survives"
+   ]
+  },
+  {
+   "id": "M58",
+   "title": "operator-only operations open to any caller",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "  if (op.access === 'operator' && (ctx.caller === null || ctx.caller !== ctx.node?.identity?.name)) {",
+     "  if (false) {"
+    ]
+   ],
+   "red": [
+    "an MCP client lists the tools, asserts a fact, and asks it back with why, all under the node's access rules"
+   ]
+  },
+  {
+   "id": "M59",
+   "title": "MCP bearer token not compared",
+   "file": "src/http.ts",
+   "edits": [
+    [
+     "    const operator = given.length === want.length && crypto.timingSafeEqual(given, want);",
+     "    const operator = true;"
+    ]
+   ],
+   "red": [
+    "an MCP client lists the tools, asserts a fact, and asks it back with why, all under the node's access rules"
+   ]
+  },
+  {
+   "id": "M60",
+   "title": "ask runs as the operator, not the caller",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "const ans = await n.ask(query, ctx.caller, perspective, { at, since,",
+     "const ans = await n.ask(query, n.identity?.name ?? null, perspective, { at, since,"
+    ]
+   ],
+   "red": [
+    "an MCP client lists the tools, asserts a fact, and asks it back with why, all under the node's access rules"
+   ]
+  },
+  {
+   "id": "M61",
+   "title": "perspective not bound in the view",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "(id, t) => this.view(id, undo).get(t[0])?.P === perspective, o.window)",
+     "() => true, o.window)"
+    ]
+   ],
+   "red": [
+    "a question restricted to one perspective sees only the facts asserted under it"
+   ]
+  },
+  {
+   "id": "M62",
+   "title": "view answers ignore the reader's scope",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "        if (sc.only !== null && !sc.only.has(String(cells[0]))) continue;\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a question restricted to one perspective sees only the facts asserted under it"
+   ]
+  },
+  {
+   "id": "M64",
+   "title": "executor started without a CPU limit",
+   "file": "src/executor.ts",
+   "edits": [
+    [
+     "`ulimit -H -t ${cpu + 1}; ulimit -S -t ${cpu}; exec \"$0\" \"$@\"`",
+     "`exec \"$0\" \"$@\"`"
+    ]
+   ],
+   "red": [
+    "an ask answers within one second while an executor saturates its CPU budget"
+   ]
+  },
+  {
+   "id": "M66",
+   "title": "backup copies the index beyond the committed lines' files (reads index after copying)",
+   "file": "src/backup.ts",
+   "edits": [
+    [
+     "    fs.writeFileSync(path.join(staging, 'log', 'index.jsonl'), index);",
+     "    fs.writeFileSync(path.join(staging, 'log', 'index.jsonl'), fs.readFileSync(path.join(log, 'index.jsonl')));"
+    ]
+   ],
+   "red": [
+    "a node rebuilt from its latest backup answers every question the same as the node up to that backup"
+   ]
+  },
+  {
+   "id": "M67",
+   "title": "backup installed without the rebuild check, manifests not copied",
+   "file": "src/backup.ts",
+   "edits": [
+    [
+     "      copy(path.join(book, `${r.digest}.manifest.json`));\n",
+     ""
+    ],
+    [
+     "    const n = await FktsNode.open({ dataDir: staging, bin: o.bin, now });\n    const head = n.log.head();\n    const batches = n.log.receipts.filter((r) => r.kind !== 'identity').length;\n    await n.close();",
+     "    const head = sha256hex(index);\n    const batches = receipts.filter((r) => r.kind !== 'identity').length;"
+    ]
+   ],
+   "red": [
+    "a node rebuilt from its latest backup answers every question the same as the node up to that backup"
+   ]
+  },
+  {
+   "id": "M68",
+   "title": "challenge HMAC not checked",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (!crypto.timingSafeEqual(this.challengeMac(raw.subarray(0, 24)), raw.subarray(24))) return false;\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused",
+    "a flood of challenge requests neither grows memory nor stops an honest mirror"
+   ]
+  },
+  {
+   "id": "M69",
+   "title": "challenge expiry not checked",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (Number(raw.readBigUInt64BE(16)) < this.now()) return false;\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused",
+    "a flood of challenge requests neither grows memory nor stops an honest mirror"
+   ]
+  },
+  {
+   "id": "M70",
+   "title": "verified feed's challenge not remembered",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      this.consume(nonce);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused",
+    "a flood of challenge requests neither grows memory nor stops an honest mirror"
+   ]
+  },
+  {
+   "id": "M71",
+   "title": "issuing a challenge stores it (the old table)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    return Buffer.concat([body, this.challengeMac(body)]).toString('base64url');",
+     "    const n = Buffer.concat([body, this.challengeMac(body)]).toString('base64url');\n    this.consumed.set(`issued:${n}`, this.now() + this.freshnessMs);\n    return n;"
+    ]
+   ],
+   "red": [
+    "a flood of challenge requests neither grows memory nor stops an honest mirror"
+   ]
+  },
+  {
+   "id": "M65",
+   "title": "an answer from any book counts for the addressed executor",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "intent[${book}](K, E, Kind, In), result_of[${SYSTEM_BOOK}](K, E, V).\\n`;",
+     "intent[${book}](K, E, Kind, In), result_of[${SYSTEM_BOOK}](K, E2, V).\\n`;"
+    ]
+   ],
+   "red": [
+    "an intent derived by a rule is answered by an executor and why of the result reaches the rule"
+   ]
+  },
+  {
+   "id": "M72",
+   "title": "a hand-written HTTP route outside the table",
+   "file": "src/http.ts",
+   "edits": [
+    [
+     "      if (p === '/mcp') {",
+     "      if (p === '/debug/state') return send(res, 200, node.health());\n      if (p === '/mcp') {"
+    ]
+   ],
+   "red": [
+    "every operation in the table is reachable with the same name and schema over MCP, CLI and HTTP, and nothing outside the table is"
+   ]
+  },
+  {
+   "id": "M73",
+   "title": "an MCP tool outside the table",
+   "file": "src/mcp.ts",
+   "edits": [
+    [
+     "    .map((o) => ({ name: o.name, description: o.description, inputSchema: o.input }));",
+     "    .map((o) => ({ name: o.name, description: o.description, inputSchema: o.input }))\n    .concat([{ name: 'debug_dump', description: 'x', inputSchema: { type: 'object', properties: {}, additionalProperties: false } }]);"
+    ]
+   ],
+   "red": [
+    "every operation in the table is reachable with the same name and schema over MCP, CLI and HTTP, and nothing outside the table is"
+   ]
+  },
+  {
+   "id": "M74",
+   "title": "a hand-written CLI command outside the table",
+   "file": "src/cli.ts",
+   "edits": [
+    [
+     "  if (cmd === 'serve') return serve(data, f);",
+     "  if (cmd === 'dump') { process.stdout.write('state\\n'); return 0; }\n  if (cmd === 'serve') return serve(data, f);"
+    ]
+   ],
+   "red": [
+    "every operation in the table is reachable with the same name and schema over MCP, CLI and HTTP, and nothing outside the table is"
+   ]
+  },
+  {
+   "id": "M75",
+   "title": "HTTP route ignores the op's schema",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "  const a = validate(op, args);",
+     "  const a = args as Record<string, unknown>;"
+    ]
+   ],
+   "red": [
+    "every operation in the table is reachable with the same name and schema over MCP, CLI and HTTP, and nothing outside the table is"
+   ]
+  },
+  {
+   "id": "M76",
+   "title": "import salt random (not derived from key and content)",
+   "file": "src/import.ts",
+   "edits": [
+    [
+     "    const salt = importSalt(me, jsonl);",
+     "    const salt = (await import('./facts.ts')).newSalt();"
+    ]
+   ],
+   "red": [
+    "importing an Enox snapshot twice gives the same log head and every imported assertion answers by ask with its original author"
+   ]
+  },
+  {
+   "id": "M77",
+   "title": "import drops the original author",
+   "file": "src/import.ts",
+   "edits": [
+    [
+     "    add(F, 'enox:asserted_by', e.asserted_by);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "importing an Enox snapshot twice gives the same log head and every imported assertion answers by ask with its original author"
+   ]
+  },
+  {
+   "id": "M78",
+   "title": "import re-admits batches the node holds",
+   "file": "src/import.ts",
+   "edits": [
+    [
+     "    if (held.has(batchDigest(salt, jsonl))) { skipped++; continue; }\n",
+     ""
+    ]
+   ],
+   "red": [
+    "importing an Enox snapshot twice gives the same log head and every imported assertion answers by ask with its original author"
+   ]
+  },
+  {
+   "id": "M79",
+   "title": "Enox remember open to any caller",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "    input: obj({ subject: s(), fact: s(), relation: s(), domain: s(), confidence: n(), asserted_by: s() }, ['subject', 'fact']), access: 'operator', text: pretty,",
+     "    input: obj({ subject: s(), fact: s(), relation: s(), domain: s(), confidence: n(), asserted_by: s() }, ['subject', 'fact']), access: 'anyone', text: pretty,"
+    ]
+   ],
+   "red": [
+    "the tool calls an Enox client made on 2026-09-26 run unchanged against a node and get answers of the same shape"
+   ]
+  },
+  {
+   "id": "M80",
+   "title": "Enox delete_assertion writes nothing",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "      const batch = await write(ctx, [{ source: f.S, relation: f.R, target: f.T, perspective: f.P, confidence: 0 },\n        meta(f.F, 'deleted_at', new Date().toISOString())]);\n",
+     "      const batch = null;\n"
+    ]
+   ],
+   "red": [
+    "the tool calls an Enox client made on 2026-09-26 run unchanged against a node and get answers of the same shape"
+   ]
+  },
+  {
+   "id": "M81",
+   "title": "semantic_search fakes an answer without an index",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "      const none = (index: string, message: string) => ({ nodes: [],",
+     "      const none = (index: string, message: string) => ({ nodes: [{ id: 'a guess' }],"
+    ]
+   ],
+   "red": [
+    "the tool calls an Enox client made on 2026-09-26 run unchanged against a node and get answers of the same shape",
+    "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent"
+   ]
+  },
+  {
+   "id": "M82",
+   "title": "Enox reads run as the operator, not the caller",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "  if (ctx.caller === null || ctx.caller !== own) return oneAtATime(() => Graph.load(n, ctx.caller));",
+     "  if (ctx.caller === null || ctx.caller !== own) return oneAtATime(() => Graph.load(n, own ?? null));"
+    ]
+   ],
+   "red": [
+    "the tool calls an Enox client made on 2026-09-26 run unchanged against a node and get answers of the same shape"
+   ]
+  },
+  {
+   "id": "M83",
+   "title": "a rule may conclude into another identity's book",
+   "file": "src/rules.ts",
+   "edits": [
+    [
+     "  if (head && book !== own) {",
+     "  if (false) {"
+    ]
+   ],
+   "red": [
+    "a rule published by alice derives facts in her book from bob's granted facts, and cannot conclude into bob's book"
+   ]
+  },
+  {
+   "id": "M84",
+   "title": "a rule reads a foreign book without a live grant",
+   "file": "src/rules.ts",
+   "edits": [
+    [
+     "  for (const b of [...foreign].sort()) body.push(",
+     "  for (const b of [...foreign].sort().filter(() => false)) body.push("
+    ]
+   ],
+   "red": [
+    "a rule published by alice derives facts in her book from bob's granted facts, and cannot conclude into bob's book",
+    "why names the facts and the rule an answer stands on, and whynot names the missing premise"
+   ]
+  },
+  {
+   "id": "M85",
+   "title": "a rule may read the system book",
+   "file": "src/rules.ts",
+   "edits": [
+    [
+     "  const book = r.startsWith('@') ? bookOf(checkName(r.slice(1))) : BOOK.test(r) ? r : null;",
+     "  const book = r.startsWith('@') ? bookOf(checkName(r.slice(1))) : BOOK.test(r) || r === 'sys_fkts' ? r : null;"
+    ]
+   ],
+   "red": [
+    "a rule published by alice derives facts in her book from bob's granted facts, and cannot conclude into bob's book"
+   ]
+  },
+  {
+   "id": "M86",
+   "title": "agents act without a live delegation",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    while (parent !== undefined) {",
+     "    while (false) {"
+    ]
+   ],
+   "red": [
+    "a delegated agent key publishes until its expiry and is refused after it"
+   ]
+  },
+  {
+   "id": "M88",
+   "title": "follow facts derive no intent",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "    `intent[${book}](P, ${roflString(owner)}, \"follow\", U) :- edge[${book}](F, P, \"fkts:follow\", U).`,\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a follower converges to the publisher's head after new batches without a manual pull"
+   ]
+  },
+  {
+   "id": "M89",
+   "title": "the follow executor pulls once and stops",
+   "file": "src/executor.ts",
+   "edits": [
+    [
+     "  while (!signal.aborted) {\n    const rows",
+     "  if (!signal.aborted) {\n    const rows"
+    ]
+   ],
+   "red": [
+    "a follower converges to the publisher's head after new batches without a manual pull"
+   ]
+  },
+  {
+   "id": "M90",
+   "title": "stdio offered as the network surface",
+   "file": "src/stdio.ts",
+   "edits": [
+    [
+     "handleRpc(ctx, m, 'local')",
+     "handleRpc(ctx, m, 'network')"
+    ]
+   ],
+   "red": [
+    "the same data directory answers the same over stdio and over HTTP"
+   ]
+  },
+  {
+   "id": "M91",
+   "title": "a second store: the Enox view cached on disk",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "  const g = await Graph.load(n, own);\n",
+     "  const g = await Graph.load(n, own);\n  (await import('node:fs')).writeFileSync('/tmp/fkts-graph-cache.json', String(g.nodes.size));\n"
+    ]
+   ],
+   "red": [
+    "a census of the source finds no second store, queue, wire format or proof of who"
+   ]
+  },
+  {
+   "id": "M92",
+   "title": "a second proof of who: an API-key header",
+   "file": "src/http.ts",
+   "edits": [
+    [
+     "export function callerOf(node: FktsNode, method: string, target: string | readonly string[], headers: http.IncomingHttpHeaders, raw: Buffer | null, mcp = false): string | null {\n  const auth = headers.authorization;",
+     "export function callerOf(node: FktsNode, method: string, target: string | readonly string[], headers: http.IncomingHttpHeaders, raw: Buffer | null, mcp = false): string | null {\n  if (headers['x-api-key'] === process.env.FKTS_API_KEY) return node.identity?.name ?? null;\n  const auth = headers.authorization;"
+    ]
+   ],
+   "red": [
+    "a census of the source finds no second store, queue, wire format or proof of who"
+   ]
+  },
+  {
+   "id": "M93",
+   "title": "URI prefix mismatch not reported",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (foreign.length === 0) return;",
+     "    if (foreign.length >= 0) return;"
+    ]
+   ],
+   "red": [
+    "a node whose imported ids sit under another URI prefix says so at startup"
+   ]
+  },
+  {
+   "id": "M94",
+   "title": "delegation checks only the direct parent",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      agent = parent;\n      parent = this.current(agent)?.doc.delegated_by;",
+     "      agent = parent;\n      parent = undefined;"
+    ]
+   ],
+   "red": [
+    "a sub-agent is refused as soon as any identity above it in the delegation chain is"
+   ]
+  },
+  {
+   "id": "M95",
+   "title": "the grant guard covers positive literals only",
+   "file": "src/rules.ts",
+   "edits": [
+    [
+     "    else if (book !== bookOf(author)) foreign.add(book);",
+     "    else if (book !== bookOf(author) && !m[1]) foreign.add(book);"
+    ]
+   ],
+   "red": [
+    "negation over an ungranted book is no oracle"
+   ]
+  },
+  {
+   "id": "M96",
+   "title": "user rules run in the main world",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "  return toRofl(v.facts, bookOf(v.manifest.identity), seq, false);\n}",
+     "  return toRofl(v.facts, bookOf(v.manifest.identity), seq, false) + v.rules.map((r) => `${r}\\n`).join('');\n}"
+    ]
+   ],
+   "red": [
+    "an unbounded rule yields unknown with its budget named, and another identity's batch is admitted meanwhile without delay"
+   ]
+  },
+  {
+   "id": "M97",
+   "title": "an exhausted budget is not reported",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (unknown.length) ans.unknown = unknown;",
+     "    void unknown;"
+    ]
+   ],
+   "red": [
+    "an unbounded rule yields unknown with its budget named, and another identity's batch is admitted meanwhile without delay"
+   ]
+  },
+  {
+   "id": "M98",
+   "title": "another identity's rules (posted or mirrored) run without trust",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (!op || !this.chains.has(op)) return [];\n    const b = bookOf(op);",
+     "    return all;\n    const b = bookOf(op!);"
+    ]
+   ],
+   "red": [
+    "a mirrored rule does not run until the reader trusts its author for rules, and then it does"
+   ]
+  },
+  {
+   "id": "M99",
+   "title": "a withdrawn trust still counts",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    return (await this.engine.sysRows(`trusts[${b}](${roflString(author)})`)).length > 0 ? all : [];",
+     "    return (await this.engine.sysRows(`edge[${b}](F, ${roflString(author)}, \"fkts:trust_rules\", T)`)).length > 0 ? all : [];"
+    ]
+   ],
+   "red": [
+    "a mirrored rule does not run until the reader trusts its author for rules, and then it does"
+   ]
+  },
+  {
+   "id": "M100",
+   "title": "a cut answer is not marked",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "    ...(more ? { cut: true,",
+     "    ...(false ? { cut: true,"
+    ]
+   ],
+   "red": [
+    "an answer longer than the limit is marked cut and the rest is fetched page by page to the same total"
+   ]
+  },
+  {
+   "id": "M101",
+   "title": "a cursor survives a changed log",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "  if (c && c.h !== head) {",
+     "  if (false) {"
+    ]
+   ],
+   "red": [
+    "an answer longer than the limit is marked cut and the rest is fetched page by page to the same total"
+   ]
+  },
+  {
+   "id": "M102",
+   "title": "a dead engine is never rebuilt",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "  private async rebuildEngine(): Promise<void> {\n",
+     "  private async rebuildEngine(): Promise<void> {\n    if (Date.now() > 0) return;\n"
+    ]
+   ],
+   "red": [
+    "killing the engine during an admission leaves the log consistent, refuses that batch, and the node answers after it rebuilds"
+   ]
+  },
+  {
+   "id": "M103",
+   "title": "an engine crash reported as the batch's fault (both layers)",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "      if (this.dead) throw this.down(e as Error);\n",
+     ""
+    ],
+    [
+     "        throw e instanceof Refusal && e.reason === 'engine_down' ? e\n          : new Refusal(503, 'engine_down',",
+     "        throw e instanceof Refusal ? e\n          : new Refusal(422, 'engine_refused',",
+     "src/node.ts"
+    ]
+   ],
+   "red": [
+    "killing the engine during an admission leaves the log consistent, refuses that batch, and the node answers after it rebuilds"
+   ]
+  },
+  {
+   "id": "M104",
+   "title": "replay evaluates after every batch",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "      await this.session.load(e.rofl, e.who);\n    }\n    await this.session.evaluate();",
+     "      await this.session.load(e.rofl, e.who);\n      await this.session.evaluate();\n    }\n    await this.session.evaluate();"
+    ]
+   ],
+   "red": [
+    "a node holding 200000 facts reopens from its log within 30 seconds"
+   ]
+  },
+  {
+   "id": "M105",
+   "title": "a rule-world ask swallows the engine's death",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        if (this.engine.dead) throw e;       // a death is never an empty answer\n",
+     ""
+    ]
+   ],
+   "red": [
+    "killing the engine during an ask never yields a plain answer: the asker gets an error or unknown, and the next ask is answered"
+   ]
+  },
+  {
+   "id": "M106",
+   "title": "a read that meets the engine's death is answered anyway (retried)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        void retry;\n",
+     "        if (retry) return f();\n"
+    ]
+   ],
+   "red": [
+    "killing the engine during an ask never yields a plain answer: the asker gets an error or unknown, and the next ask is answered"
+   ]
+  },
+  {
+   "id": "M107",
+   "title": "A: admission evaluates the whole world again",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "      beforeLoad();\n      await this.session.load(rofl, who);\n",
+     "      beforeLoad();\n      await this.session.load(rofl, who);\n      await this.session.evaluate();\n"
+    ]
+   ],
+   "red": [
+    "a batch of 2000 facts is admitted within one second with 200000 facts held"
+   ]
+  },
+  {
+   "id": "M108",
+   "title": "B: a replaced control fact's engine row is kept (admission retracts nothing)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      await this.engine.retract(plan.retract);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing"
+   ]
+  },
+  {
+   "id": "M109",
+   "title": "B: the current assertion is not recorded",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "      for (const [F, c] of next) m.set(F, c);\n      for (const [F, act] of on) m.get(F)!.on = act;\n",
+     ""
+    ]
+   ],
+   "red": [
+    "re-asserting a fact with a new confidence leaves exactly one confidence for that identity, the latest"
+   ]
+  },
+  {
+   "id": "M110",
+   "title": "C: grant expiry ignored",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        .filter((r) => now < Number(r[1])).map((r) => String(r[0])));",
+     ".map((r) => String(r[0])));"
+    ]
+   ],
+   "red": [
+    "a request signed by an identity with no grant is refused and whynot names the missing grant"
+   ]
+  },
+  {
+   "id": "M111",
+   "title": "C: delegation expiry ignored",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        if (!until.some((u) => at < u)) {",
+     "        if (until.length === 0) {"
+    ]
+   ],
+   "red": [
+    "a delegated agent key publishes until its expiry and is refused after it"
+   ]
+  },
+  {
+   "id": "M112",
+   "title": "D: the Enox view is rebuilt on every write",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "    const since = n.admittedSince(kept.version);",
+     "    const since = null as ReturnType<typeof n.admittedSince>;"
+    ]
+   ],
+   "red": [
+    "an Enox read right after a write answers within one second with 200000 facts held"
+   ]
+  },
+  {
+   "id": "M113",
+   "title": "r_session_eviction: /mcp issues a session id",
+   "file": "src/http.ts",
+   "edits": [
+    [
+     "        if (replies.length === 0) { res.writeHead(202).end(); return; }",
+     "        res.setHeader('Mcp-Session-Id', crypto.randomUUID());\n        if (replies.length === 0) { res.writeHead(202).end(); return; }"
+    ]
+   ],
+   "red": [
+    "the MCP endpoint issues no session id and keeps no state per client"
+   ]
+  },
+  {
+   "id": "M114",
+   "title": "r_session_eviction: a client's session id is looked up (unknown ones refused)",
+   "file": "src/http.ts",
+   "edits": [
+    [
+     "        let msg: unknown;\n        try { msg = JSON.parse(raw!.toString('utf8')); } catch {",
+     "        if (req.headers[`mcp-${'sess' + 'ion'}-id`]) return send(res, 404, { error: 'unknown' });\n        let msg: unknown;\n        try { msg = JSON.parse(raw!.toString('utf8')); } catch {"
+    ]
+   ],
+   "red": [
+    "the MCP endpoint issues no session id and keeps no state per client"
+   ]
+  },
+  {
+   "id": "M115",
+   "title": "r_session_eviction: every caller's Enox view is kept",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "  if (ctx.caller === null || ctx.caller !== own) return oneAtATime(() => Graph.load(n, ctx.caller));",
+     "  if (ctx.caller === null || ctx.caller !== own) { const g = await oneAtATime(() => Graph.load(n, ctx.caller)); if (ctx.caller) perCaller.set(ctx.caller, g); return g; }"
+    ],
+    [
+     "let kept: { node: FktsNode; owner: string; g: Graph; version: number } | null = null;",
+     "let kept: { node: FktsNode; owner: string; g: Graph; version: number } | null = null;\nconst perCaller = new Map<string, Graph>();"
+    ]
+   ],
+   "red": [
+    "the MCP endpoint issues no session id and keeps no state per client"
+   ]
+  },
+  {
+   "id": "M116",
+   "title": "r_session_eviction: every caller's Enox view is kept, counted",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "  if (ctx.caller === null || ctx.caller !== own) return oneAtATime(() => Graph.load(n, ctx.caller));",
+     "  if (ctx.caller === null || ctx.caller !== own) { const g = await oneAtATime(() => Graph.load(n, ctx.caller)); if (ctx.caller) others.push(g); return g; }"
+    ],
+    [
+     "let kept: { node: FktsNode; owner: string; g: Graph; version: number } | null = null;",
+     "let kept: { node: FktsNode; owner: string; g: Graph; version: number } | null = null;\nconst others: Graph[] = [];"
+    ],
+    [
+     "  return kept ? 1 : 0;",
+     "  return (kept ? 1 : 0) + others.length;"
+    ]
+   ],
+   "red": [
+    "the MCP endpoint issues no session id and keeps no state per client"
+   ]
+  },
+  {
+   "id": "M117",
+   "title": "r_bounded_memory: no declared heap budget",
+   "file": "src/cli.ts",
+   "edits": [
+    [
+     "#!/usr/bin/env -S node --experimental-strip-types --no-warnings --max-old-space-size=1024",
+     "#!/usr/bin/env -S node --experimental-strip-types --no-warnings"
+    ],
+    [
+     "\"node --experimental-strip-types --no-warnings --max-old-space-size=1024 src/cli.ts\"",
+     "\"node --experimental-strip-types --no-warnings src/cli.ts\"",
+     "package.json"
+    ]
+   ],
+   "red": [
+    "a node holding 200000 facts stays under 1.5 GB of resident memory while idle"
+   ]
+  },
+  {
+   "id": "M118",
+   "title": "r_bounded_memory: the engine a rebuild replaced is left running",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    await old.stop().catch(() => {});",
+     "    void old;"
+    ]
+   ],
+   "red": [
+    "a node holding 200000 facts stays under 1.5 GB of resident memory while idle"
+   ]
+  },
+  {
+   "id": "M119",
+   "title": "r_bounded_memory: recent admissions remembered by batch count, not facts",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    while (this.recent.length && (this.recentFacts > this.recentLimit || this.recentBytes > this.recentBytesLimit)) {",
+     "    while (this.recent.length > 1000) {"
+    ]
+   ],
+   "red": [
+    "a node holding 200000 facts stays under 1.5 GB of resident memory while idle"
+   ]
+  },
+  {
+   "id": "M120",
+   "title": "r_relation_primary: blank means only ASCII-style white space (trim)",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "    if (f[k].replace(INVISIBLE, '').length === 0) {",
+     "    if (f[k].trim().length === 0) {"
+    ]
+   ],
+   "red": [
+    "a name made only of invisible or text-direction characters is refused, the same way by the client and the node"
+   ]
+  },
+  {
+   "id": "M121",
+   "title": "r_relation_primary: a multi-line document as source or relation is let in",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "    if (/[\\u0000-\\u001f\\u007f]/.test(v)) throw",
+     "    if (false) throw"
+    ]
+   ],
+   "red": [
+    "a batch line that is not a relation between two entities is refused"
+   ]
+  },
+  {
+   "id": "M122",
+   "title": "r_relation_primary: no bound on the length of an entity or a type",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "    if (v.length > max) throw",
+     "    if (v.length > max * 1000) throw"
+    ]
+   ],
+   "red": [
+    "a batch line that is not a relation between two entities is refused"
+   ]
+  },
+  {
+   "id": "M123",
+   "title": "r_relation_primary: replay judges the log again (an old log no longer opens)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      facts = parseJsonl(jsonl, !replaying);",
+     "      facts = parseJsonl(jsonl, true);"
+    ]
+   ],
+   "red": [
+    "a batch line that is not a relation between two entities is refused"
+   ]
+  },
+  {
+   "id": "M124",
+   "title": "r_relation_primary: batches are not judged at admission",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      facts = parseJsonl(jsonl, !replaying);",
+     "      facts = parseJsonl(jsonl, false);"
+    ]
+   ],
+   "red": [
+    "a batch line that is not a relation between two entities is refused"
+   ]
+  },
+  {
+   "id": "M125",
+   "title": "r_semantic_search: anyone's search writes a fact",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (found.state !== 'not_asked' || requester === null || requester !== this.identity?.name) return found;",
+     "    if (found.state !== 'not_asked') return found;"
+    ]
+   ],
+   "red": [
+    "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent"
+   ]
+  },
+  {
+   "id": "M126",
+   "title": "r_semantic_search: an embedder no longer named still answers",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      const embedders = [...new Set(named.filter((r) => (cur.get(String(r[0]))?.C ?? 0) > 0).map((r) => canonicalOrNull(r[1])).filter((x): x is string => x !== null))].sort();",
+     "      const embedders = [...new Set(named.map((r) => canonicalOrNull(r[1])).filter((x): x is string => x !== null))].sort();"
+    ]
+   ],
+   "red": [
+    "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent"
+   ]
+  },
+  {
+   "id": "M127",
+   "title": "r_semantic_search: hits are shown through the operator's view, not the caller's",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "      // Hits the CALLER may not read are not in its view, and so not answered.\n      const g = await graph(ctx);",
+     "      const g = await graph({ ...ctx, caller: node(ctx).identity?.name ?? null });"
+    ]
+   ],
+   "red": [
+    "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent"
+   ]
+  },
+  {
+   "id": "M128",
+   "title": "r_semantic_search: no rule makes a search an intent",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "    `intent[${book}](K, E, \"search\", Q) :- edge[${book}](F, K, \"fkts:search\", Q), edge[${book}](G, E, \"fkts:embedder\", \"search\").`,",
+     "    `intent[${book}](K, E, \"search\", Q) :- edge[${book}](F, K, \"fkts:search\", Q), edge[${book}](G, E, \"fkts:embedder\", \"never\").`,"
+    ]
+   ],
+   "red": [
+    "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent"
+   ]
+  },
+  {
+   "id": "M129",
+   "title": "r_derived_rebuildable: the embedder does not rebuild its index from its book",
+   "file": "executors/embedder/embedder.ts",
+   "edits": [
+    [
+     "        if (f.relation === EMBEDDING) this.index.set(f.source, decode(f.target));",
+     "        if (false) this.index.set(f.source, decode(f.target));"
+    ]
+   ],
+   "red": [
+    "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent"
+   ]
+  },
+  {
+   "id": "M130",
+   "title": "r_relation_primary: the node uses its own weaker check (drifts from the client)",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "    const f = checkFact(o, i + 1, admission);",
+     "    const f = checkFact(o, i + 1, false);\n    if (admission && (['source', 'relation', 'target'] as const).some((k) => f[k].trim() === '')) throw new Refusal(400, 'not_a_relation', `line ${i + 1}: blank`);"
+    ]
+   ],
+   "red": [
+    "a batch line that is not a relation between two entities is refused",
+    "a name made only of invisible or text-direction characters is refused, the same way by the client and the node"
+   ]
+  },
+  {
+   "id": "M131",
+   "title": "r_relation_primary: text-direction controls let inside a name",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "    if (BIDI.test(v)) throw",
+     "    if (false) throw"
+    ]
+   ],
+   "red": [
+    "a name made only of invisible or text-direction characters is refused, the same way by the client and the node"
+   ]
+  },
+  {
+   "id": "M132",
+   "title": "r_relation_primary: the client's loose-JSONL path skips the rule",
+   "file": "src/client.ts",
+   "edits": [
+    [
+     "    return checkFact(o, i + 1);\n",
+     "    return checkFact(o, i + 1, false);\n"
+    ]
+   ],
+   "red": [
+    "a name made only of invisible or text-direction characters is refused, the same way by the client and the node"
+   ]
+  },
+  {
+   "id": "M133",
+   "title": "r_relation_primary: blank blind to format characters (zero-width, BOM, bidi)",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "const INVISIBLE = /[\\p{White_Space}\\p{Cf}\\p{Cc}]/gu;",
+     "const INVISIBLE = /[\\p{White_Space}\\p{Cc}]/gu;"
+    ]
+   ],
+   "red": [
+    "a name made only of invisible or text-direction characters is refused, the same way by the client and the node"
+   ]
+  },
+  {
+   "id": "M134",
+   "title": "r_semantic_search: a wildcard export covers the node's own relations (the search leaks)",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     ", export[${book}](\"*\", A), not reserved[${SYSTEM_BOOK}](Rel).`",
+     ", export[${book}](\"*\", A).`"
+    ]
+   ],
+   "red": [
+    "a search the operator asks is never published by a wildcard export"
+   ]
+  },
+  {
+   "id": "M135",
+   "title": "r_semantic_search: an unknown fkts: relation is admitted (past the closed list)",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "  if (f.relation.startsWith('fkts:') && !(RESERVED as readonly string[]).includes(f.relation)) {",
+     "  if (false) {"
+    ]
+   ],
+   "red": [
+    "a search the operator asks is never published by a wildcard export"
+   ]
+  },
+  {
+   "id": "M136",
+   "title": "r_semantic_search: the search relation missing from the reserved list",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "    ...NOT_BY_WILDCARD.map((r) => `reserved[${SYSTEM_BOOK}](${roflString(r)}).`),",
+     "    ...NOT_BY_WILDCARD.filter((r) => r !== 'fkts:search').map((r) => `reserved[${SYSTEM_BOOK}](${roflString(r)}).`),"
+    ]
+   ],
+   "red": [
+    "a search the operator asks is never published by a wildcard export"
+   ]
+  },
+  {
+   "id": "M137",
+   "title": "r_semantic_search: the embedder quietly runs the hash model (text, not meaning)",
+   "file": "executors/embedder/embed.ts",
+   "edits": [
+    [
+     "  return name === 'hash' ? HASH : learned(name);",
+     "  return HASH;"
+    ]
+   ],
+   "red": [
+    "a meaning search finds a fact that shares none of the query's words"
+   ]
+  },
+  {
+   "id": "M138",
+   "title": "r_uc_observability: a silent feed reads as an all-clear (no unknown)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      unknown.push(...await this.silentFeeds(sc.identity));\n",
+     ""
+    ]
+   ],
+   "red": [
+    "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why"
+   ]
+  },
+  {
+   "id": "M139",
+   "title": "r_uc_observability: a feed that spoke once is never silent",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (last !== undefined && now - last <= this.silenceSec * 1000) continue;",
+     "      if (last !== undefined) continue;"
+    ]
+   ],
+   "red": [
+    "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why"
+   ]
+  },
+  {
+   "id": "M140",
+   "title": "r_uc_observability: a feed that never spoke is taken as fine",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (last !== undefined && now - last <= this.silenceSec * 1000) continue;",
+     "      if (last === undefined || now - last <= this.silenceSec * 1000) continue;"
+    ]
+   ],
+   "red": [
+    "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why"
+   ]
+  },
+  {
+   "id": "M141",
+   "title": "r_uc_observability: integer targets are not numbers to the rules",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "    if (INTEGER.test(f.target)) out.push(",
+     "    if (false) out.push("
+    ]
+   ],
+   "red": [
+    "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why"
+   ]
+  },
+  {
+   "id": "M142",
+   "title": "r_uc_observability: silence measured from when the reader received, not when the host claimed",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    const claimed = Date.parse(v.manifest.claimed_at);",
+     "    const claimed = this.now();"
+    ]
+   ],
+   "red": [
+    "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why"
+   ]
+  },
+  {
+   "id": "M143",
+   "title": "r_session_eviction: the kept Enox view is shared by every node in the process",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "  if (kept && kept.node === n && kept.owner === own) {",
+     "  if (kept && kept.owner === own) {"
+    ]
+   ],
+   "red": [
+    "the MCP endpoint issues no session id and keeps no state per client"
+   ]
+  },
+  {
+   "id": "M144",
+   "title": "r_uc_observability: a book variable reads without may_read (every book, granted or not)",
+   "file": "src/rules.ts",
+   "edits": [
+    [
+     "  for (const v of [...variables].sort()) body.push(`may_read_book[${SYSTEM_BOOK}](${roflString(author)}, ${v})`);",
+     "  for (const v of [...variables].sort()) void v;"
+    ],
+    [
+     "    const ranging = rules.some((r) => /may_read_book\\[/.test(r));",
+     "    const ranging = true;",
+     "src/node.ts"
+    ],
+    [
+     "      ? (await this.engine.sysRows(`readable_until[${SYSTEM_BOOK}](${roflString(author)}, B, U)`)).filter((r) => clock < Number(r[1])).map((r) => String(r[0]))",
+     "      ? [...this.chains.keys()].map(bookOf)",
+     "src/node.ts"
+    ]
+   ],
+   "red": [
+    "a fleet rule written once covers every followed host, including a host followed after the rule was written"
+   ]
+  },
+  {
+   "id": "M145",
+   "title": "r_uc_observability: a ranging rule's world loads only the books its text names",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    const ranging = rules.some((r) => /may_read_book\\[/.test(r));",
+     "    const ranging = false;"
+    ]
+   ],
+   "red": [
+    "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why",
+    "a fleet rule written once covers every followed host, including a host followed after the rule was written"
+   ]
+  },
+  {
+   "id": "M146",
+   "title": "r_uc_observability: follows are not visible to rules",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "const followRow = (book: string, name: string) => `follows[${book}](",
+     "const followRow = (book: string, name: string) => `followed_elsewhere[${book}]("
+    ]
+   ],
+   "red": [
+    "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why",
+    "a fleet rule written once covers every followed host, including a host followed after the rule was written"
+   ]
+  },
+  {
+   "id": "M147",
+   "title": "r_uc_observability: only a feed some rule names is watched for silence",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    for (const p of followed) {",
+     "    for (const p of followed.filter((x) => (this.userRules.get(author) ?? []).some((r) => r.text.includes(bookOf(x))))) {"
+    ]
+   ],
+   "red": [
+    "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why",
+    "a followed feed that no rule reads is reported as unknown, never as all-clear"
+   ]
+  },
+  {
+   "id": "M148",
+   "title": "r_uc_observability: follows come from edge rows again (a retired follow still ranges)",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "    // (A grant's, delegation's or export's row, and a follow's\n",
+     "    if (f.relation === 'fkts:follow') out.push(`follows[${book}](${roflString(f.source)}, b_${sha256hex(f.source).slice(0, 16)}).`);\n    // (A grant's, delegation's or export's row, and a follow's\n"
+    ]
+   ],
+   "red": [
+    "a follow retired with confidence 0 stops every rule ranging over that host's book"
+   ]
+  },
+  {
+   "id": "M149",
+   "title": "r_uc_observability: retiring one of two follows of a host unfollows it",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "      if (![...next].some(([F, c]) => still(F, c)) && ![...m].some(([F, c]) => !next.has(F) && still(F, c))) retract.push(followRow(book, name));",
+     "      retract.push(followRow(book, name));"
+    ]
+   ],
+   "red": [
+    "a follow retired with confidence 0 stops every rule ranging over that host's book"
+   ]
+  },
+  {
+   "id": "M151",
+   "title": "r_uc_observability: replay forgets the current follows",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "${c.follow !== undefined && c.C > 0 ? `${followRow(book, c.follow)}.\\n` : ''}",
+     "${''}"
+    ]
+   ],
+   "red": [
+    "a follow retired with confidence 0 stops every rule ranging over that host's book"
+   ]
+  },
+  {
+   "id": "M152",
+   "title": "r_key_change_loud: plain-HTTP first contact without an invitation is pinned",
+   "file": "src/client.ts",
+   "edits": [
+    [
+     "if (!known && invited === null && new URL(peer).protocol !== 'https:') {",
+     "if (false && !known && invited === null && new URL(peer).protocol !== 'https:') {"
+    ]
+   ],
+   "red": [
+    "a first contact over plain HTTP is refused without an invitation link and pins with one whose key id matches"
+   ]
+  },
+  {
+   "id": "M153",
+   "title": "r_key_change_loud: an invitation's key id is not compared",
+   "file": "src/client.ts",
+   "edits": [
+    [
+     "if (!known && invited !== null && ",
+     "if (false && !known && invited !== null && "
+    ]
+   ],
+   "red": [
+    "a first contact over plain HTTP is refused without an invitation link and pins with one whose key id matches"
+   ]
+  },
+  {
+   "id": "M154",
+   "title": "r_key_change_loud: plain HTTP counts as a secure transport",
+   "file": "src/client.ts",
+   "edits": [
+    [
+     "new URL(peer).protocol !== 'https:'",
+     "!/^https?:$/.test(new URL(peer).protocol)"
+    ]
+   ],
+   "red": [
+    "a first contact over plain HTTP is refused without an invitation link and pins with one whose key id matches"
+   ]
+  },
+  {
+   "id": "M155",
+   "title": "r_key_change_loud: an unknown identity counts as already pinned",
+   "file": "src/client.ts",
+   "edits": [
+    [
+     "if ((e as { status?: number }).status === 404) return false;",
+     "if ((e as { status?: number }).status === 404) return true;"
+    ]
+   ],
+   "red": [
+    "a first contact over plain HTTP is refused without an invitation link and pins with one whose key id matches"
+   ]
+  },
+  {
+   "id": "M156",
+   "title": "r_atomic_write: the receipt is committed before the batch's facts are on disk",
+   "file": "src/log.ts",
+   "edits": [
+    [
+     "    if (jsonl !== null) writeFileAtomic(this.batchPath(manifest.identity, manifest.digest, 'jsonl'), jsonl, this.fault, 'jsonl', false);\n",
+     ""
+    ],
+    [
+     "    return this.commit({ received_at: receivedAt, digest: manifest.digest, identity: manifest.identity, pin: pinDigest, ...extra });",
+     "    const rc = this.commit({ received_at: receivedAt, digest: manifest.digest, identity: manifest.identity, pin: pinDigest, ...extra });\n    if (jsonl !== null) writeFileAtomic(this.batchPath(manifest.identity, manifest.digest, 'jsonl'), jsonl, this.fault, 'jsonl');\n    return rc;"
+    ]
+   ],
+   "red": [
+    "a node killed at each write step reopens with the whole batch or none of it"
+   ]
+  },
+  {
+   "id": "M157",
+   "title": "r_atomic_write: the pinned identity document is written after the commit",
+   "file": "src/log.ts",
+   "edits": [
+    [
+     "      writeFileAtomic(path.join(bookDir, `identity-${pinDigest}.json`), text, this.fault, 'identity');\n    }\n    // (The batch's",
+     "    }\n    // (The batch's"
+    ],
+    [
+     "    return this.commit({ received_at: receivedAt, digest: manifest.digest, identity: manifest.identity, pin: pinDigest, ...extra });",
+     "    const rc = this.commit({ received_at: receivedAt, digest: manifest.digest, identity: manifest.identity, pin: pinDigest, ...extra });\n    if (pin) writeFileAtomic(path.join(bookDir, `identity-${pinDigest}.json`), canonicalize(pin), this.fault, 'identity');\n    return rc;"
+    ]
+   ],
+   "red": [
+    "a node killed at each write step reopens with the whole batch or none of it"
+   ]
+  },
+  {
+   "id": "M158",
+   "title": "r_key_change_loud: an unknown identity is pinned by whoever speaks first",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (!this.idDocs.has(identity)) await this.vouch(identity, docs[0]!, by, receivedAt);",
+     "    if (false && !this.idDocs.has(identity)) await this.vouch(identity, docs[0]!, by, receivedAt);"
+    ]
+   ],
+   "red": [
+    "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins"
+   ]
+  },
+  {
+   "id": "M159",
+   "title": "r_key_change_loud: any signed caller vouches, not only the operator",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (by !== null && by === this.identity?.name) return;",
+     "    if (by !== null) return;"
+    ]
+   ],
+   "red": [
+    "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins"
+   ]
+  },
+  {
+   "id": "M160",
+   "title": "r_key_change_loud: any document under the node's own name is its own",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (identity === this.identity?.name && docHash(first) === docHash(this.identity.identityChain()[0]!)) return;",
+     "    if (identity === this.identity?.name) return;"
+    ]
+   ],
+   "red": [
+    "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins"
+   ]
+  },
+  {
+   "id": "M161",
+   "title": "r_key_change_loud: a claimed delegated_by vouches without the parent's delegation",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (until.some((u) => at < u)) return;",
+     "      return;"
+    ]
+   ],
+   "red": [
+    "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins"
+   ]
+  },
+  {
+   "id": "M162",
+   "title": "r_key_change_loud: a delegation from a pinned identity does not vouch",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (parent !== undefined && label !== '' && !label.includes('.') && this.idDocs.has(parent)) {",
+     "    if (false && parent !== undefined && label !== '' && !label.includes('.') && this.idDocs.has(parent)) {"
+    ]
+   ],
+   "red": [
+    "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins"
+   ]
+  },
+  {
+   "id": "M163",
+   "title": "r_key_change_loud: a posted batch counts as the operator's word",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "needNode(ctx).admit(a as never, ctx.caller)",
+     "needNode(ctx).admit(a as never, needNode(ctx).identity?.name ?? null)"
+    ]
+   ],
+   "red": [
+    "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins"
+   ]
+  },
+  {
+   "id": "M164",
+   "title": "r_key_change_loud: an introduction counts as the operator's word",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "needNode(ctx).introduce(a.chain, ctx.caller)",
+     "needNode(ctx).introduce(a.chain, needNode(ctx).identity?.name ?? null)"
+    ]
+   ],
+   "red": [
+    "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins"
+   ]
+  },
+  {
+   "id": "M165",
+   "title": "r_key_change_loud: a pushed feed counts as the operator's word",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "needNode(ctx).admitFeed(a as never, ctx.caller)",
+     "needNode(ctx).admitFeed(a as never, needNode(ctx).identity?.name ?? null)"
+    ]
+   ],
+   "red": [
+    "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins"
+   ]
+  },
+  {
+   "id": "M166",
+   "title": "r_key_change_loud: a sealed batch counts as the operator's word",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "needNode(ctx).admitSealed(a, ctx.caller)",
+     "needNode(ctx).admitSealed(a, needNode(ctx).identity?.name ?? null)"
+    ]
+   ],
+   "red": [
+    "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins"
+   ]
+  },
+  {
+   "id": "M167",
+   "title": "r_atomic_write: the previous backup leaves latest before the new one arrives",
+   "file": "src/backup.ts",
+   "edits": [
+    [
+     "    fs.symlinkSync(path.basename(staging), link);",
+     "    fs.rmSync(latest, { force: true });\n    fs.symlinkSync(path.basename(staging), link);"
+    ]
+   ],
+   "red": [
+    "a backup killed between any two of its steps leaves a readable backup at the latest path"
+   ]
+  },
+  {
+   "id": "M168",
+   "title": "r_atomic_write: the previous snapshot is removed before the swap",
+   "file": "src/backup.ts",
+   "edits": [
+    [
+     "    fs.symlinkSync(path.basename(staging), link);",
+     "    if (old !== null) fs.rmSync(old, { recursive: true, force: true });\n    fs.symlinkSync(path.basename(staging), link);"
+    ]
+   ],
+   "red": [
+    "a backup killed between any two of its steps leaves a readable backup at the latest path"
+   ]
+  },
+  {
+   "id": "M169",
+   "title": "r_key_change_loud: a delegation vouches for any name",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (parent !== undefined && label !== '' && !label.includes('.') && this.idDocs.has(parent)) {",
+     "    if (parent !== undefined && this.idDocs.has(parent)) {"
+    ]
+   ],
+   "red": [
+    "a delegation to a name outside the parent's own names pins nothing, and the invited pull of that name's real owner still pins"
+   ]
+  },
+  {
+   "id": "M170",
+   "title": "r_key_change_loud: a delegation vouches for names any depth under the parent",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "label !== '' && !label.includes('.') && this.idDocs.has(parent)",
+     "label !== '' && this.idDocs.has(parent)"
+    ]
+   ],
+   "red": [
+    "a delegation to a name outside the parent's own names pins nothing, and the invited pull of that name's real owner still pins"
+   ]
+  },
+  {
+   "id": "M171",
+   "title": "r_key_change_loud: a name merely ending in the parent's counts as under it",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "identity.endsWith(`.${parent}`) ? identity.slice(0, identity.length - parent.length - 1) : ''",
+     "identity.endsWith(parent) ? identity.slice(0, identity.length - parent.length) : ''"
+    ]
+   ],
+   "red": [
+    "a delegation to a name outside the parent's own names pins nothing, and the invited pull of that name's real owner still pins"
+   ]
+  },
+  {
+   "id": "M172",
+   "title": "r_asserted_by: an edge reads back the asserted_by its batch claims",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "asserted_by: (Array.isArray(a.by) ? [...a.by].sort().join(', ') : a.by) || null,",
+     "asserted_by: attr('asserted_by') ?? null,"
+    ]
+   ],
+   "red": [
+    "every admitted fact reads back asserted by the identity that signed its batch, whatever the batch claims"
+   ]
+  },
+  {
+   "id": "M173",
+   "title": "r_asserted_by: an Enox write answers with the claimed asserted_by",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "relation: a.relation, asserted_by: signer, claimed_by: by, confidence,",
+     "relation: a.relation, asserted_by: by, claimed_by: by, confidence,"
+    ]
+   ],
+   "red": [
+    "every admitted fact reads back asserted by the identity that signed its batch, whatever the batch claims"
+   ]
+  },
+  {
+   "id": "M174",
+   "title": "r_asserted_by: a loaded view credits the reader, not the signer",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "      g.hold(F, S, R, T, identity);",
+     "      g.hold(F, S, R, T, caller ?? '');"
+    ]
+   ],
+   "red": [
+    "every admitted fact reads back asserted by the identity that signed its batch, whatever the batch claims"
+   ]
+  },
+  {
+   "id": "M175",
+   "title": "r_asserted_by: an applied batch credits the node, not its signer",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "kept.g.apply(b.facts, b.seq, b.identity);",
+     "kept.g.apply(b.facts, b.seq, own);"
+    ]
+   ],
+   "red": [
+    "every admitted fact reads back asserted by the identity that signed its batch, whatever the batch claims"
+   ]
+  },
+  {
+   "id": "M176",
+   "title": "r_confidence: a retired control fact's row is never retracted",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "      if (!act && was) retracts.add(m.get(F)!.ctl!);",
+     "      if (false && !act && was) retracts.add(m.get(F)!.ctl!);"
+    ]
+   ],
+   "red": [
+    "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing"
+   ]
+  },
+  {
+   "id": "M177",
+   "title": "r_confidence: a control fact acts whatever its confidence",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "    for (const [F, cur] of next) if (cur.ctl !== undefined && cur.grantee === undefined) on.set(F, cur.C > 0);",
+     "    for (const [F, cur] of next) if (cur.ctl !== undefined && cur.grantee === undefined) on.set(F, true);"
+    ],
+    [
+     "      for (const F of Fs) on.set(F, F === latest![1] && (next.get(F) ?? m.get(F)!).C > 0);",
+     "      for (const F of Fs) on.set(F, F === latest![1]);"
+    ]
+   ],
+   "red": [
+    "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing"
+   ]
+  },
+  {
+   "id": "M178",
+   "title": "r_confidence: a retired rule still runs",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      .filter(([F, , by]) => (this.assertions.of(by).get(F)?.C ?? 0) > 0);",
+     "      ;"
+    ]
+   ],
+   "red": [
+    "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing"
+   ]
+  },
+  {
+   "id": "M179",
+   "title": "r_confidence: a rebuild loads retired control rows",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "${acting(c) ? `${c.ctl}.\\n` : ''}",
+     "${c.ctl !== undefined ? `${c.ctl}.\\n` : ''}"
+    ]
+   ],
+   "red": [
+    "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing"
+   ]
+  },
+  {
+   "id": "M180",
+   "title": "r_confidence: a grant's row comes with the batch, not with the current assertion",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "    // (A grant's, delegation's or export's row, and a follow's",
+     "    if (f.relation === 'fkts:grant') out.push(`grant[${book}](${roflString(f.source)}, ${Math.floor(Date.parse(f.target) / 1000)}).`);\n    // (A grant's, delegation's or export's row, and a follow's"
+    ]
+   ],
+   "red": [
+    "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing"
+   ]
+  },
+  {
+   "id": "M181",
+   "title": "r_confidence: a delegation's row comes with the batch, not with the current assertion",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "    // (A grant's, delegation's or export's row, and a follow's\n",
+     "    if (f.relation === 'fkts:delegate') out.push(`delegate[${book}](${roflString(f.source)}, ${Math.floor(Date.parse(f.target) / 1000)}).`);\n    // (A grant's, delegation's or export's row, and a follow's\n"
+    ]
+   ],
+   "red": [
+    "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing"
+   ]
+  },
+  {
+   "id": "M182",
+   "title": "r_confidence: an export's row comes with the batch, not with the current assertion",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "    // (A grant's, delegation's or export's row, and a follow's\n",
+     "    if (f.relation === 'fkts:export') out.push(`export[${book}](${roflString(f.source)}, ${roflString(f.target)}).`);\n    // (A grant's, delegation's or export's row, and a follow's\n"
+    ]
+   ],
+   "red": [
+    "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing"
+   ]
+  },
+  {
+   "id": "M183",
+   "title": "r_revocation_receipt: a revoked grant reads as never granted (403)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (grants.some((r) => cur.get(String(r[0]))?.C === 0)) {",
+     "    if (false) {"
+    ]
+   ],
+   "red": [
+    "a revoked grant answers 410 on the next read, while facts read before the revocation still verify against their batch digest"
+   ]
+  },
+  {
+   "id": "M184",
+   "title": "r_revocation_receipt: every refused read claims a revocation",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (grants.some((r) => cur.get(String(r[0]))?.C === 0)) {",
+     "    if (true) {"
+    ]
+   ],
+   "red": [
+    "a revoked grant answers 410 on the next read, while facts read before the revocation still verify against their batch digest"
+   ]
+  },
+  {
+   "id": "M186",
+   "title": "r_rotation: key validity judged at the receipt, not the claimed time",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (!keyValidAt(key, Date.parse(m.claimed_at))) {",
+     "    if (!keyValidAt(key, Date.parse(receivedAt))) {"
+    ]
+   ],
+   "red": [
+    "a batch signed after its key's invalid_from is refused, and one dated 301 seconds past its receipt is refused as future-dated"
+   ]
+  },
+  {
+   "id": "M187",
+   "title": "r_rotation: the allowed skew is exclusive (300 s refused)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (Date.parse(at) > Date.parse(receivedAt) + this.freshnessMs) {",
+     "    if (Date.parse(at) >= Date.parse(receivedAt) + this.freshnessMs) {"
+    ]
+   ],
+   "red": [
+    "a batch signed after its key's invalid_from is refused, and one dated 301 seconds past its receipt is refused as future-dated"
+   ]
+  },
+  {
+   "id": "M188",
+   "title": "r_static_feed: the checkpoint window is not set per node",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "this.checkpointWindowMs = (o.checkpointWindowSec ?? DEFAULT_CHECKPOINT_WINDOW_SEC) * 1000;",
+     "this.checkpointWindowMs = DEFAULT_CHECKPOINT_WINDOW_SEC * 1000;"
+    ]
+   ],
+   "red": [
+    "a checkpoint one second past the window is refused and one second inside it mirrors"
+   ]
+  },
+  {
+   "id": "M189",
+   "title": "r_static_feed: the default window is not 24 hours",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "export const DEFAULT_CHECKPOINT_WINDOW_SEC = 24 * 3600;",
+     "export const DEFAULT_CHECKPOINT_WINDOW_SEC = 24 * 3600 + 60;"
+    ]
+   ],
+   "red": [
+    "a checkpoint one second past the window is refused and one second inside it mirrors"
+   ]
+  },
+  {
+   "id": "M190",
+   "title": "r_static_feed: a checkpoint is judged with a minute's grace past the window",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (age > this.checkpointWindowMs) {",
+     "    if (age > this.checkpointWindowMs + 60_000) {"
+    ]
+   ],
+   "red": [
+    "a checkpoint one second past the window is refused and one second inside it mirrors"
+   ]
+  },
+  {
+   "id": "M197",
+   "title": "r_default_deny: anyone gets the full health",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (!full) return { identity:",
+     "    if (false) return { identity:"
+    ]
+   ],
+   "red": [
+    "an anonymous caller of every open endpoint learns the node's own name and liveness and nothing about the identities, facts or batches it holds"
+   ]
+  },
+  {
+   "id": "M198",
+   "title": "r_default_deny: anyone reads any identity's document chain",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (identity === null || (identity !== this.identity?.name && !(await this.visible(identity, caller)))) {",
+     "      if (identity === null) {"
+    ]
+   ],
+   "red": [
+    "an anonymous caller of every open endpoint learns the node's own name and liveness and nothing about the identities, facts or batches it holds"
+   ]
+  },
+  {
+   "id": "M199",
+   "title": "r_default_deny: anyone reads any identity's batch digests",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (identity === null || !(await this.visible(identity, caller))) return { digests: [], last_claimed_at: null };",
+     "      if (identity === null) return { digests: [], last_claimed_at: null };"
+    ]
+   ],
+   "red": [
+    "an anonymous caller of every open endpoint learns the node's own name and liveness and nothing about the identities, facts or batches it holds"
+   ]
+  },
+  {
+   "id": "M200",
+   "title": "r_default_deny: anyone reads any identity's feed of withheld manifests",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (!chain || !doc || !(await this.visible(identity, reader)))",
+     "if (!chain || !doc)"
+    ]
+   ],
+   "red": [
+    "an anonymous caller of every open endpoint learns the node's own name and liveness and nothing about the identities, facts or batches it holds"
+   ]
+  },
+  {
+   "id": "M201",
+   "title": "r_default_deny: an anonymous ask names the owner of an unreadable book",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (requester === null) throw new Refusal(404, 'unknown_book', `no book ${book} here`);",
+     "    if (requester === null) throw new Refusal(401, 'unsigned', `${owner}'s book is not public`);"
+    ]
+   ],
+   "red": [
+    "an anonymous caller of every open endpoint learns the node's own name and liveness and nothing about the identities, facts or batches it holds"
+   ]
+  },
+  {
+   "id": "M202",
+   "title": "r_default_deny: a stranger's failed write says what the node holds",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (by !== null && by === this.identity?.name) return p;\n    return p.catch(",
+     "    return p;\n    return p.catch("
+    ]
+   ],
+   "red": [
+    "an anonymous caller of every open endpoint learns the node's own name and liveness and nothing about the identities, facts or batches it holds"
+   ]
+  },
+  {
+   "id": "M203",
+   "title": "r_chain: a second successor is only a chain mismatch",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (m.prev === null || chain.includes(m.prev)) {",
+     "      if (false) {"
+    ]
+   ],
+   "red": [
+    "a node given a second signed successor of the same batch keeps both signatures as fork proof and marks every answer over that book"
+   ]
+  },
+  {
+   "id": "M204",
+   "title": "r_chain: a fork is not kept durably",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    this.log.appendFork(m, receivedAt);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a node given a second signed successor of the same batch keeps both signatures as fork proof and marks every answer over that book"
+   ]
+  },
+  {
+   "id": "M205",
+   "title": "r_chain: a restart forgets the forks",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (r.kind === 'fork') { n.noteFork(n.log.read(r).manifest); continue; }",
+     "if (r.kind === 'fork') continue;"
+    ]
+   ],
+   "red": [
+    "a node given a second signed successor of the same batch keeps both signatures as fork proof and marks every answer over that book"
+   ]
+  },
+  {
+   "id": "M206",
+   "title": "r_chain: an answer over a forked book is not marked",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      unknown.push(...this.forkedUnknowns(scope, book));\n      if (unknown.length) a.unknown = unknown;",
+     "      if (unknown.length) a.unknown = unknown;"
+    ],
+    [
+     "    unknown.push(...this.forkedUnknowns(scope, book));\n    if (unknown.length) ans.unknown = unknown;",
+     "    if (unknown.length) ans.unknown = unknown;"
+    ]
+   ],
+   "red": [
+    "a node given a second signed successor of the same batch keeps both signatures as fork proof and marks every answer over that book"
+   ]
+  },
+  {
+   "id": "M207",
+   "title": "r_chain: a confidence or perspective answer is not marked",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (forked.length) a.unknown = [...(a.unknown ?? []), ...forked];",
+     "      if (false) a.unknown = [...(a.unknown ?? []), ...forked];"
+    ]
+   ],
+   "red": [
+    "a node given a second signed successor of the same batch keeps both signatures as fork proof and marks every answer over that book"
+   ]
+  },
+  {
+   "id": "M208",
+   "title": "r_chain: a static copy that repeats held batches never reaches the fork",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "\n      if (this.chains.get(String((b.manifest as Manifest)?.identity))?.includes(digests[i]!)) continue;",
+     "\n      if (false) continue;"
+    ]
+   ],
+   "red": [
+    "a node given a second signed successor of the same batch keeps both signatures as fork proof and marks every answer over that book"
+   ]
+  },
+  {
+   "id": "M209",
+   "title": "r_backup: the snapshot's files are not synced",
+   "file": "src/backup.ts",
+   "edits": [
+    [
+     "    for (const f of entries.filter((p) => fs.statSync(p).isFile())) {",
+     "    for (const f of [] as string[]) {"
+    ]
+   ],
+   "red": [
+    "a backup syncs every file and directory it holds before it becomes the latest"
+   ]
+  },
+  {
+   "id": "M210",
+   "title": "r_backup: only the snapshot directory is synced, not the ones inside it",
+   "file": "src/backup.ts",
+   "edits": [
+    [
+     "    for (const d of [...entries.filter((p) => fs.statSync(p).isDirectory()), staging].sort((x, y) => y.length - x.length)) {",
+     "    for (const d of [staging]) {"
+    ]
+   ],
+   "red": [
+    "a backup syncs every file and directory it holds before it becomes the latest"
+   ]
+  },
+  {
+   "id": "M211",
+   "title": "r_backup: a latest that is a real directory is taken over",
+   "file": "src/backup.ts",
+   "edits": [
+    [
+     "  if (fs.existsSync(latest) && !fs.lstatSync(latest).isSymbolicLink()) {",
+     "  if (false) {"
+    ]
+   ],
+   "red": [
+    "a backup syncs every file and directory it holds before it becomes the latest"
+   ]
+  },
+  {
+   "id": "M212",
+   "title": "r_enox_compat: the claimed label is not read back",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "claimed_by: attr('asserted_by') ?? null,",
+     "claimed_by: null,"
+    ]
+   ],
+   "red": [
+    "an agent label given to an Enox write reads back as claimed_by next to the signing identity, and a forged label changes nothing but claimed_by"
+   ]
+  },
+  {
+   "id": "M213",
+   "title": "r_enox_compat: a write's answer drops the label",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "asserted_by: signer, claimed_by: by,",
+     "asserted_by: signer, claimed_by: null,"
+    ]
+   ],
+   "red": [
+    "an agent label given to an Enox write reads back as claimed_by next to the signing identity, and a forged label changes nothing but claimed_by"
+   ]
+  },
+  {
+   "id": "M214",
+   "title": "r_enox_compat: the text view does not mark the claim",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "${e.claimed_by ? `, claims ${JSON.stringify(e.claimed_by)}` : ''}",
+     ""
+    ]
+   ],
+   "red": [
+    "an agent label given to an Enox write reads back as claimed_by next to the signing identity, and a forged label changes nothing but claimed_by"
+   ]
+  },
+  {
+   "id": "M215",
+   "title": "r_enox_compat: recall leaves the claim out",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "...(e.claimed_by ? { claimed_by: e.claimed_by } : {}), ",
+     ""
+    ]
+   ],
+   "red": [
+    "an agent label given to an Enox write reads back as claimed_by next to the signing identity, and a forged label changes nothing but claimed_by"
+   ]
+  },
+  {
+   "id": "M216",
+   "title": "r_mutation_gate: a node that refuses to start leaves its engine running",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      await n.engine.stop().catch(() => {});\n",
+     ""
+    ]
+   ],
+   "red": [
+    "every test file exits on its own without force-exit, leaving no engine process behind"
+   ]
+  },
+  {
+   "id": "M217",
+   "title": "r_mutation_gate: a failing shard does not fail the gate",
+   "file": "scripts/mutants.ts",
+   "edits": [
+    [
+     "shards passed\\n`);\n  return bad === 0 ? 0 : 1;",
+     "shards passed\\n`);\n  return 0;"
+    ]
+   ],
+   "red": [
+    "a failing mutant shard fails the whole mutant gate"
+   ]
+  },
+  {
+   "id": "M218",
+   "title": "r_mutation_gate: a nested failure is reported without its error",
+   "file": "test/sandbox.ts",
+   "edits": [
+    [
+     "    for (let j = i + 1; j < lines.length && !/^\\s*\\.\\.\\.\\s*$/.test(lines[j]!) && j < i + 40; j++) out.push(`  ${lines[j]!.trim()}`);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "the hermetic suite passes five runs in a row, and a nested failure prints the failing test's own error"
+   ]
+  },
+  {
+   "id": "M219",
+   "title": "r_enox_compat: the text view shows the label unquoted",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "claims ${JSON.stringify(e.claimed_by)}",
+     "claims ${e.claimed_by}"
+    ]
+   ],
+   "red": [
+    "a claimed label holding brackets, a newline or 5000 characters can neither forge a signer nor add a line to a text view"
+   ]
+  },
+  {
+   "id": "M220",
+   "title": "r_enox_compat: a label of any length is written",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "  if (f.relation === 'enox:asserted_by' && (f.target.length > MAX_CLAIM || /[\\u0000-\\u001f\\u007f-\\u009f]/.test(f.target) || BIDI.test(f.target))) {",
+     "  if (f.relation === 'enox:asserted_by' && (/[\\u0000-\\u001f\\u007f-\\u009f]/.test(f.target) || BIDI.test(f.target))) {"
+    ]
+   ],
+   "red": [
+    "a claimed label holding brackets, a newline or 5000 characters can neither forge a signer nor add a line to a text view"
+   ]
+  },
+  {
+   "id": "M221",
+   "title": "r_enox_compat: a label may hold control characters",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "  if (f.relation === 'enox:asserted_by' && (f.target.length > MAX_CLAIM || /[\\u0000-\\u001f\\u007f-\\u009f]/.test(f.target) || BIDI.test(f.target))) {",
+     "  if (f.relation === 'enox:asserted_by' && (f.target.length > MAX_CLAIM || BIDI.test(f.target))) {"
+    ]
+   ],
+   "red": [
+    "a claimed label holding brackets, a newline or 5000 characters can neither forge a signer nor add a line to a text view"
+   ]
+  },
+  {
+   "id": "M222",
+   "title": "r_enox_compat: labels stop at 127 characters",
+   "file": "src/facts.ts",
+   "edits": [
+    [
+     "export const MAX_CLAIM = 128;",
+     "export const MAX_CLAIM = 127;"
+    ]
+   ],
+   "red": [
+    "a claimed label holding brackets, a newline or 5000 characters can neither forge a signer nor add a line to a text view"
+   ]
+  },
+  {
+   "id": "M223",
+   "title": "r_mutation_gate: the gate judges mutants without a baseline",
+   "file": "scripts/mutants.ts",
+   "edits": [
+    [
+     "  if (reds.length) {",
+     "  if (false) {"
+    ]
+   ],
+   "red": [
+    "a mutant whose red test already fails on the unmutated tree is reported as a broken baseline, never as killed"
+   ]
+  },
+  {
+   "id": "M224",
+   "title": "r_rotation: time may run backwards within a chain",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (last !== undefined && Date.parse(m.claimed_at) < last) {",
+     "    if (false) {"
+    ]
+   ],
+   "red": [
+    "after a batch signed by the new key, a batch signed by the rotated key is refused whatever time it claims, and a batch claiming a time earlier than its predecessor is refused"
+   ]
+  },
+  {
+   "id": "M225",
+   "title": "r_rotation: an equal claimed time counts as backwards",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (last !== undefined && Date.parse(m.claimed_at) < last) {",
+     "    if (last !== undefined && Date.parse(m.claimed_at) <= last) {"
+    ]
+   ],
+   "red": [
+    "after a batch signed by the new key, a batch signed by the rotated key is refused whatever time it claims, and a batch claiming a time earlier than its predecessor is refused"
+   ]
+  },
+  {
+   "id": "M226",
+   "title": "r_rotation: a live POST from the future is only stale",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    this.notFuture(m.claimed_at, receivedAt, 'the batch');",
+     "    if (mode !== 'post') this.notFuture(m.claimed_at, receivedAt, 'the batch');"
+    ]
+   ],
+   "red": [
+    "a batch signed after its key's invalid_from is refused, and one dated 301 seconds past its receipt is refused as future-dated",
+    "a batch claiming a time outside the window is marked stale and a re-attestation is requested",
+    "a live batch dated 301 seconds ahead of its receipt is refused as future-dated, while one dated 301 seconds behind is refused as stale with a request to re-attest"
+   ]
+  },
+  {
+   "id": "M227",
+   "title": "r_identity_names: a name is not case-folded",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "  const ascii = domainToASCII(raw);",
+     "  const ascii = domainToASCII(raw) && raw;"
+    ]
+   ],
+   "red": [
+    "Node-A, node-a and NODE-A are one identity, and so are a composed and a decomposed accent and a name with a zero-width mark"
+   ]
+  },
+  {
+   "id": "M228",
+   "title": "r_identity_names: a label may mix scripts",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "    || labels.some((l) => !singleScript(domainToUnicode(l)))) return '';",
+     "    ) return '';"
+    ]
+   ],
+   "red": [
+    "a label mixing Cyrillic and Latin letters is refused, while an all-Cyrillic name is accepted and shown in Cyrillic"
+   ]
+  },
+  {
+   "id": "M229",
+   "title": "r_identity_names: a label may run to 64 characters",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "  if (ascii === '' || ascii.length > 253 || labels.some((l) => l.length === 0 || l.length > 63 || l.startsWith('-') || l.endsWith('-'))",
+     "  if (ascii === '' || ascii.length > 253 || labels.some((l) => l.length === 0 || l.length > 64 || l.startsWith('-') || l.endsWith('-'))"
+    ]
+   ],
+   "red": [
+    "a name with a space or a text-direction mark is refused, and names at the label and total length limits are accepted"
+   ]
+  },
+  {
+   "id": "M230",
+   "title": "r_identity_names: a name may run past 253 characters",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "  if (ascii === '' || ascii.length > 253 || labels.some((l) => l.length === 0 || l.length > 63 || l.startsWith('-') || l.endsWith('-'))",
+     "  if (ascii === '' || labels.some((l) => l.length === 0 || l.length > 63 || l.startsWith('-') || l.endsWith('-'))"
+    ],
+    [
+     "  if (canonical.length > 253) throw refuse();\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a name with a space or a text-direction mark is refused, and names at the label and total length limits are accepted"
+   ]
+  },
+  {
+   "id": "M231",
+   "title": "r_identity_names: a label may start or end with a hyphen",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "  if (ascii === '' || ascii.length > 253 || labels.some((l) => l.length === 0 || l.length > 63 || l.startsWith('-') || l.endsWith('-'))",
+     "  if (ascii === '' || ascii.length > 253 || labels.some((l) => l.length === 0 || l.length > 63)"
+    ]
+   ],
+   "red": [
+    "a name with a space or a text-direction mark is refused, and names at the label and total length limits are accepted"
+   ]
+  },
+  {
+   "id": "M232",
+   "title": "r_identity_names: the user part is not case-mapped",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     ".normalize('NFKC').toLowerCase().normalize('NFC');",
+     ".normalize('NFKC').normalize('NFC');"
+    ]
+   ],
+   "red": [
+    "ada@example.org, Ada@Example.ORG and a fullwidth spelling of it are one identity; ada@пример.рф is accepted and shown in Cyrillic; bot.ada@example.org is its delegated agent's name"
+   ]
+  },
+  {
+   "id": "M233",
+   "title": "r_identity_names: the user part is not width-mapped",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     ".normalize('NFKC').toLowerCase().normalize('NFC');",
+     ".normalize('NFC').toLowerCase().normalize('NFC');"
+    ]
+   ],
+   "red": [
+    "ada@example.org, Ada@Example.ORG and a fullwidth spelling of it are one identity; ada@пример.рф is accepted and shown in Cyrillic; bot.ada@example.org is its delegated agent's name"
+   ]
+  },
+  {
+   "id": "M234",
+   "title": "r_identity_names: a node takes a document under a non-canonical spelling",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "  checkCanonical(x.doc.identity, 'the document\\'s identity');",
+     "  checkName(x.doc.identity);"
+    ]
+   ],
+   "red": [
+    "Node-A, node-a and NODE-A are one identity, and so are a composed and a decomposed accent and a name with a zero-width mark"
+   ]
+  },
+  {
+   "id": "M235",
+   "title": "r_identity_names: a grant row keeps the name as written",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "  const name = (x: string) => roflString(checkName(x));",
+     "  const name = (x: string) => roflString(x);"
+    ]
+   ],
+   "red": [
+    "a grant, a delegation and a follow written with a differently cased or composed name act on the same identity"
+   ]
+  },
+  {
+   "id": "M236",
+   "title": "r_identity_names: a book is derived from the name as written",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "  return `b_${sha256hex(checkName(identity)).slice(0, 16)}`;",
+     "  return `b_${sha256hex(identity).slice(0, 16)}`;"
+    ]
+   ],
+   "red": [
+    "Node-A, node-a and NODE-A are one identity, and so are a composed and a decomposed accent and a name with a zero-width mark"
+   ]
+  },
+  {
+   "id": "M237",
+   "title": "r_identity_names: a pull takes the name as written",
+   "file": "src/client.ts",
+   "edits": [
+    [
+     "  const identity = checkName(named);",
+     "  const identity = named;"
+    ]
+   ],
+   "red": [
+    "a grant, a delegation and a follow written with a differently cased or composed name act on the same identity"
+   ]
+  },
+  {
+   "id": "M238",
+   "title": "r_identity_names: a followed feed's silence is judged under the name as written",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "follows.filter((r) => (cur.get(String(r[0]))?.C ?? 0) > 0).map((r) => canonicalOrNull(r[1]))",
+     "follows.filter((r) => (cur.get(String(r[0]))?.C ?? 0) > 0).map((r) => String(r[1]))"
+    ]
+   ],
+   "red": [
+    "a grant, a delegation and a follow written with a differently cased or composed name act on the same identity"
+   ]
+  },
+  {
+   "id": "M239",
+   "title": "r_rotation: the client claims its clock even when it stepped back",
+   "file": "src/client.ts",
+   "edits": [
+    [
+     "const claimTime = (now: number, last: number) => new Date(Math.max(now, last)).toISOString();",
+     "const claimTime = (now: number, last: number) => new Date(now + 0 * last).toISOString();"
+    ]
+   ],
+   "red": [
+    "a publisher whose clock steps back publishes on without a refusal, each batch claiming no earlier than the one before"
+   ]
+  },
+  {
+   "id": "M240",
+   "title": "r_rotation: the node's own writes claim its clock even when it stepped back",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "new Date(Math.max(this.now(), this.lastClaimed.get(me.name) ?? -Infinity)).toISOString()",
+     "new Date(this.now()).toISOString()"
+    ]
+   ],
+   "red": [
+    "a publisher whose clock steps back publishes on without a refusal, each batch claiming no earlier than the one before"
+   ]
+  },
+  {
+   "id": "M242",
+   "title": "r_identity_names: the user part may start or end with a dot",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "    if (!/^[\\p{L}\\p{N}!#$%&'*+\\-/=?^_`{|}~.]+$/u.test(local) || local.startsWith('.') || local.endsWith('.') || local.includes('..')",
+     "    if (!/^[\\p{L}\\p{N}!#$%&'*+\\-/=?^_`{|}~.]+$/u.test(local) || local.includes('..')"
+    ]
+   ],
+   "red": [
+    "admin@example.org@evil.example, ada@@example.org and ada.@example.org are refused, so no name reads as an identity of a domain it does not belong to"
+   ]
+  },
+  {
+   "id": "M243",
+   "title": "r_identity_names: the user part may hold two dots in a row",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "    if (!/^[\\p{L}\\p{N}!#$%&'*+\\-/=?^_`{|}~.]+$/u.test(local) || local.startsWith('.') || local.endsWith('.') || local.includes('..')",
+     "    if (!/^[\\p{L}\\p{N}!#$%&'*+\\-/=?^_`{|}~.]+$/u.test(local) || local.startsWith('.') || local.endsWith('.')"
+    ]
+   ],
+   "red": [
+    "admin@example.org@evil.example, ada@@example.org and ada.@example.org are refused, so no name reads as an identity of a domain it does not belong to"
+   ]
+  },
+  {
+   "id": "M244",
+   "title": "r_identity_names: the user part may hold any printable ASCII",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "    if (!/^[\\p{L}\\p{N}!#$%&'*+\\-/=?^_`{|}~.]+$/u.test(local) || local.startsWith('.') || local.endsWith('.') || local.includes('..')",
+     "    if (!/^[\\p{L}\\p{N}!-~]+$/u.test(local) || local.startsWith('.') || local.endsWith('.') || local.includes('..')"
+    ]
+   ],
+   "red": [
+    "a user part holding any of < > ( ) [ ] : ; , a backslash or a double quote is refused, while one with + or ' is accepted, as email atext allows",
+    "admin@example.org@evil.example, ada@@example.org and ada.@example.org are refused, so no name reads as an identity of a domain it does not belong to"
+   ]
+  },
+  {
+   "id": "M245",
+   "title": "r_identity_names: the user part may not hold an apostrophe",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "    if (!/^[\\p{L}\\p{N}!#$%&'*+\\-/=?^_`{|}~.]+$/u.test(local) || local.startsWith('.') || local.endsWith('.') || local.includes('..')",
+     "    if (!/^[\\p{L}\\p{N}!#$%&*+\\-/=?^_`{|}~.]+$/u.test(local) || local.startsWith('.') || local.endsWith('.') || local.includes('..')"
+    ]
+   ],
+   "red": [
+    "a user part holding any of < > ( ) [ ] : ; , a backslash or a double quote is refused, while one with + or ' is accepted, as email atext allows"
+   ]
+  },
+  {
+   "id": "M246",
+   "title": "r_domain_vouch: the operator's switch does nothing",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (this.domainVouch && identity.includes('@')) {",
+     "    if (false) {"
+    ]
+   ],
+   "red": [
+    "with domain vouching on, a first contact with user@domain pins the key its domain publishes over HTTPS, and with it off the same contact needs an invitation"
+   ]
+  },
+  {
+   "id": "M247",
+   "title": "r_domain_vouch: any document the domain serves vouches",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (served && typeof served === 'object' && canonicalize(served) === canonicalize(first)) return;",
+     "      if (served) return;"
+    ]
+   ],
+   "red": [
+    "a domain vouches for no name outside it, never over plain HTTP or across a redirect to another host, and never replaces an already pinned key"
+   ]
+  },
+  {
+   "id": "M248",
+   "title": "r_domain_vouch: the domain is asked over plain HTTP",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "import * as https from 'node:https';",
+     "import * as https from 'node:http';"
+    ]
+   ],
+   "red": [
+    "a domain vouches for no name outside it, never over plain HTTP or across a redirect to another host, and never replaces an already pinned key"
+   ]
+  },
+  {
+   "id": "M249",
+   "title": "r_domain_vouch: a certificate no one trusts is accepted",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "      headers: { accept: 'application/json' } }, (res) => {",
+     "      headers: { accept: 'application/json' }, rejectUnauthorized: false }, (res) => {"
+    ]
+   ],
+   "red": [
+    "a domain vouches for no name outside it, never over plain HTTP or across a redirect to another host, and never replaces an already pinned key"
+   ]
+  },
+  {
+   "id": "M250",
+   "title": "r_domain_vouch: one domain answers for names under another",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "  const host = domainToASCII(identity.slice(at + 1));",
+     "  const host = 'example.org';"
+    ]
+   ],
+   "red": [
+    "a domain vouches for no name outside it, never over plain HTTP or across a redirect to another host, and never replaces an already pinned key"
+   ]
+  },
+  {
+   "id": "M251",
+   "title": "r_freshness: a stale batch is refused without the request to re-attest",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "          're-attestation requested: the publisher signs the same digest again with a current claimed_at');",
+     "          'the publisher signs the same digest again with a current claimed_at');"
+    ]
+   ],
+   "red": [
+    "a live batch dated 301 seconds ahead of its receipt is refused as future-dated, while one dated 301 seconds behind is refused as stale with a request to re-attest"
+   ]
+  },
+  {
+   "id": "M252",
+   "title": "r_domain_vouch: an IP literal or a single label is looked up and asked",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "    if (host === '' || isIP(host) !== 0 || !host.includes('.')) return null;",
+     "    if (host === '') return null;"
+    ]
+   ],
+   "red": [
+    "an anonymous first contact as user@127.0.0.1, user@localhost or a user at a name resolving to a private address makes no outbound connection"
+   ]
+  },
+  {
+   "id": "M253",
+   "title": "r_domain_vouch: an internal address is connected to",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "    if (!addrs || addrs.length === 0 || !addrs.every((a) => allow(a.address, a.family))) return null;",
+     "    if (!addrs || addrs.length === 0) return null;"
+    ]
+   ],
+   "red": [
+    "an anonymous first contact as user@127.0.0.1, user@localhost or a user at a name resolving to a private address makes no outbound connection"
+   ]
+  },
+  {
+   "id": "M254",
+   "title": "r_domain_vouch: one public address among internal ones is enough",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "!addrs.every((a) => allow(a.address, a.family))",
+     "!addrs.some((a) => allow(a.address, a.family))"
+    ]
+   ],
+   "red": [
+    "an anonymous first contact as user@127.0.0.1, user@localhost or a user at a name resolving to a private address makes no outbound connection"
+   ]
+  },
+  {
+   "id": "M255",
+   "title": "r_domain_vouch: the connection resolves the name again",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "      const req = https.get({ host, servername: host, port: this.t.port ?? 443, path, ca: this.t.ca, lookup: fixed,",
+     "      const req = https.get({ host, servername: host, port: this.t.port ?? 443, path, ca: this.t.ca, lookup,"
+    ]
+   ],
+   "red": [
+    "an anonymous first contact as user@127.0.0.1, user@localhost or a user at a name resolving to a private address makes no outbound connection"
+   ]
+  },
+  {
+   "id": "M256",
+   "title": "r_domain_vouch: no answer is cached",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "    if (hit && this.now() - hit.at < (this.t.cacheMs ?? 300_000)) return hit.doc;",
+     "    if (false) return hit!.doc;"
+    ]
+   ],
+   "red": [
+    "a flood of first contacts naming many domains opens a bounded number of domain lookups at a time and repeats none within the cache time"
+   ]
+  },
+  {
+   "id": "M257",
+   "title": "r_domain_vouch: lookups are not bounded",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "    if (this.inFlight < IN_FLIGHT) { this.inFlight++; return Promise.resolve(); }",
+     "    this.inFlight++; return Promise.resolve();"
+    ]
+   ],
+   "red": [
+    "a flood of first contacts naming many domains opens a bounded number of domain lookups at a time and repeats none within the cache time"
+   ]
+  },
+  {
+   "id": "M258",
+   "title": "r_domain_vouch: the node's addresses count as public",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "    const allow = this.t.allowAddress ?? isPublic;",
+     "    const allow = this.t.allowAddress ?? (() => true);"
+    ]
+   ],
+   "red": [
+    "an anonymous first contact as user@127.0.0.1, user@localhost or a user at a name resolving to a private address makes no outbound connection"
+   ]
+  },
+  {
+   "id": "M259",
+   "title": "r_domain_vouch: IPv6 judged by a deny-list (only what is listed internal)",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "  family === 6 ? GLOBAL6.check(address, 'ipv6') && !NOT_GLOBAL6.check(address, 'ipv6') : !INTERNAL4.check(address, 'ipv4');",
+     "  family === 6 ? !NOT_GLOBAL6.check(address, 'ipv6') && !['::1', '::'].includes(address) : !INTERNAL4.check(address, 'ipv4');"
+    ]
+   ],
+   "red": [
+    "an internal IPv4 written in any IPv6 form, NAT64, 6to4, IPv4-compatible or mapped, is not a public address"
+   ]
+  },
+  {
+   "id": "M260",
+   "title": "r_domain_vouch: 6to4 and Teredo count as global",
+   "file": "src/domain.ts",
+   "edits": [
+    [
+     "  family === 6 ? GLOBAL6.check(address, 'ipv6') && !NOT_GLOBAL6.check(address, 'ipv6') : !INTERNAL4.check(address, 'ipv4');",
+     "  family === 6 ? GLOBAL6.check(address, 'ipv6') : !INTERNAL4.check(address, 'ipv4');"
+    ]
+   ],
+   "red": [
+    "an internal IPv4 written in any IPv6 form, NAT64, 6to4, IPv4-compatible or mapped, is not a public address"
+   ]
+  },
+  {
+   "id": "M261",
+   "title": "serve takes no lock",
+   "file": "src/cli.ts",
+   "edits": [
+    [
+     "const lock = DataLock.acquire(data, 'serve');",
+     "const lock = { note() {}, release() {} } as unknown as DataLock;"
+    ]
+   ],
+   "red": [
+    "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing"
+   ]
+  },
+  {
+   "id": "M262",
+   "title": "stdio takes no lock",
+   "file": "src/stdio.ts",
+   "edits": [
+    [
+     "const lock = DataLock.acquire(dataDir, 'stdio');",
+     "const lock = { release() {} } as unknown as DataLock;"
+    ]
+   ],
+   "red": [
+    "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing"
+   ]
+  },
+  {
+   "id": "M263",
+   "title": "serve reads the key before it takes the lock",
+   "file": "src/cli.ts",
+   "edits": [
+    [
+     "  const lock = DataLock.acquire(data, 'serve');\n  if (!LocalIdentity.load(data)) createIdentity(data, f.name);",
+     "  if (!LocalIdentity.load(data)) createIdentity(data, f.name);\n  const lock = DataLock.acquire(data, 'serve');"
+    ]
+   ],
+   "red": [
+    "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing"
+   ]
+  },
+  {
+   "id": "M264",
+   "title": "every holder counts as dead",
+   "file": "src/lock.ts",
+   "edits": [
+    [
+     "export function alive(h: Holder): boolean {",
+     "export function alive(h: Holder): boolean {\n  if (h) return false;"
+    ]
+   ],
+   "red": [
+    "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing"
+   ]
+  },
+  {
+   "id": "M265",
+   "title": "a signing local op takes no lock",
+   "file": "src/cli.ts",
+   "edits": [
+    [
+     "  if (op.signs) {",
+     "  if (false && op.signs) {"
+    ]
+   ],
+   "red": [
+    "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing"
+   ]
+  },
+  {
+   "id": "M266",
+   "title": "a signing local op goes through any live holder",
+   "file": "src/cli.ts",
+   "edits": [
+    [
+     "h.url !== undefined && new URL(h.url).origin === new URL(url).origin;",
+     ";"
+    ]
+   ],
+   "red": [
+    "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing"
+   ]
+  },
+  {
+   "id": "M267",
+   "title": "release leaves the lock behind",
+   "file": "src/lock.ts",
+   "edits": [
+    [
+     "if (holderOf(this.dataDir)?.token === this.holder.token) fs.rmSync",
+     "if (false) fs.rmSync"
+    ]
+   ],
+   "red": [
+    "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing"
+   ]
+  },
+  {
+   "id": "M268",
+   "title": "r_compat_parity: recall matches names only",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "      if (meant.state === 'answered') {",
+     "      if (false) {"
+    ]
+   ],
+   "red": [
+    "recall finds an entity from a natural-language question that shares no word with its name"
+   ]
+  },
+  {
+   "id": "M269",
+   "title": "r_compat_parity: semantic_search rows carry no staleness",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "staleness({ ...g.record(nd!), similarity: sim(h.score) }, ctx.now())",
+     "({ ...g.record(nd!), similarity: sim(h.score) })"
+    ]
+   ],
+   "red": [
+    "semantic_search results carry age_days and stale like the base"
+   ]
+  },
+  {
+   "id": "M270",
+   "title": "r_compat_parity: a domain with no TTL of its own goes stale after 90 days",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "?? STALE_TTL_DEFAULT)",
+     "?? 90)"
+    ]
+   ],
+   "red": [
+    "semantic_search results carry age_days and stale like the base"
+   ]
+  },
+  {
+   "id": "M271",
+   "title": "r_compat_parity: an integer property takes any number",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "    if (p.type === 'integer' && t === 'number' && !Number.isInteger(v)) throw",
+     "    if (false) throw"
+    ]
+   ],
+   "red": [
+    "a fractional proof_depth is refused"
+   ]
+  },
+  {
+   "id": "M272",
+   "title": "r_compat_parity: a batch item's proof_depth may be fractional",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "  if (a.proof_depth !== undefined && !Number.isInteger(a.proof_depth)) throw",
+     "  if (false) throw"
+    ]
+   ],
+   "red": [
+    "a fractional proof_depth is refused"
+   ]
+  },
+  {
+   "id": "M273",
+   "title": "r_compat_parity: the embedder sends every missing text in one call",
+   "file": "executors/embedder/embedder.ts",
+   "edits": [
+    [
+     "for (const [i, j] of buckets(missing.map(([, t]) => t.length))) {",
+     "for (const [i, j] of [[0, missing.length]] as [number, number][]) {"
+    ]
+   ],
+   "red": [
+    "the embedder embeds a book of mixed text lengths in bounded memory and finishes although writes land during its read"
+   ]
+  },
+  {
+   "id": "M274",
+   "title": "r_compat_parity: the embedder embeds whole long texts",
+   "file": "executors/embedder/embedder.ts",
+   "edits": [
+    [
+     "d.text.slice(0, MAX_CHARS)",
+     "d.text"
+    ]
+   ],
+   "red": [
+    "the embedder embeds a book of mixed text lengths in bounded memory and finishes although writes land during its read"
+   ]
+  },
+  {
+   "id": "M275",
+   "title": "r_compat_parity: the embedder reads only the first page of a book (writes landing during its read are left unread)",
+   "file": "executors/embedder/embedder.ts",
+   "edits": [
+    [
+     "      if (r.batches.length < limit) return;",
+     "      return;"
+    ]
+   ],
+   "red": [
+    "the embedder embeds a book of mixed text lengths in bounded memory and finishes although writes land during its read"
+   ]
+  },
+  {
+   "id": "M276",
+   "title": "r_compat_parity: a stale cursor cannot be resumed",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "    if (a.resume === true && typeof c.k === 'string' && a.order === undefined) resumed = true;",
+     "    if (false) resumed = true;"
+    ]
+   ],
+   "red": [
+    "an answer longer than the limit is marked cut and the rest is fetched page by page to the same total"
+   ]
+  },
+  {
+   "id": "M277",
+   "title": "r_compat_parity: why asks the engine about conf, persp and asserted",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (rel === 'conf' || rel === 'persp' || rel === 'asserted') return this.explainAssertion(",
+     "    if (false) return this.explainAssertion("
+    ]
+   ],
+   "red": [
+    "why agrees with ask for every literal ask returns, including conf"
+   ]
+  },
+  {
+   "id": "M278",
+   "title": "r_compat_parity: the main world keeps asserted rows, retracting the replaced one",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "      next.set(F, cur);\n",
+     "      if (old && !next.has(F)) retract.push(row(book, F, old));\n      next.set(F, cur);\n      load.push(`${row(book, F, cur)}.`);\n"
+    ]
+   ],
+   "red": [
+    "update_assertion and delete_assertion answer within 100 ms and a read after a write within one second while writes keep arriving"
+   ]
+  },
+  {
+   "id": "M279",
+   "title": "r_compat_parity: the Enox view re-derives everything on each write",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "    const subjects = [...this.dirtySubjects];",
+     "    const subjects = [...new Set([...this.dirtySubjects, ...this.attrFacts.keys()])];\n    for (const F of this.assertionIds) this.dirtyEdges.add(F);"
+    ]
+   ],
+   "red": [
+    "update_assertion and delete_assertion answer within 100 ms and a read after a write within one second while writes keep arriving"
+   ]
+  },
+  {
+   "id": "M280",
+   "title": "r_single_writer: a local publish signs itself instead of handing its facts to its node",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "      if (await ownNode(ctx, me)) {\n        await ctx.call('assert', { facts });",
+     "      if (false) {\n        await ctx.call('assert', { facts });"
+    ]
+   ],
+   "red": [
+    "eight concurrent local publishes through one serve are all admitted, in one chain, and the node records no fork of its own identity"
+   ]
+  },
+  {
+   "id": "M281",
+   "title": "r_single_writer: the node signs its batches concurrently, not one at a time",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "  signAsSelf(facts: Fact[], o: SignOptions = {}): Promise<Signed> {\n    return this.serial(async () => {",
+     "  signAsSelf(facts: Fact[], o: SignOptions = {}): Promise<Signed> {\n    return (async (f: () => Promise<any>) => f())(async () => {"
+    ]
+   ],
+   "red": [
+    "eight concurrent local publishes through one serve are all admitted, in one chain, and the node records no fork of its own identity"
+   ]
+  },
+  {
+   "id": "M282",
+   "title": "r_single_writer: a key change signs beside the serve that holds the directory",
+   "file": "src/cli.ts",
+   "edits": [
+    [
+     "    if (through && op.alone) throw refusal(data, h!);",
+     "    if (false) throw refusal(data, h!);"
+    ]
+   ],
+   "red": [
+    "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing"
+   ]
+  },
+  {
+   "id": "M283",
+   "title": "r_empty_explains: a bare word is not tried quoted",
+   "file": "src/empty.ts",
+   "edits": [
+    [
+     "if (words.length > 0) {",
+     "if (false) {"
+    ]
+   ],
+   "red": [
+    "ask with an unquoted relation, a misspelt relation, an unknown predicate or an unknown perspective answers no rows with a note naming the cause and the nearest existing names"
+   ]
+  },
+  {
+   "id": "M284",
+   "title": "r_empty_explains: a constant is noted without asking whether it occurs elsewhere",
+   "file": "src/empty.ts",
+   "edits": [
+    [
+     "if (!isString(x) || await occurs(x, i)) continue;",
+     "if (!isString(x)) continue;"
+    ]
+   ],
+   "red": [
+    "ask whose question is well formed but matches nothing answers no rows and no note"
+   ]
+  },
+  {
+   "id": "M285",
+   "title": "r_empty_explains: an unknown perspective answers silently",
+   "file": "src/empty.ts",
+   "edits": [
+    [
+     "if (perspective !== null && !perspectives.has(perspective)) {",
+     "if (false) {"
+    ]
+   ],
+   "red": [
+    "ask with an unquoted relation, a misspelt relation, an unknown predicate or an unknown perspective answers no rows with a note naming the cause and the nearest existing names"
+   ]
+  },
+  {
+   "id": "M286",
+   "title": "r_empty_explains: an unknown predicate answers silently",
+   "file": "src/empty.ts",
+   "edits": [
+    [
+     "if (!predicates.has(rel)) {",
+     "if (false) {"
+    ]
+   ],
+   "red": [
+    "ask with an unquoted relation, a misspelt relation, an unknown predicate or an unknown perspective answers no rows with a note naming the cause and the nearest existing names"
+   ]
+  },
+  {
+   "id": "M287",
+   "title": "r_claimed_author: an Enox write with no author claims agent:unknown",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "const agent = (ctx: Ctx) => ctx.agent?.trim() || 'operator';",
+     "const agent = (_ctx: Ctx) => 'agent:unknown';"
+    ]
+   ],
+   "red": [
+    "a write over OAuth without asserted_by is claimed by the approved client's name, and every read tool shows asserted_by and claimed_by on that edge"
+   ]
+  },
+  {
+   "id": "M288",
+   "title": "r_claimed_author: recent_activity shows neither signer nor claim",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "target_id: e.target, asserted_by: e.asserted_by, claimed_by: e.claimed_by, confidence",
+     "target_id: e.target, confidence"
+    ]
+   ],
+   "red": [
+    "a write over OAuth without asserted_by is claimed by the approved client's name, and every read tool shows asserted_by and claimed_by on that edge"
+   ]
+  },
+  {
+   "id": "M289",
+   "title": "r_claimed_author: /mcp does not hand the approved client to the tools",
+   "file": "src/http.ts",
+   "edits": [
+    [
+     "handleRpc(ctx(caller, agent, session), m, 'network')",
+     "handleRpc(ctx(caller, null, session), m, 'network')"
+    ]
+   ],
+   "red": [
+    "a write over OAuth without asserted_by is claimed by the approved client's name, and every read tool shows asserted_by and claimed_by on that edge"
+   ]
+  },
+  {
+   "id": "M290",
+   "title": "r_claimed_author: a blank asserted_by is kept as the claim",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "(typeof a.asserted_by === 'string' && a.asserted_by.trim()) || agent",
+     "a.asserted_by ?? agent"
+    ]
+   ],
+   "red": [
+    "a write over OAuth without asserted_by is claimed by the approved client's name, and every read tool shows asserted_by and claimed_by on that edge"
+   ]
+  },
+  {
+   "id": "M291",
+   "title": "r_claimed_author: recall drops the signer",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "...(e.asserted_by ? { asserted_by: e.asserted_by } : {}), ...(e.claimed_by ? { claimed_by: e.claimed_by } : {}), confidence: e.confidence, context: e.context });",
+     "...(e.claimed_by ? { claimed_by: e.claimed_by } : {}), confidence: e.confidence, context: e.context });"
+    ]
+   ],
+   "red": [
+    "a write over OAuth without asserted_by is claimed by the approved client's name, and every read tool shows asserted_by and claimed_by on that edge"
+   ]
+  },
+  {
+   "id": "M292",
+   "title": "r_recent_order: recent_activity orders by the claimed updated_at, with a comparator that never ties",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     ".sort((x, y) => y.written - x.written || cmpDesc(x.updated_at ?? '', y.updated_at ?? '') || (x.F < y.F ? -1 : x.F > y.F ? 1 : 0))",
+     ".sort((x, y) => ((y.updated_at ?? '') < (x.updated_at ?? '') ? -1 : 1))"
+    ]
+   ],
+   "red": [
+    "recent_activity with and without a limit agrees on its first rows, and a write made now comes first in both"
+   ]
+  },
+  {
+   "id": "M293",
+   "title": "r_recent_order: rows written together tie by the view's input order",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     " || (x.F < y.F ? -1 : x.F > y.F ? 1 : 0))",
+     ")"
+    ]
+   ],
+   "red": [
+    "recent_activity with and without a limit agrees on its first rows, and a write made now comes first in both"
+   ]
+  },
+  {
+   "id": "M294",
+   "title": "r_recent_order: the kept Enox view does not learn when an applied write was written",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "    r.written = Math.max(r.written, this.orderOf(signer, seq));\n",
+     ""
+    ]
+   ],
+   "red": [
+    "recent_activity with and without a limit agrees on its first rows, and a write made now comes first in both"
+   ]
+  },
+  {
+   "id": "M295",
+   "title": "r_search_latency: the embedder rebuilds its index from the log for every search",
+   "file": "executors/embedder/embedder.ts",
+   "edits": [
+    [
+     "    const had = this.index.size;",
+     "    this.index.clear(); this.own.head = null;\n    const had = this.index.size;"
+    ]
+   ],
+   "red": [
+    "a second search on an unchanged book is answered within ten seconds, and a search after five new facts within ten seconds too"
+   ]
+  },
+  {
+   "id": "M296",
+   "title": "r_search_latency: the embedder re-reads the whole book for every search",
+   "file": "executors/embedder/embedder.ts",
+   "edits": [
+    [
+     "      const book = this.books.get(author) ?? new Book();",
+     "      const book = new Book();"
+    ]
+   ],
+   "red": [
+    "a second search on an unchanged book is answered within ten seconds, and a search after five new facts within ten seconds too"
+   ]
+  },
+  {
+   "id": "M297",
+   "title": "r_search_latency: the embedder signs its requests with a time taken before its work",
+   "file": "executors/embedder/embedder.ts",
+   "edits": [
+    [
+     "    this.node = httpCaller(url, me, this.now);",
+     "    const at = this.now();\n    this.node = httpCaller(url, me, () => at);"
+    ]
+   ],
+   "red": [
+    "an embedder whose embedding takes longer than the freshness window still has every request admitted"
+   ]
+  },
+  {
+   "id": "M298",
+   "title": "r_search_latency: the embedder claims its answer at the time its round began",
+   "file": "executors/embedder/embedder.ts",
+   "edits": [
+    [
+     "    const first = this.rounds++ === 0;",
+     "    const first = this.rounds++ === 0;\n    const t0 = this.now();"
+    ],
+    [
+     "    await publishVia(this.node, this.me, results, this.now);",
+     "    await publishVia(this.node, this.me, results, () => t0);"
+    ]
+   ],
+   "red": [
+    "an embedder whose embedding takes longer than the freshness window still has every request admitted"
+   ]
+  },
+  {
+   "id": "M299",
+   "title": "r_stats_bounded: graph_stats answers the whole breakdown by default",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "      if (a.full === true) {",
+     "      if (true) {"
+    ]
+   ],
+   "red": [
+    "graph_stats by default stays under 4 KB on the owner's book and its full form still matches the Enox breakdown"
+   ]
+  },
+  {
+   "id": "M300",
+   "title": "r_stats_bounded: the named buckets are not the largest",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "      const buckets = bySize([...dt.values()], (x) => x.cnt, (x) => `${x.domain}\\u0000${x.type}`);",
+     "      const buckets = [...dt.values()];"
+    ]
+   ],
+   "red": [
+    "graph_stats by default stays under 4 KB on the owner's book and its full form still matches the Enox breakdown"
+   ]
+  },
+  {
+   "id": "M301",
+   "title": "r_stats_bounded: only the largest relations are named",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "        by_relation: Object.fromEntries(bySize([...rel], ([, c]) => c, ([r]) => r)),",
+     "        by_relation: Object.fromEntries(bySize([...rel], ([, c]) => c, ([r]) => r).slice(0, 20)),"
+    ]
+   ],
+   "red": [
+    "graph_stats by default stays under 4 KB on the owner's book and its full form still matches the Enox breakdown"
+   ]
+  },
+  {
+   "id": "M302",
+   "title": "r_stats_bounded: the rest counts buckets, not nodes",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "by_domain_rest: { buckets: rest.length, nodes: rest.reduce((t, x) => t + x.cnt, 0) }",
+     "by_domain_rest: { buckets: rest.length, nodes: rest.length }"
+    ]
+   ],
+   "red": [
+    "graph_stats by default stays under 4 KB on the owner's book and its full form still matches the Enox breakdown"
+   ]
+  },
+  {
+   "id": "M303",
+   "title": "r_empty_explains: the node keeps no relation names for notes",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      vals.R.add(f.relation);",
+     "      void f.relation;"
+    ]
+   ],
+   "red": [
+    "ask with an unquoted relation, a misspelt relation, an unknown predicate or an unknown perspective answers no rows with a note naming the cause and the nearest existing names"
+   ]
+  },
+  {
+   "id": "M304",
+   "title": "r_empty_explains: a note's nearest names come from a scan of the relation",
+   "file": "src/empty.ts",
+   "edits": [
+    [
+     "      const sets = whole.map((b) => b[place]);",
+     "      const sets = [new Set((await rows(['V0', 'V1', 'V2', 'V3'], null)).map((r) => String(r.cells[i])))];"
+    ]
+   ],
+   "red": [
+    "on an owner-sized book a misspelt relation and an unknown constant are answered with their note within one second"
+   ]
+  },
+  {
+   "id": "M305",
+   "title": "r_empty_explains: whether a constant occurs is asked of the engine, place by place",
+   "file": "src/empty.ts",
+   "edits": [
+    [
+     "    if (partial.length === 0 && (at === 0 || kept(value))) return false;",
+     "    void kept;"
+    ],
+    [
+     "    } else if (whole.some((b) => b.S.has(value) || b.R.has(value) || b.T.has(value))) return true;",
+     "    }"
+    ],
+    [
+     "    for (const j of places) if ((await rows(quoted.map((_, k) => (k === j ? x : `V${k}`)), null)).length > 0) return true;",
+     "    for (const j of places) if ((await rows(quoted.map((_, k) => (k === j ? x : `V${k}`)), null)).length > 0) return true;\n    for (const j of places) await rows(quoted.map((_, k) => (k === j ? 'V' + k : `V${k}`)), null);"
+    ]
+   ],
+   "red": [
+    "on an owner-sized book a misspelt relation and an unknown constant are answered with their note within one second"
+   ]
+  },
+  {
+   "id": "M306",
+   "title": "executor CPU budget: soft and hard limits equal, so on Linux the budget kill is SIGKILL",
+   "file": "src/executor.ts",
+   "edits": [
+    [
+     "`ulimit -H -t ${cpu + 1}; ulimit -S -t ${cpu}; exec \"$0\" \"$@\"`",
+     "`ulimit -t ${cpu}; exec \"$0\" \"$@\"`"
+    ]
+   ],
+   "on": [
+    "linux"
+   ],
+   "red": [
+    "an executor over its CPU budget is stopped by the soft limit's SIGXCPU, not the hard limit's SIGKILL"
+   ]
+  },
+  {
+   "id": "M307",
+   "title": "r_one_fact_id: ask, why and whynot take the Enox fact_id literally",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "  if (!m || !FACT_FIRST.has(m[2]!)) return query;",
+     "  if (true || !m || !FACT_FIRST.has(m[2]!)) return query;"
+    ]
+   ],
+   "red": [
+    "update_assertion, delete_assertion and why accept either the Enox fact_id or the fact id ask returns, and add_assertion returns both"
+   ]
+  },
+  {
+   "id": "M308",
+   "title": "r_one_fact_id: update and delete find an edge by its Enox fact_id only",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "    return this.edgeOf.get(id) ?? this.inOrder(this.byFactId.get(id))[0];",
+     "    return this.inOrder(this.byFactId.get(id))[0];"
+    ]
+   ],
+   "red": [
+    "update_assertion, delete_assertion and why accept either the Enox fact_id or the fact id ask returns, and add_assertion returns both"
+   ]
+  },
+  {
+   "id": "M309",
+   "title": "r_one_fact_id: a reader's Enox fact_id is not resolved (only the operator's view resolves it)",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "  return r.rows.length ? String(r.rows[0]!.cells[1]) : null;",
+     "  return r.rows.length ? null : null;"
+    ]
+   ],
+   "red": [
+    "update_assertion, delete_assertion and why accept either the Enox fact_id or the fact id ask returns, and add_assertion returns both"
+   ]
+  },
+  {
+   "id": "M310",
+   "title": "r_live_view: every value of a one-value attribute is live",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      return this.assertions.valueAcross(books, S, R) === F;",
+     "      return true;"
+    ]
+   ],
+   "red": [
+    "after update_node only the new description holds in live while the old one stays in edge"
+   ]
+  },
+  {
+   "id": "M311",
+   "title": "r_live_view: live answers every edge, retired ones too",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "(id, t) => this.liveNow(id, t, undo), o.window)",
+     "() => true, o.window)"
+    ]
+   ],
+   "red": [
+    "after delete_assertion the edge is gone from live and still in edge with confidence zero"
+   ]
+  },
+  {
+   "id": "M312",
+   "title": "r_live_view: a newer grant to the same grantee does not replace the older one",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "      for (const F of Fs) on.set(F, F === latest![1] && (next.get(F) ?? m.get(F)!).C > 0);",
+     "      for (const F of Fs) on.set(F, (next.get(F) ?? m.get(F)!).C > 0);"
+    ]
+   ],
+   "red": [
+    "a grant replaced by a newer grant to the same grantee leaves exactly one grant in live"
+   ]
+  },
+  {
+   "id": "M313",
+   "title": "r_live_view: an expired grant stays live",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    return R !== GRANT || this.now() < Date.parse(T);",
+     "    return true;"
+    ]
+   ],
+   "red": [
+    "a grant replaced by a newer grant to the same grantee leaves exactly one grant in live"
+   ]
+  },
+  {
+   "id": "M314",
+   "title": "r_edge_context_stays: a node add_assertion creates is described by the edge's context",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "    facts.push(...entityFacts(id, name, type, domain, '', t));",
+     "    facts.push(...entityFacts(id, name, type, domain, deriveDescription(a.context ?? ''), t));"
+    ]
+   ],
+   "red": [
+    "add_assertion that creates its target node leaves that node without a description and keeps the context on the edge"
+   ]
+  },
+  {
+   "id": "M315",
+   "title": "r_retract_node: the edges touching the node are left standing",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "    for (const F of this.touching.get(id) ?? []) Fs.add(F);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "retract_node removes a node and its edges from explore, traverse, query_graph and live in one batch, and they remain in edge with confidence zero"
+   ]
+  },
+  {
+   "id": "M316",
+   "title": "r_retract_node: the node's own facts are left standing",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "    for (const xs of this.attrFacts.get(id)?.values() ?? []) for (const F of xs) Fs.add(F);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "retract_node removes a node and its edges from explore, traverse, query_graph and live in one batch, and they remain in edge with confidence zero"
+   ]
+  },
+  {
+   "id": "M317",
+   "title": "r_delete_any_perspective: delete_assertion finds only edges of the Enox view",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "      const f = g.assertion(a.fact_id as string);\n      if (!f) notAnEdge(g, a.fact_id as string);",
+     "      const f = g.edgeByFactId(a.fact_id as string) ? g.assertion(a.fact_id as string) : undefined;\n      if (!f) notAnEdge(g, a.fact_id as string);"
+    ]
+   ],
+   "red": [
+    "delete_assertion retracts a fact asserted through assert under another perspective"
+   ]
+  },
+  {
+   "id": "M318",
+   "title": "r_delete_any_perspective: delete_assertion retracts under the enox perspective whatever the fact's",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "      const batch = await write(ctx, [{ source: f.S, relation: f.R, target: f.T, perspective: f.P, confidence: 0 },",
+     "      const batch = await write(ctx, [{ source: f.S, relation: f.R, target: f.T, perspective: ENOX_PERSPECTIVE, confidence: 0 },"
+    ]
+   ],
+   "red": [
+    "delete_assertion retracts a fact asserted through assert under another perspective"
+   ]
+  },
+  {
+   "id": "M319",
+   "title": "r_assert_receipt: assert names the chain position one off",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "held: false, seq: this.chains.get(me.name)!.length - 1, admission:",
+     "held: false, seq: this.chains.get(me.name)!.length, admission:"
+    ]
+   ],
+   "red": [
+    "assert returns the batch digest, its chain position and every admitted fact id, and they match chain and ask"
+   ]
+  },
+  {
+   "id": "M320",
+   "title": "r_assert_receipt: the fact ids an Enox write answers are not the facts it wrote",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "  return { digest: r.receipt.digest, seq: r.seq, fact_ids: all.map((f) => factId(f)) };",
+     "  return { digest: r.receipt.digest, seq: r.seq, fact_ids: all.slice(1).map((f) => factId(f)) };"
+    ]
+   ],
+   "red": [
+    "assert returns the batch digest, its chain position and every admitted fact id, and they match chain and ask"
+   ]
+  },
+  {
+   "id": "M321",
+   "title": "r_introspect: schema leaves out the heads of the rules a caller may read",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        if (sc.only !== null) continue;\n        for (const r of this.currentRules(sc.identity)) {",
+     "        continue;\n        for (const r of this.currentRules(sc.identity)) {"
+    ]
+   ],
+   "red": [
+    "the schema tool lists every predicate ask answers with its arity and every perspective present, and asking each listed predicate with its arity is never refused"
+   ]
+  },
+  {
+   "id": "M322",
+   "title": "r_introspect: schema counts one fact under every perspective",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        for (const [F, c] of this.assertions.of(sc.identity)) if (sc.only === null || sc.only.has(F)) counts.set(c.P, (counts.get(c.P) ?? 0) + 1);",
+     "        for (const [F, c] of this.assertions.of(sc.identity)) if (sc.only === null || sc.only.has(F)) counts.set(c.P, 1);"
+    ]
+   ],
+   "red": [
+    "the schema tool lists every predicate ask answers with its arity and every perspective present, and asking each listed predicate with its arity is never refused"
+   ]
+  },
+  {
+   "id": "M323",
+   "title": "r_query_errors: a conjunction reaches the engine and comes back in its wording",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "  if (!m || !balanced(m[3]!)) throw new Refusal(400, 'bad_query', ONE_LITERAL);",
+     "  if (!m) throw new Refusal(400, 'bad_query', ONE_LITERAL);"
+    ],
+    [
+     "    void e;\n    throw new Refusal(400, 'bad_query', `not a literal this node can read: ${ONE_LITERAL}; check its quotes and parentheses`);",
+     "    throw new Refusal(400, 'bad_query', `the engine could not answer: ${(e as Error).message}`);"
+    ]
+   ],
+   "red": [
+    "wrong arity, a conjunction, a negation and a fact held only under another perspective each get one consistent explanation without engine internals"
+   ]
+  },
+  {
+   "id": "M324",
+   "title": "r_query_errors: a wrong arity of asserted, conf or persp is refused, not noted",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (a.length !== (rel === 'asserted' ? 4 : 2)) return { vars, rows: [] };   // the note says the arity (src/empty.ts)",
+     "    if (a.length !== (rel === 'asserted' ? 4 : 2)) throw new Refusal(400, 'bad_query', 'arity');"
+    ]
+   ],
+   "red": [
+    "wrong arity, a conjunction, a negation and a fact held only under another perspective each get one consistent explanation without engine internals"
+   ]
+  },
+  {
+   "id": "M325",
+   "title": "r_query_errors: an empty answer under one perspective does not name the others that hold it",
+   "file": "src/empty.ts",
+   "edits": [
+    [
+     "    if (elsewhere.length > 0) {",
+     "    if (false && elsewhere.length > 0) {"
+    ]
+   ],
+   "red": [
+    "wrong arity, a conjunction, a negation and a fact held only under another perspective each get one consistent explanation without engine internals"
+   ]
+  },
+  {
+   "id": "M326",
+   "title": "r_query_errors: a hash-like id gets nearest names",
+   "file": "src/empty.ts",
+   "edits": [
+    [
+     "    if (i > 0 && !HASHLIKE.test(value)) {",
+     "    if (i > 0) {"
+    ]
+   ],
+   "red": [
+    "wrong arity, a conjunction, a negation and a fact held only under another perspective each get one consistent explanation without engine internals"
+   ]
+  },
+  {
+   "id": "M327",
+   "title": "r_query_errors: answered without rules names no variables",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    const ans: AskAnswer = rel === 'answered' ? { vars: named, rows: [] } : await this.engine.ask(query, scope);",
+     "    const ans: AskAnswer = rel === 'answered' ? { vars: [], rows: [] } : await this.engine.ask(query, scope);"
+    ]
+   ],
+   "red": [
+    "wrong arity, a conjunction, a negation and a fact held only under another perspective each get one consistent explanation without engine internals"
+   ]
+  },
+  {
+   "id": "M328",
+   "title": "r_bounded_reads: chain answers the whole chain whatever the limit",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "      const page = digests.slice(from, from + limit);",
+     "      const page = digests.slice(from);"
+    ]
+   ],
+   "red": [
+    "chain pages with a limit, semantic_search cuts descriptions to the cap, and why on an Enox edge answers once with the batch and claim of its axiom"
+   ]
+  },
+  {
+   "id": "M329",
+   "title": "r_bounded_reads: semantic_search answers whole descriptions",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "      const cut = (t: string) => (max > 0 && t.length > max ? truncateAtWordBoundary(t, max - 1) : t);",
+     "      const cut = (t: string) => t;"
+    ]
+   ],
+   "red": [
+    "chain pages with a limit, semantic_search cuts descriptions to the cap, and why on an Enox edge answers once with the batch and claim of its axiom"
+   ]
+  },
+  {
+   "id": "M330",
+   "title": "r_bounded_reads: why and whynot answer once per book the reader may see",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    const scope = this.matchable(rel, book, args, all);",
+     "    const scope = all;"
+    ]
+   ],
+   "red": [
+    "chain pages with a limit, semantic_search cuts descriptions to the cap, and why on an Enox edge answers once with the batch and claim of its axiom"
+   ]
+  },
+  {
+   "id": "M331",
+   "title": "r_bounded_reads: an axiom says nothing of where it comes from",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        if (!c) continue;\n        const digest",
+     "        if (c || !c) continue;\n        const digest"
+    ]
+   ],
+   "red": [
+    "chain pages with a limit, semantic_search cuts descriptions to the cap, and why on an Enox edge answers once with the batch and claim of its axiom"
+   ]
+  },
+  {
+   "id": "M332",
+   "title": "r_bounded_reads: a publishing client takes the last digest of the first page as its head",
+   "file": "src/client.ts",
+   "edits": [
+    [
+     "    const prev = c.head !== undefined ? c.head : c.digests.length ? c.digests[c.digests.length - 1]! : null;",
+     "    const prev = c.digests.length ? c.digests[c.digests.length - 1]! : null;"
+    ]
+   ],
+   "red": [
+    "chain pages with a limit, semantic_search cuts descriptions to the cap, and why on an Enox edge answers once with the batch and claim of its axiom"
+   ]
+  },
+  {
+   "id": "M333",
+   "title": "r_tool_list_clean: tools/list offers the tools that do not work here",
+   "file": "src/mcp.ts",
+   "edits": [
+    [
+     "  return OPS.filter((o) => (surface === 'local' || !isLocal(o)) && o.unlisted === undefined)",
+     "  return OPS.filter((o) => (surface === 'local' || !isLocal(o)))"
+    ]
+   ],
+   "red": [
+    "tools/list holds no tool described as not offered, and re-adding a deleted edge answers restored"
+   ]
+  },
+  {
+   "id": "M334",
+   "title": "r_tool_list_clean: re-adding a deleted edge answers created",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "  const restored = !existing && g.assertion(F)?.confidence === 0;",
+     "  const restored = false;"
+    ]
+   ],
+   "red": [
+    "tools/list holds no tool described as not offered, and re-adding a deleted edge answers restored"
+   ]
+  },
+  {
+   "id": "M335",
+   "title": "r_ask_at_revision: an ask at a head answers the latest assertions",
+   "file": "src/assertions.ts",
+   "edits": [
+    [
+     "    if (!undo || undo.size === 0) return m;",
+     "    return m;"
+    ]
+   ],
+   "red": [
+    "two asks at the same head answer the same rows while writes land between them, and an ask at a head older than the node keeps is refused naming the oldest it keeps"
+   ]
+  },
+  {
+   "id": "M336",
+   "title": "r_ask_at_revision: a head older than the node keeps is answered from what it has",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (kept === undefined || first < kept) {",
+     "    if (kept === undefined) {"
+    ]
+   ],
+   "red": [
+    "two asks at the same head answer the same rows while writes land between them, and an ask at a head older than the node keeps is refused naming the oldest it keeps"
+   ]
+  },
+  {
+   "id": "M337",
+   "title": "r_ask_at_revision: an ask at a head keeps the facts admitted after it",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "(id, t) => this.assertions.viewAt(id, undo.get(id)).get(t[0]) !== undefined, o.window)",
+     "() => true, o.window)"
+    ]
+   ],
+   "red": [
+    "two asks at the same head answer the same rows while writes land between them, and an ask at a head older than the node keeps is refused naming the oldest it keeps"
+   ]
+  },
+  {
+   "id": "M338",
+   "title": "r_ask_since: since starts from the first batch of the log",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    for (let i = from + 1; i < rs.length; i++) {\n      const r = rs[i]!;\n      if (r.kind !== undefined || r.withheld) continue;",
+     "    for (let i = 0; i < rs.length; i++) {\n      const r = rs[i]!;\n      if (r.kind !== undefined || r.withheld) continue;"
+    ]
+   ],
+   "red": [
+    "ask since a digest answers only the facts admitted after it, and its cost on an owner-sized book grows with the new facts, not the log"
+   ]
+  },
+  {
+   "id": "M339",
+   "title": "r_ask_since: since ignores the perspective",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        if (!c || (perspective !== null && c.P !== perspective)) continue;",
+     "        if (!c) continue;"
+    ]
+   ],
+   "red": [
+    "ask since a digest answers only the facts admitted after it, and its cost on an owner-sized book grows with the new facts, not the log"
+   ]
+  },
+  {
+   "id": "M340",
+   "title": "r_ask_since: since reads every batch of the log and keeps those after the digest",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    for (let i = from + 1; i < rs.length; i++) {\n      const r = rs[i]!;\n      if (r.kind !== undefined || r.withheld) continue;",
+     "    for (let i = 0; i < rs.length; i++) {\n      const r = rs[i]!;\n      if (r.kind !== undefined || r.withheld) continue;\n      if (i <= from) { parseJsonl(this.log.read(r).jsonl!); continue; }"
+    ]
+   ],
+   "red": [
+    "ask since a digest answers only the facts admitted after it, and its cost on an owner-sized book grows with the new facts, not the log"
+   ]
+  },
+  {
+   "id": "M341",
+   "title": "r_admission_order: an edge row carries its latest assertion's batch, not the one that made it true",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        r.admission = at(c?.by ?? r.identity, rel === 'edge' || rel === 'edge_num' ? c?.first : c?.S);",
+     "        r.admission = at(c?.by ?? r.identity, c?.S);"
+    ]
+   ],
+   "red": [
+    "ask ordered by admission lists rows in the order their batches were admitted, the same after a restart"
+   ]
+  },
+  {
+   "id": "M342",
+   "title": "r_admission_order: rows keep their fixed order",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    ans.rows.sort((x, y) => (x.admission ?? Infinity) - (y.admission ?? Infinity));",
+     ""
+    ]
+   ],
+   "red": [
+    "ask ordered by admission lists rows in the order their batches were admitted, the same after a restart"
+   ]
+  },
+  {
+   "id": "M343",
+   "title": "r_admission_order: a grant row carries no admission number",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      for (const r of ans.rows) r.admission = at(r.identity, rowOf(r.identity).get(ground(r)));",
+     "      for (const r of ans.rows) r.admission = null;"
+    ]
+   ],
+   "red": [
+    "ask ordered by admission lists rows in the order their batches were admitted, the same after a restart"
+   ]
+  },
+  {
+   "id": "M344",
+   "title": "r_assert_then_ask: the question is asked after the write, in a slot of its own",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "      const r = ctx.session ? await n.signAsSession(ctx.session, facts, so) : await n.signAsSelf(facts, so);",
+     "      const { ask: _q, ...so2 } = so;\n      const r = ctx.session ? await n.signAsSession(ctx.session, facts, so2) : await n.signAsSelf(facts, so2);\n      if (ask) Object.assign(r, { admission: r.admission, answer: await n.ask(ask.query, ask.asker, ask.perspective, ask.options) });"
+    ]
+   ],
+   "red": [
+    "two sessions that claim the same task at once each get an answer naming the same single winner, and no batch lands between a claim and its answer"
+   ]
+  },
+  {
+   "id": "M345",
+   "title": "r_knew_head: knew is not signed with the batch",
+   "file": "src/identity.ts",
+   "edits": [
+    [
+     "  const { sig, ...unsigned } = m;\n  try {\n    return crypto.verify(null, Buffer.from(BATCH_CONTEXT",
+     "  const { sig, knew: _knew, ...unsigned } = m;\n  try {\n    return crypto.verify(null, Buffer.from(BATCH_CONTEXT"
+    ],
+    [
+     "      ...(knew !== undefined ? { knew } : {}),\n    };",
+     "    };"
+    ],
+    [
+     "    return { ...unsigned, sig };\n  }\n}",
+     "    return { ...unsigned, ...(knew !== undefined ? { knew } : {}), sig };\n  }\n}"
+    ]
+   ],
+   "red": [
+    "a batch that names the head its author knew keeps it through admission, mirroring and a restart, and a forged head breaks the signature"
+   ]
+  },
+  {
+   "id": "M346",
+   "title": "r_knew_head: assert drops the head its author knew",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "toISOString(), salt, o.knew);",
+     "toISOString(), salt);"
+    ]
+   ],
+   "red": [
+    "a batch that names the head its author knew keeps it through admission, mirroring and a restart, and a forged head breaks the signature"
+   ]
+  },
+  {
+   "id": "M347",
+   "title": "r_one_time: a writer's created_at is shown as written",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "  return Number.isNaN(t) ? x : new Date(t).toISOString();",
+     "  return x;"
+    ]
+   ],
+   "red": [
+    "every tool shows times in one form, and a lease that expires by the node's admission times expires whatever time its writer claimed"
+   ]
+  },
+  {
+   "id": "M348",
+   "title": "r_one_time: a grant's expiry is shown in Unix seconds",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      for (const r of ans.rows) if (u >= 0 && typeof r.cells[u] === 'number') r.cells[u] = new Date((r.cells[u] as number) * 1000).toISOString();",
+     ""
+    ]
+   ],
+   "red": [
+    "every tool shows times in one form, and a lease that expires by the node's admission times expires whatever time its writer claimed"
+   ]
+  },
+  {
+   "id": "M349",
+   "title": "r_one_time: admitted_at is the writer's claimed time",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    return this.log.receipts[this.writtenAt(identity, seq)]?.received_at ?? '';",
+     "    return new Date(this.lastClaimed.get(identity) ?? 0).toISOString();"
+    ]
+   ],
+   "red": [
+    "every tool shows times in one form, and a lease that expires by the node's admission times expires whatever time its writer claimed"
+   ]
+  },
+  {
+   "id": "M350",
+   "title": "r_perspective_export: the dump comes in answer order, not sorted",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      }).sort((p, q) => (p < q ? -1 : p > q ? 1 : 0));\n      return { perspective, head: at",
+     "      });\n      return { perspective, head: at"
+    ]
+   ],
+   "red": [
+    "two exports of one perspective at the same head are byte-identical, and an export after a retraction no longer holds the retracted fact"
+   ]
+  },
+  {
+   "id": "M351",
+   "title": "r_perspective_export: retracted facts stay in the dump",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        (id, t) => view.get(t[0])?.P === perspective && this.liveNow(id, t, undo));",
+     "        (id, t) => view.get(t[0])?.P === perspective);"
+    ]
+   ],
+   "red": [
+    "two exports of one perspective at the same head are byte-identical, and an export after a retraction no longer holds the retracted fact"
+   ]
+  },
+  {
+   "id": "M352",
+   "title": "r_perspective_export: an export at a head is of the latest state",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      const undo = at !== undefined ? this.undoSince(at) : null;\n      const view = this.view(me, undo);",
+     "      const undo = null as Map<string, Map<string, Current | null>> | null;\n      const view = this.view(me, undo);"
+    ]
+   ],
+   "red": [
+    "two exports of one perspective at the same head are byte-identical, and an export after a retraction no longer holds the retracted fact"
+   ]
+  },
+  {
+   "id": "M353",
+   "title": "r_attribute_delete_explains: an attribute fact's id answers not found",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "      if (!f) notAnEdge(g, a.fact_id as string);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "delete_assertion with an attribute fact's id names the node and attribute and points to update_node or retract_node"
+   ]
+  },
+  {
+   "id": "M354",
+   "title": "r_conjunction: negations are not applied",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (!stopped && neg.length) {",
+     "    if (false) {"
+    ]
+   ],
+   "red": [
+    "ask answers a conjunction joining edge and conf, refuses an unbound negation with a note, and stops at the budget with the budget named"
+   ]
+  },
+  {
+   "id": "M355",
+   "title": "r_conjunction: an unbound negation is asked anyway",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (free.length) {\n        const note",
+     "      if (false) {\n        const note"
+    ]
+   ],
+   "red": [
+    "ask answers a conjunction joining edge and conf, refuses an unbound negation with a note, and stops at the budget with the budget named"
+   ]
+  },
+  {
+   "id": "M356",
+   "title": "r_conjunction: a conjunction runs past the budget",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (used > this.ruleBudget) { stopped = true; break; }\n      if (rows.length === 0) break;",
+     "      if (rows.length === 0) break;"
+    ],
+    [
+     "          if (used > this.ruleBudget) break;\n        }\n      } else {",
+     "        }\n      } else {"
+    ],
+    [
+     "            if (++used > this.ruleBudget) break;\n          }\n          if (used > this.ruleBudget) break;",
+     "            ++used;\n          }"
+    ]
+   ],
+   "red": [
+    "ask answers a conjunction joining edge and conf, refuses an unbound negation with a note, and stops at the budget with the budget named"
+   ]
+  },
+  {
+   "id": "M357",
+   "title": "r_conjunction: a join keeps rows whose shared variables disagree",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "          for (const r of byKey.get(JSON.stringify(shared.map((v) => row.b.get(v)))) ?? []) {",
+     "          for (const r of [...byKey.values()].flat()) {"
+    ],
+    [
+     "        if (m.has(k) && m.get(k) !== v) return;\n",
+     ""
+    ]
+   ],
+   "red": [
+    "ask answers a conjunction joining edge and conf, refuses an unbound negation with a note, and stops at the budget with the budget named"
+   ]
+  },
+  {
+   "id": "M358",
+   "title": "r_owner_rules: a rule may conclude a built-in predicate",
+   "file": "src/rules.ts",
+   "edits": [
+    [
+     "  if (BUILTIN.has(hm[2]!)) {",
+     "  if (false) {"
+    ]
+   ],
+   "red": [
+    "a rule that concludes a built-in predicate or exceeds the budget is refused at admission and stored facts and grants are unchanged"
+   ]
+  },
+  {
+   "id": "M359",
+   "title": "r_owner_rules: admission does not try the owner's rules against the budget",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    await this.trialRules(v, this.chains.get(v.manifest.identity)?.length ?? 0);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "a rule that concludes a built-in predicate or exceeds the budget is refused at admission and stored facts and grants are unchanged"
+   ]
+  },
+  {
+   "id": "M360",
+   "title": "r_owner_rules: a built-in-head rule already in the log refuses the start",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        if (!replaying || !(e instanceof Refusal)) throw e;",
+     "        throw e;"
+    ]
+   ],
+   "red": [
+    "a rule that concludes a built-in predicate or exceeds the budget is refused at admission and stored facts and grants are unchanged"
+   ]
+  },
+  {
+   "id": "M361",
+   "title": "r_owner_rules: a session's rule is its own book's, so it never runs for the owner",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    const author = op !== undefined && parent === op ? op : m.identity;",
+     "    const author = m.identity;"
+    ]
+   ],
+   "red": [
+    "a rule written by a delegated session derives for the owner, and goes inert once that session is revoked"
+   ]
+  },
+  {
+   "id": "M362",
+   "title": "r_owner_rules: a session's rules keep running after its delegation ends",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        if (by === op || live.get(by)) out.push(text);",
+     "        out.push(text);"
+    ]
+   ],
+   "red": [
+    "a rule written by a delegated session derives for the owner, and goes inert once that session is revoked"
+   ]
+  },
+  {
+   "id": "M363",
+   "title": "r_owner_rules: why does not name the rule a derivation used",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      e.text = this.namingRules(e.identity, r.text);",
+     "      e.text = r.text;"
+    ]
+   ],
+   "red": [
+    "a rule in the owner's book derives a predicate that ask answers and why explains with that rule"
+   ]
+  },
+  {
+   "id": "M369",
+   "title": "r_heap_headroom: every caller who finds no view builds its own, at once",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "  if (rebuild && rebuild.node === n) return (await rebuild.p, graph(ctx));\n  const p = oneAtATime(async () => {",
+     "  const p = (async () => {"
+    ],
+    [
+     "    kept = { node: n, owner: own, g, version };\n    return g;\n  });",
+     "    kept = { node: n, owner: own, g, version };\n    return g;\n  })();"
+    ],
+    [
+     "  if (ctx.caller === null || ctx.caller !== own) return oneAtATime(() => Graph.load(n, ctx.caller));",
+     "  if (ctx.caller === null || ctx.caller !== own) return Graph.load(n, ctx.caller);"
+    ]
+   ],
+   "red": [
+    "on an owner-sized book under a 1 GB heap, ten concurrent graph_stats, recall and ask calls while an embedder polls leave the node alive and answering, and graph_stats answers within 200 ms"
+   ],
+   "survivor": "Defence in depth, measured: with the slim view (one record per fact, no fkts:* facts, about 150 MB on the owner-sized book) and the node's serial queue building views one after another, even unshared builds do not overrun the 1 GB heap under ten concurrent calls (run 2026-10-04: survived). It stays because a view build for a granted reader is still a book's worth, and two at once are not needed. The perf test is red on 976f7b1 itself (SIGABRT, heap out of memory)."
+  },
+  {
+   "id": "M370",
+   "title": "r_heap_headroom: a windowed answer starts at the beginning whatever the cursor",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "    if (this.w.after !== undefined && k <= this.w.after) return;\n",
+     ""
+    ]
+   ],
+   "red": [
+    "an answer longer than the limit is marked cut and the rest is fetched page by page to the same total"
+   ]
+  },
+  {
+   "id": "M364",
+   "title": "r_session_identity: a session's writes are signed as the owner",
+   "file": "src/enox-ops.ts",
+   "edits": [
+    [
+     "  const r = ctx.session ? await node(ctx).signAsSession(ctx.session, all) : await node(ctx).signAsSelf(all);",
+     "  const r = await node(ctx).signAsSelf(all);"
+    ]
+   ],
+   "red": [
+    "two OAuth sessions write as two distinct identities delegated by the owner, neither can sign as the other or as the owner, and a revoked session can no longer write"
+   ]
+  },
+  {
+   "id": "M365",
+   "title": "r_session_identity: revoking a grant leaves its session delegated",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "      const retired = await needNode(ctx).retireSession(a.grant as string);",
+     "      const retired = true;"
+    ]
+   ],
+   "red": [
+    "two OAuth sessions write as two distinct identities delegated by the owner, neither can sign as the other or as the owner, and a revoked session can no longer write"
+   ]
+  },
+  {
+   "id": "M366",
+   "title": "r_session_identity: a session's token may call the owner-only operations",
+   "file": "src/ops.ts",
+   "edits": [
+    [
+     "  if ((op.ownerOnly || isLocal(op)) && ctx.session) {",
+     "  if (false) {"
+    ]
+   ],
+   "red": [
+    "a session token is refused for operator_token, the OAuth grant list and revocation, and after the owner's key rotates no session identity can write until approved again"
+   ]
+  },
+  {
+   "id": "M367",
+   "title": "r_session_identity: a new owner key leaves the sessions running",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (pinned && before > 0 && first.doc.identity === this.identity?.name) await this.ownerKeyChanged();",
+     ""
+    ],
+    [
+     "      if (bound !== undefined && bound !== owner.keyId) {",
+     "      if (false) {"
+    ]
+   ],
+   "red": [
+    "a session token is refused for operator_token, the OAuth grant list and revocation, and after the owner's key rotates no session identity can write until approved again"
+   ]
+  },
+  {
+   "id": "M368",
+   "title": "r_session_identity: every session writes as one shared identity",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    return `s${sha256hex(`fkts session ${grant}`).slice(0, 10)}.${this.identity!.name}`;",
+     "    return `s${sha256hex('fkts session').slice(0, 10)}.${this.identity!.name}`;"
+    ]
+   ],
+   "red": [
+    "two OAuth sessions write as two distinct identities delegated by the owner, neither can sign as the other or as the owner, and a revoked session can no longer write"
+   ]
+  },
+  {
+   "id": "M371",
+   "title": "r_session_identity: a session's book is read only by its own grants",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    if (!owner || !this.isSession(id)) return base;",
+     "    if (true) return base;"
+    ]
+   ],
+   "red": [
+    "a reader granted the owner's book reads what a session wrote while delegated, still reads it after the session is revoked, and a stranger reads none of it"
+   ]
+  },
+  {
+   "id": "M372",
+   "title": "r_session_identity: any delegate of the owner is read as the owner's book",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    return this.oauth.grants().some((g) => this.sessionName(g.grant) === id);",
+     "    return true;"
+    ],
+    [
+     "    if (!owner || !id.endsWith(`.${owner}`) || !/^s[0-9a-f]{10}\\./.test(id)) return false;",
+     "    if (!owner || !id.endsWith(`.${owner}`)) return false;"
+    ]
+   ],
+   "red": [
+    "a reader granted the owner's book reads what a session wrote while delegated, still reads it after the session is revoked, and a stranger reads none of it"
+   ]
+  },
+  {
+   "id": "M373",
+   "title": "r_session_identity: the embedder reads the author's own book only",
+   "file": "executors/embedder/embedder.ts",
+   "edits": [
+    [
+     "      for (const id of [author, ...await this.sessionsOf(author)]) await this.follow(id, book, (facts) => book.apply(facts));",
+     "      for (const id of [author]) await this.follow(id, book, (facts) => book.apply(facts));"
+    ]
+   ],
+   "red": [
+    "a write over OAuth without asserted_by is claimed by the approved client's name, and every read tool shows asserted_by and claimed_by on that edge"
+   ]
+  },
+  {
+   "id": "M374",
+   "title": "r_session_identity: live ignores what the owner's sessions asserted",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    const view = this.view(identity, undo);\n    if (oneValue(R)) {",
+     "    const view = this.assertions.viewAt(identity, undo?.get(identity));\n    if (oneValue(R)) {"
+    ],
+    [
+     "      const books = (this.familyOf(identity) ?? [identity]).map((m) => [m, this.view(m, undo)] as [string, View]);",
+     "      const books = [[identity, view]] as [string, View][];"
+    ]
+   ],
+   "red": [
+    "a session that deletes an edge the owner or another session asserted removes it from live and from every Enox read alike, and conf shows it retired"
+   ]
+  },
+  {
+   "id": "M375",
+   "title": "r_session_identity: conf and the Enox view count only each book's own assertions",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    const family = this.familyOf(identity)?.filter((m) => m !== identity) ?? [];\n    if (family.length === 0) return own;",
+     "    return own;\n    const family = this.familyOf(identity)?.filter((m) => m !== identity) ?? [];"
+    ]
+   ],
+   "red": [
+    "a session that deletes an edge the owner or another session asserted removes it from live and from every Enox read alike, and conf shows it retired"
+   ]
+  },
+  {
+   "id": "M376",
+   "title": "r_session_identity: anyone's assertion overrides the owner's family's in the Enox view",
+   "file": "src/enox.ts",
+   "edits": [
+    [
+     "    if ((fam && !r.fam) || (fam === r.fam && N >= r.N)) {",
+     "    if (N >= r.N) {"
+    ]
+   ],
+   "red": [
+    "a session that deletes an edge the owner or another session asserted removes it from live and from every Enox read alike, and conf shows it retired"
+   ]
+  },
+  {
+   "id": "M377",
+   "title": "r_session_no_access_control: a session may assert a grant",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "const SESSION_MAY_NOT = new Set([GRANT, EXPORT,",
+     "const SESSION_MAY_NOT = new Set([EXPORT,"
+    ]
+   ],
+   "red": [
+    "a session's grant, export, delegation, trust or follow is refused at admission, a stranger it named reads nothing, and the owner's grant still works"
+   ]
+  },
+  {
+   "id": "M378",
+   "title": "r_session_no_access_control: a session may assert a follow",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "'fkts:trust_rules', 'fkts:follow']);",
+     "'fkts:trust_rules']);"
+    ]
+   ],
+   "red": [
+    "a session's grant, export, delegation, trust or follow is refused at admission, a stranger it named reads nothing, and the owner's grant still works"
+   ]
+  },
+  {
+   "id": "M379",
+   "title": "r_session_no_access_control: a session's grant already in the log acts on replay",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "v.facts, seq, this.isSession(v.manifest.identity))): void {",
+     "v.facts, seq, false)): void {"
+    ]
+   ],
+   "red": [
+    "a session's grant, export, delegation, trust or follow is refused at admission, a stranger it named reads nothing, and the owner's grant still works"
+   ]
+  },
+  {
+   "id": "MS1",
+   "title": "subscriptions: the fan-out drops removals",
+   "file": "src/subscribe.ts",
+   "edits": [
+    [
+     "[[c.added, 1], [c.removed, -1]] as const",
+     "[[c.added, 1]] as const"
+    ]
+   ],
+   "red": [
+    "a subscriber to red(P, X) is sent the whole answer, then +2 on the update and −1 on an acceptance; the journal says why"
+   ]
+  },
+  {
+   "id": "MS2",
+   "title": "subscriptions: a literal's constants are ignored",
+   "file": "src/subscribe.ts",
+   "edits": [
+    [
+     "const m = match(sub.args, values);",
+     "const m = { cells: values };"
+    ]
+   ],
+   "red": [
+    "a subscriber to red(P, X) is sent the whole answer, then +2 on the update and −1 on an acceptance; the journal says why"
+   ]
+  },
+  {
+   "id": "MS3",
+   "title": "subscriptions: a change in a book the reader may not see is sent anyway",
+   "file": "src/subscribe.ts",
+   "edits": [
+    [
+     "const sc = sub.scope.get(book);",
+     "const sc = sub.scope.get(book) ?? { identity: book, only: null };"
+    ]
+   ],
+   "red": [
+    "a subscriber sees only what it may read: no grant, nothing; a grant, the rows; the grant expired, nothing again"
+   ]
+  },
+  {
+   "id": "MS4",
+   "title": "rule worlds rebuilt whole on every batch instead of advanced by delta",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (why) {\n        await c.w.close()",
+     "      if (true) {\n        await c.w.close()"
+    ]
+   ],
+   "red": [
+    "a subscriber to red(P, X) is sent the whole answer, then +2 on the update and −1 on an acceptance; the journal says why",
+    "a rule added, retired and switched on again, and a grant it reads by revoked, given and expired, reach a subscriber as deltas"
+   ]
+  },
+  {
+   "id": "MS5",
+   "title": "the mutant cut takes its units in the order of their files, not heaviest first: more shards than the costs need, or a shard over its budget",
+   "file": "scripts/shard-cut.ts",
+   "edits": [
+    [
+     "for (const [, ids, w] of parts.sort((x, y) => y[2] - x[2] || (x[0] < y[0] ? -1 : 1))) {",
+     "for (const [, ids, w] of parts) {"
+    ]
+   ],
+   "red": [
+    "mutant cut: two shards asked cannot hold 120 s of mutants under 45 s each; three are cut, heaviest first, each under it"
+   ]
+  },
+  {
+   "id": "MB1",
+   "title": "rule worlds: a rule new to a kept world, or switched on again, is never loaded",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "await c.w.apply(on.map(ruleText).join(''), author, off);",
+     "await c.w.apply('', author, off);"
+    ]
+   ],
+   "red": [
+    "a rule added, retired and switched on again, and a grant it reads by revoked, given and expired, reach a subscriber as deltas"
+   ]
+  },
+  {
+   "id": "MB2",
+   "title": "rule worlds: a rule switched off is not taken out (retired rules go on deriving)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "await c.w.apply(on.map(ruleText).join(''), author, off);",
+     "await c.w.apply(on.map(ruleText).join(''), author, []);"
+    ]
+   ],
+   "red": [
+    "a rule added, retired and switched on again, and a grant it reads by revoked, given and expired, reach a subscriber as deltas"
+   ]
+  },
+  {
+   "id": "MB3",
+   "title": "rule worlds: a batch's control rows (grant revoked) are not carried into a kept world",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "          retract.push(...plan.retract);",
+     "          void plan.retract;"
+    ]
+   ],
+   "red": [
+    "a rule added, retired and switched on again, and a grant it reads by revoked, given and expired, reach a subscriber as deltas"
+   ]
+  },
+  {
+   "id": "MB4",
+   "title": "rule worlds: the clock is not moved in a kept world (an expired grant still lets rows in)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (clock !== c.clock) { await c.w.setClock(clock); c.clock = clock; }",
+     "if (false) { await c.w.setClock(clock); c.clock = clock; }"
+    ]
+   ],
+   "red": [
+    "a rule added, retired and switched on again, and a grant it reads by revoked, given and expired, reach a subscriber as deltas"
+   ]
+  },
+  {
+   "id": "MB5",
+   "title": "subscriptions: every reader is sent the answer whole after a batch that moves access, as before",
+   "file": "src/subscribe.ts",
+   "edits": [
+    [
+     "      if (sig(scope) === sig(sub.scope)) continue;\n      if (batch && grownBy(",
+     "      if (!access && sig(scope) === sig(sub.scope)) continue;\n      if (!access && batch && grownBy("
+    ]
+   ],
+   "red": [
+    "a rule added, retired and switched on again, and a grant it reads by revoked, given and expired, reach a subscriber as deltas",
+    "an author's first rules: a world where there was none, its rows sent as added, saying the world was built whole"
+   ]
+  },
+  {
+   "id": "MB6",
+   "title": "rule worlds: the admission trial forks the kept world and never tries the batch in it",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        if (own || add) await w.apply(own + add, op, []);",
+     "        if (false) await w.apply(own + add, op, []);"
+    ]
+   ],
+   "red": [
+    "a runaway rule of the owner is refused by the trial in a fork of the kept world, and the world and its subscribers are untouched"
+   ]
+  },
+  {
+   "id": "P1",
+   "title": "a pod publishes the escaping rows that came, never those that went",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "if (before > 0 && r.n === 0) {",
+     "if (false && before > 0 && r.n === 0) {"
+    ]
+   ],
+   "red": [
+    "pods: the coordinator subscriber equals the whole world after a load, a local edit, a cross-file edit and a deletion"
+   ]
+  },
+  {
+   "id": "P2",
+   "title": "one relation the coordinator's rules read does not cross (the first escape omitted)",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "return [...by.values()].sort((a, b) => (a.rel < b.rel ? -1 : 1));",
+     "return [...by.values()].sort((a, b) => (a.rel < b.rel ? -1 : 1)).slice(1);"
+    ]
+   ],
+   "red": [
+    "pods: the coordinator subscriber equals the whole world after a load, a local edit, a cross-file edit and a deletion"
+   ]
+  },
+  {
+   "id": "P3",
+   "title": "a premise's constant narrows the rows that cross to nothing (filters compared by position off by one)",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "[...f].every(([i, v]) => cells[i] === v)",
+     "[...f].every(([i, v]) => cells[i + 1] === v)"
+    ]
+   ],
+   "red": [
+    "pods: the coordinator subscriber equals the whole world after a load, a local edit, a cross-file edit and a deletion"
+   ]
+  },
+  {
+   "id": "P4",
+   "title": "a pod evaluated anew publishes what came and forgets what its new world lacks",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "      x.d -= r.n;\n",
+     "      x.d -= 0;\n"
+    ]
+   ],
+   "red": [
+    "pods: the coordinator subscriber equals the whole world after a load, a local edit, a cross-file edit and a deletion"
+   ]
+  },
+  {
+   "id": "P5",
+   "title": "a pod is not sent a core fact it reaches when the fact arrives (the router marks no pod for an added fact)",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "for (const p of this.pods.values()) if (!p.dirty && this.passes(f, p.held)) p.dirty = true;",
+     "for (const p of this.pods.values()) if (false && !p.dirty && this.passes(f, p.held)) p.dirty = true;"
+    ]
+   ],
+   "red": [
+    "pods: a pod holds the core its files reach; a core change reaches only the pods it moves; a string no file holds leaves"
+   ]
+  },
+  {
+   "id": "P6",
+   "title": "the core a pod reaches stops at its files' own values (a laid fact's values are not held)",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "      for (let j = 0; j < f.cells.length; j++) holdIn(gs[j], f.cells[j]!);",
+     "      for (let j = 0; j < f.cells.length; j++) false && holdIn(gs[j], f.cells[j]!);"
+    ]
+   ],
+   "red": [
+    "pods: a pod holds the core its files reach; a core change reaches only the pods it moves; a string no file holds leaves"
+   ]
+  },
+  {
+   "id": "P7",
+   "title": "a string no file holds any more stays in the corpus's core",
+   "file": "test/pods-harness.ts",
+   "edits": [
+    [
+     "if (n === 0) { this.core.delete(l); coreOut.push(l); } else this.core.set(l, n);",
+     "if (false) { this.core.delete(l); coreOut.push(l); } else this.core.set(l, n);"
+    ]
+   ],
+   "red": [
+    "pods: a pod holds the core its files reach; a core change reaches only the pods it moves; a string no file holds leaves"
+   ]
+  },
+  {
+   "id": "P8",
+   "title": "the router shares one set of values across every key (a value held at one key opens another)",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "const from = k.from[i]!, h = held[this.group.get(from)!], x = k.calc?.[i]",
+     "const from = k.from[i]!, h = { has: (v: string) => held.some((s) => s.has(v)) }, x = k.calc?.[i]"
+    ]
+   ],
+   "red": [
+    "core routed by key: a name held at one key of the listing does not open the directories holding it"
+   ]
+  },
+  {
+   "id": "P9",
+   "title": "a premise that only asks whether some fact holds a value lays every such fact, not one witness",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "if (!k.exists) { lay(l, f); return; }",
+     "if (true) { lay(l, f); return; }"
+    ]
+   ],
+   "red": [
+    "core routed by key: a name held at one key of the listing does not open the directories holding it"
+   ]
+  },
+  {
+   "id": "P10",
+   "title": "a key reads a derived relation's values as if it held base facts (the sources it is derived from dropped)",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "      } else for (const u of derived.get(t.slice(2)) ?? []) go(u);",
+     "      } else sources.add(t.slice(2));"
+    ]
+   ],
+   "red": [
+    "core routed by key: a name held at one key of the listing does not open the directories holding it"
+   ]
+  },
+  {
+   "id": "P11",
+   "title": "a position the rule's builtins compute (a file's stem from its name) is not keyed: a pod that imports one file of a directory is given the directory's whole listing",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "      if (!rules.has(e.lit.rel)) {",
+     "      if (false && !rules.has(e.lit.rel)) {"
+    ]
+   ],
+   "red": [
+    "core routed by key: a pod importing one file of a large directory holds that file's listing, not the directory's"
+   ]
+  },
+  {
+   "id": "P12",
+   "title": "a premise over the program's own table (index_file) is read after the listing it keys: the listing keyed by its directory alone, laid whole",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "(anchored(e.lit.rel) ? 4 : rigid.get(e.lit.rel) ? 3 : 0)",
+     "(anchored(e.lit.rel) ? 4 : 0)"
+    ]
+   ],
+   "red": [
+    "core routed by key: a pod importing one file of a large directory holds that file's listing, not the directory's"
+   ]
+  },
+  {
+   "id": "P13",
+   "title": "a key position the router computes never holds (what the rule's builtins compute of a name is never compared): too little listing laid, a file another pod's file imports by its stem not found",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "      if (!x.fn(c).some((v) => from.values.has(v) || h?.has(v) === true)) return false;",
+     "      if (!x.fn(c).slice(1).some((v) => from.values.has(v) || h?.has(v) === true)) return false;"
+    ]
+   ],
+   "red": [
+    "pods: a pod holds the core its files reach; a core change reaches only the pods it moves; a string no file holds leaves"
+   ]
+  },
+  {
+   "id": "P14",
+   "title": "a core fact is indexed at one open position of its key only: held last at another, it is never considered again, and too little is laid",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "        if (vs.some((v) => from.values.has(v))) return;\n",
+     "        if (open || vs.some((v) => from.values.has(v))) return;\n"
+    ]
+   ],
+   "red": [
+    "core routed by key: a program of more groups than one word of bits, keys of two open positions and a constant"
+   ]
+  },
+  {
+   "id": "P15",
+   "title": "a value's groups in one word of bits are lost when its groups cross into the next word: the router of a program of more than 30 groups lays too little",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "        if (i !== wi) { if (now !== was) w!.set(c, now); wi = i;",
+     "        if (i !== wi) { wi = i;"
+    ]
+   ],
+   "red": [
+    "core routed by key: a program of more groups than one word of bits, keys of two open positions and a constant"
+   ]
+  },
+  {
+   "id": "P16",
+   "title": "a core fact taken out stays in the router's index (the index not kept with the core on an edit)",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "      for (const [g, v] of this.entries(f).at) this.at[g]?.get(v)?.delete(l);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "core routed by key: the router lays what a router with no index lays, through edits of the core and the files"
+   ]
+  },
+  {
+   "id": "MC1",
+   "title": "view links: expiry not checked",
+   "file": "src/viewlink.ts",
+   "edits": [
+    [
+     "  if (now >= k.exp) throw bad('has expired');",
+     "  if (false) throw bad('has expired');"
+    ]
+   ],
+   "red": [
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line"
+   ]
+  },
+  {
+   "id": "MC2",
+   "title": "view links: a link for another node accepted",
+   "file": "src/viewlink.ts",
+   "edits": [
+    [
+     "  if (k.aud !== c.audience) throw",
+     "  if (false) throw"
+    ]
+   ],
+   "red": [
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line"
+   ]
+  },
+  {
+   "id": "MC3",
+   "title": "view links: a link for another view accepted",
+   "file": "src/viewlink.ts",
+   "edits": [
+    [
+     "  if (k.owner !== c.owner || k.name !== c.name) throw",
+     "  if (false) throw"
+    ]
+   ],
+   "red": [
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line"
+   ]
+  },
+  {
+   "id": "MC4",
+   "title": "view links: the signature not checked",
+   "file": "src/viewlink.ts",
+   "edits": [
+    [
+     "  if (!ok) throw bad('does not verify');",
+     "  void ok;"
+    ]
+   ],
+   "red": [
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line"
+   ]
+  },
+  {
+   "id": "MC5",
+   "title": "view links: an issuer's revocation not checked",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (await this.linkRevoked(claims.iss, claims.jti)) throw bad(",
+     "      if (false) throw bad("
+    ]
+   ],
+   "red": [
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line"
+   ]
+  },
+  {
+   "id": "MC6",
+   "title": "view links: a stream opened by a link is not ended when the link is revoked",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (l.claims.iss === by && l.claims.jti === f.source) await this.endLink(",
+     "if (false) await this.endLink("
+    ]
+   ],
+   "red": [
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line",
+    "a revoke queued behind a link's open ends the stream, and one queued before refuses the open: no slot between check and registration"
+   ]
+  },
+  {
+   "id": "MC7",
+   "title": "subscriptions: a reader who sees a book in part (an export) is not sent that book's new facts",
+   "file": "src/subscribe.ts",
+   "edits": [
+    [
+     "      const partial = batch !== undefined && sub.scope.get(batch.book)?.only != null;",
+     "      const partial = false;"
+    ]
+   ],
+   "red": [
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line"
+   ]
+  },
+  {
+   "id": "MV1",
+   "title": "view links: a request path that normalises to another (//host, \\, dot segments) is routed as the path it normalises to",
+   "file": "src/http.ts",
+   "edits": [
+    [
+     "      if (!rawUrl.startsWith('/') || url.host !== 'local' || url.pathname !== rawUrl.split('?')[0]) {",
+     "      if (false) {"
+    ]
+   ],
+   "red": [
+    "a request path that is not one single-slash absolute path is refused: the view page is never served under //host"
+   ]
+  },
+  {
+   "id": "MV2",
+   "title": "view links: the page fetches its own path as given (location.pathname), not the URL it builds from its origin",
+   "file": "src/view.ts",
+   "edits": [
+    [
+     "  const res = await fetch(target.href, {",
+     "  const res = await fetch(location.pathname, {"
+    ],
+    [
+     "  if (!here) { $('status')",
+     "  if (false) { $('status')"
+    ]
+   ],
+   "red": [
+    "the view page fetches only its own origin, from the view's owner and name, under a CSP that holds its own script"
+   ]
+  },
+  {
+   "id": "MV3",
+   "title": "view links: the page's CSP lets it connect anywhere",
+   "file": "src/view.ts",
+   "edits": [
+    [
+     " connect-src 'self';",
+     ""
+    ]
+   ],
+   "red": [
+    "the view page fetches only its own origin, from the view's owner and name, under a CSP that holds its own script"
+   ]
+  },
+  {
+   "id": "MV4",
+   "title": "view links: a link opens the view's latest definition, whatever it was signed for",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (viewLit(L) !== claims.lit) throw bad(",
+     "      if (false) throw bad("
+    ]
+   ],
+   "red": [
+    "a link is bound to the view's definition: redefined, its open stream ends and the link opens nothing"
+   ]
+  },
+  {
+   "id": "MV5",
+   "title": "view links: a redefinition leaves open the streams of links to the old definition",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        if (L === null || viewLit(L) !== l.claims.lit) await this.endLink(",
+     "        if (false) await this.endLink("
+    ]
+   ],
+   "red": [
+    "a link is bound to the view's definition: redefined, its open stream ends and the link opens nothing"
+   ]
+  },
+  {
+   "id": "MV6",
+   "title": "view links: the revocation is checked in a serial slot before the one that registers the stream (the review's race)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    const id = await this.serial(async () => {\n      if (this.keyFor(claims.kid)?.identity !== claims.iss) throw bad('is signed by a key not valid here for its issuer');\n      if (await this.linkRevoked(claims.iss, claims.jti)) throw bad('was revoked by its issuer');",
+     "    if (await this.serial(() => this.linkRevoked(claims.iss, claims.jti))) throw bad('was revoked by its issuer');\n    const id = await this.serial(async () => {\n      if (this.keyFor(claims.kid)?.identity !== claims.iss) throw bad('is signed by a key not valid here for its issuer');"
+    ]
+   ],
+   "red": [
+    "a revoke queued behind a link's open ends the stream, and one queued before refuses the open: no slot between check and registration"
+   ]
+  },
+  {
+   "id": "MV8",
+   "title": "view links: a non-canonical base64url spelling of a link accepted",
+   "file": "src/viewlink.ts",
+   "edits": [
+    [
+     "  if (m.slice(1).some((p) => Buffer.from(p, 'base64url').toString('base64url') !== p)) throw",
+     "  if (false) throw"
+    ]
+   ],
+   "red": [
+    "a link has one spelling: a non-canonical base64url of its claims or signature is refused"
+   ]
+  },
+  {
+   "id": "MWN1",
+   "title": "a refusal's whynot loses the rule a negation blocked (the decisive reason dropped)",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "return { holds: false, whynot: r.text as string };",
+     "return { holds: false, whynot: (r.text as string).replace(/\\n  rule [^\\n]*\\n    failed premise: not [^\\n]*/g, '') };"
+    ]
+   ],
+   "red": [
+    "a stolen current key cannot rotate the identity away from its recovery key"
+   ]
+  }
+ ]
+}

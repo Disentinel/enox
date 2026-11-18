@@ -1,0 +1,5 @@
+{"source":"stale","relation":"fkts:rule","target":"stale(X) :- edge(F, Y, \"supersedes\", X).","perspective":"invariant","confidence":1}
+{"source":"broken","relation":"fkts:rule","target":"broken(P, X) :- edge(F, P, \"shows\", X), stale(X).","perspective":"invariant","confidence":1}
+{"source":"accepted","relation":"fkts:rule","target":"accepted(P, X) :- edge(F, P, \"accepts_stale\", X).","perspective":"invariant","confidence":1}
+{"source":"red","relation":"fkts:rule","target":"red(P, X) :- broken(P, X), not accepted(P, X).","perspective":"invariant","confidence":1}
+{"source":"intent","relation":"fkts:rule","target":"intent(P, \"fixer.local\", \"refresh\", X) :- red(P, X).","perspective":"invariant","confidence":1}

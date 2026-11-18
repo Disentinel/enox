@@ -1,0 +1,25 @@
+{
+  "name": "fkts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FKTS core: a federated signed knowledge log with the ROFL engine as its derived index",
+  "type": "module",
+  "bin": {
+    "fkts": "src/cli.ts"
+  },
+  "engines": {
+    "node": ">=22.6"
+  },
+  "dependencies": {
+    "@grafema/rofl": "1.5.0"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --no-warnings --test --test-concurrency=2 --test-timeout=110000 --test-force-exit test/*.test.ts",
+    "fkts": "node --experimental-strip-types --no-warnings --max-old-space-size=1024 src/cli.ts",
+    "mutants": "node --experimental-strip-types --no-warnings scripts/mutants.ts --shards auto",
+    "census": "node --experimental-strip-types --no-warnings scripts/census.ts",
+    "perf": "node --experimental-strip-types --no-warnings --test --test-concurrency=1 --test-timeout=280000 --test-force-exit test/perf/*.test.ts",
+    "mutants:perf": "node --experimental-strip-types --no-warnings scripts/mutants.ts --perf --shards 3",
+    "hermetic5": "node --experimental-strip-types --no-warnings scripts/mutants.ts --suite hermetic5"
+  }
+}
