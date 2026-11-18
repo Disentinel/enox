@@ -91,8 +91,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '22', cache: npm, cache-dependency-path: roflenox/package-lock.json }
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            roflenox/package-lock.json
+            roflenox/executors/embedder/package-lock.json
       - run: npm ci
+      # the embedder's own mutants red its meaning test, which runs the learned model (~130 MB, fetched once, kept)
+      - run: npm ci
+        working-directory: roflenox/executors/embedder
+      - id: model
+        uses: actions/cache@v4
+        with: { path: roflenox/executors/embedder/.models, key: embed-model-Xenova-multilingual-e5-small }
+      - if: steps.model.outputs.cache-hit != 'true'
+        run: npm run fetch-model
+        working-directory: roflenox/executors/embedder
       - uses: actions/cache/restore@v4
         with: { path: roflenox/node_modules/.cache/roflenox-mutants, key: 'mutant-costs-${{ github.run_id }}', restore-keys: mutant-costs- }
       - uses: actions/download-artifact@v4
