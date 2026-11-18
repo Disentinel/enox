@@ -223,14 +223,14 @@ export async function coreDemand(program: string, roots: string[], homeless: Set
   }
   // Demand, from the escapes down: rel -> its keys ('' all of it).
   const alts = new Map<string, Set<string>>();
-  const queue: [string, number[]][] = [];
+  const todo: [string, number[]][] = [];
   const want = (rel: string, at: number[]) => {
     const a = alts.get(rel) ?? new Set<string>();
     alts.set(rel, a);
     const k = at.join(',');
     if (a.has('') || a.has(k)) return;
     a.add(k);
-    queue.push([rel, at]);
+    todo.push([rel, at]);
   };
   const body = (els: Elem[], bound: Set<string>) => {
     const left = els.filter((e): e is Elem & { t: 'pos' } => e.t === 'pos');
@@ -252,8 +252,8 @@ export async function coreDemand(program: string, roots: string[], homeless: Set
     }
   };
   for (const r of roots) want(r, []);
-  while (queue.length) {
-    const [rel, at] = queue.pop()!;
+  while (todo.length) {
+    const [rel, at] = todo.pop()!;
     if (at.length && alts.get(rel)!.has('')) continue;
     for (const r of rules.get(rel) ?? []) {
       const bound = new Set<string>();
@@ -387,12 +387,12 @@ export class CoreRouter {
     const held = new Set<string>([...(this.d?.constants ?? []), ...p.values.keys()]);
     const lay = (l: string, f: { rel: string; cells: string[] }) => {
       laid.add(l);
-      for (const c of f.cells) if (!held.has(c)) { held.add(c); queue.push(c); }
+      for (const c of f.cells) if (!held.has(c)) { held.add(c); todo.push(c); }
     };
-    const queue = [...held];
+    const todo = [...held];
     for (const l of this.free) lay(l, this.facts.get(l)!);
-    while (queue.length) {
-      for (const l of this.at.get(queue.pop()!) ?? []) {
+    while (todo.length) {
+      for (const l of this.at.get(todo.pop()!) ?? []) {
         if (laid.has(l)) continue;
         const f = this.facts.get(l)!;
         if (this.passes(f, held)) lay(l, f);
