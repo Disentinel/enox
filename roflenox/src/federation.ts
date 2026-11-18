@@ -606,36 +606,38 @@ const NODE_CELL = /^an[0-9a-f]{16}_/;
 /** The values a key compares at its i-th position for a fact's value there: the value, or what its Calc computes. */
 const valuesAt = (k: Key, i: number, c: string): string[] => { const x = k.calc?.[i]; return x ? x.fn(c) : [c]; };
 /** The values held, per group of sources (one key position's): a value held at any source of a group is the group's. */
-type Held = Map<string, Set<string>>;
+type Held = { has: (c: string) => boolean }[];
+/** Groups to a word of bits: a value's groups are one number in a map, not one entry in a set per group. */
+const WORD = 30;
 
 /** The corpus's core, routed: each pod is given the core facts its files reach by the program's keys (coreDemand),
  *  and a change of the core reaches only the pods whose share it moves. With no demand (null) every pod is given all. */
 export class CoreRouter {
   private readonly d: Demand | null;
   private readonly facts = new Map<string, { rel: string; cells: string[] }>();
-  /** value -> the core facts holding it at a keyed position */
-  private readonly at = new Map<string, Set<string>>();
-  /** the core facts a key with no position lays everywhere */
+  /** a key position's group and a value there -> the core facts a key may hold once that value is held there. A
+   *  position whose value is a constant of the key always holds and is not indexed: a constant every fact of the
+   *  relation holds there (`str_seg(S, 0, _)`) would make each pod's route visit the whole corpus's relation. */
+  private readonly at: (Map<string, Set<string>> | undefined)[] = [];
+  /** the core facts a key holds by its constants alone: every pod considers them */
   private readonly free = new Set<string>();
   /** per pod: its files' values at each source (counted), the values held at each source, the core laid */
   private readonly pods = new Map<number, { values: Map<string, Map<string, number>>; held: Held; laid: Set<string>; dirty: boolean }>();
 
   /** a key position's sources as one group, and the groups each source is in */
-  private readonly group = new Map<object, string>();
-  private readonly groupsOf = new Map<string, string[]>();
+  private readonly group = new Map<object, number>();
+  private readonly groupsOf = new Map<string, number[]>();
   /** a computed source's input sources as one group -> the computed sources it feeds */
-  private readonly feeds = new Map<string, { x: string; calc: Calc }[]>();
+  private readonly feeds: ({ x: string; calc: Calc }[] | undefined)[] = [];
 
   constructor(d: Demand | null) {
     this.d = d;
-    // A group is named by a short id: it is part of every index key.
-    const ids = new Map<string, string>();
-    const id = (sources: Set<string>) => { const n = [...sources].sort().join(' '); if (!ids.has(n)) ids.set(n, `g${ids.size}`); return ids.get(n)!; };
+    // A group is numbered: it indexes the values held and the core facts.
+    const ids = new Map<string, number>();
+    const id = (sources: Set<string>) => { const n = [...sources].sort().join(' '); if (!ids.has(n)) ids.set(n, ids.size); return ids.get(n)!; };
     for (const [x, { calc, input }] of d?.calc ?? []) {
       const g = id(input);
-      const fs = this.feeds.get(g) ?? [];
-      fs.push({ x, calc });
-      this.feeds.set(g, fs);
+      (this.feeds[g] ??= []).push({ x, calc });
       for (const s of input) { const gs = this.groupsOf.get(s) ?? []; if (!gs.includes(g)) gs.push(g); this.groupsOf.set(s, gs); }
     }
     for (const k of [...d?.keys.values() ?? []].flat()) {
@@ -645,20 +647,41 @@ export class CoreRouter {
         for (const s of from.sources) { const gs = this.groupsOf.get(s) ?? []; if (!gs.includes(g)) gs.push(g); this.groupsOf.set(s, gs); }
       }
     }
+    for (const gs of this.groupsOf.values()) gs.sort((a, b) => a - b);
+    this.groups = ids.size;
   }
+  private readonly groups: number;
 
   /** per relation, the groups each of its places' values are held in */
-  private readonly placeGroups = new Map<string, (string[] | undefined)[]>();
-  private groupsAt(rel: string, n: number): (string[] | undefined)[] {
+  private readonly placeGroups = new Map<string, (number[] | undefined)[]>();
+  private groupsAt(rel: string, n: number): (number[] | undefined)[] {
     let gs = this.placeGroups.get(rel);
     if (!gs || gs.length < n) { gs = Array.from({ length: n }, (_, j) => this.groupsOf.get(`${rel}#${j}`)); this.placeGroups.set(rel, gs); }
     return gs;
+  }
+  /** Where a fact is indexed: per key, each position its constants do not hold, by the position's group and value;
+   *  and whether some key holds it by its constants alone. */
+  private entries(f: { rel: string; cells: string[] }): { at: [number, string][]; free: boolean } {
+    const out: [number, string][] = [];
+    let free = false;
+    for (const k of this.keysOf(f.rel) ?? []) {
+      let open = false;
+      k.at.forEach((j, i) => {
+        const from = k.from[i]!, vs = valuesAt(k, i, f.cells[j]!);
+        if (vs.some((v) => from.values.has(v))) return;
+        open = true;
+        const g = this.group.get(from);
+        for (const v of vs) out.push([g!, v]);
+      });
+      if (!open) free = true;
+    }
+    return { at: out, free };
   }
   private keysOf(rel: string): Key[] | undefined { return this.d ? this.d.keys.get(rel) : [{ at: [], from: [], exists: false }]; }
   /** A key holds a fact when at each of its positions the fact's value is a constant of it or held at one of its sources. */
   private holds(k: Key, f: { rel: string; cells: string[] }, held: Held): boolean {
     for (let i = 0; i < k.at.length; i++) {
-      const from = k.from[i]!, h = held.get(this.group.get(from)!), x = k.calc?.[i], c = f.cells[k.at[i]!]!;
+      const from = k.from[i]!, h = held[this.group.get(from)!], x = k.calc?.[i], c = f.cells[k.at[i]!]!;
       if (!x) { if (!from.values.has(c) && h?.has(c) !== true) return false; continue; }
       if (!x.fn(c).some((v) => from.values.has(v) || h?.has(v) === true)) return false;
     }
@@ -676,22 +699,28 @@ export class CoreRouter {
       if (!f) continue;
       this.facts.delete(l);
       this.free.delete(l);
-      for (const k of this.keysOf(f.rel) ?? []) k.at.forEach((j, i) => { for (const c of valuesAt(k, i, f.cells[j]!)) this.at.get(c)?.delete(l); });
+      for (const [g, v] of this.entries(f).at) this.at[g]?.get(v)?.delete(l);
       for (const p of this.pods.values()) if (p.laid.has(l)) p.dirty = true;
     }
     for (const l of added) {
       if (this.facts.has(l)) continue;
       const f = cellsOf(l.replace(/\.$/, ''));
       this.facts.set(l, f);
-      if ((this.keysOf(f.rel) ?? []).some((k) => k.at.length === 0)) this.free.add(l);
-      for (const k of this.keysOf(f.rel) ?? []) k.at.forEach((j, i) => { for (const c of valuesAt(k, i, f.cells[j]!)) { const s = this.at.get(c) ?? new Set<string>(); s.add(l); this.at.set(c, s); } });
+      const e = this.entries(f);
+      if (e.free) this.free.add(l);
+      for (const [g, v] of e.at) {
+        const byV = (this.at[g] ??= new Map<string, Set<string>>());
+        const s = byV.get(v) ?? new Set<string>();
+        s.add(l);
+        byV.set(v, s);
+      }
       for (const p of this.pods.values()) if (!p.dirty && this.passes(f, p.held)) p.dirty = true;
     }
   }
 
   /** A pod's file facts in and out: their values counted at each source the keys read. */
   files(pod: number, added: Iterable<string>, removed: Iterable<string>): void {
-    const p = this.pods.get(pod) ?? { values: new Map(), held: new Map(), laid: new Set<string>(), dirty: true };
+    const p = this.pods.get(pod) ?? { values: new Map(), held: [], laid: new Set<string>(), dirty: true };
     this.pods.set(pod, p);
     const count = (lines: Iterable<string>, d: 1 | -1) => {
       for (const l of lines) {
@@ -731,22 +760,32 @@ export class CoreRouter {
    *  tuple yet, the least such fact), and its values are then held at its sources. */
   private reach(p: { values: Map<string, Map<string, number>>; held: Held }): Set<string> {
     const laid = new Set<string>();
-    const held: Held = new Map();
-    const todo = [...this.d?.values ?? []];
+    const words: Map<string, number>[] = [];
+    const held: Held = Array.from({ length: this.groups }, (_, g) => {
+      const w = (words[Math.floor(g / WORD)] ??= new Map()), b = 1 << g % WORD;
+      return { has: (c: string) => ((w.get(c) ?? 0) & b) !== 0 };
+    });
+    const todo: Set<string>[] = [];
     const hold = (s: string, c: string) => holdIn(this.groupsOf.get(s), c);
-    const holdIn = (groups: string[] | undefined, c: string) => {
+    const holdIn = (groups: number[] | undefined, c: string) => {
       if (!groups) return;
-      let more = false, fed: { x: string; calc: Calc }[] | undefined;
+      let fed: { x: string; calc: Calc }[] | undefined;
+      let wi = -1, w: Map<string, number> | undefined, was = 0, now = 0;
       for (const g of groups) {
-        const h = held.get(g) ?? new Set<string>();
-        held.set(g, h);
-        if (!h.has(c)) { h.add(c); more = true; const f = this.feeds.get(g); if (f) fed = fed ? fed.concat(f) : f; }
+        const i = Math.floor(g / WORD), b = 1 << g % WORD;
+        if (i !== wi) { if (now !== was) w!.set(c, now); wi = i; w = words[i]!; was = now = w.get(c) ?? 0; }
+        if (now & b) continue;
+        now |= b;
+        const ls = this.at[g]?.get(c);
+        if (ls) todo.push(ls);
+        const f = this.feeds[g];
+        if (f) fed = fed ? fed.concat(f) : f;
       }
-      if (more) todo.push(c);
+      if (now !== was) w!.set(c, now);
       // A value new at a computed source's inputs: what its Calc computes of it is held there.
       for (const { x, calc } of fed ?? []) for (const v of calc.fn(c)) hold(x, v);
     };
-    for (const [s, at] of p.values) for (const c of at.keys()) hold(s, c);
+    for (const [s, at] of p.values) { const gs = this.groupsOf.get(s); if (gs) for (const c of at.keys()) holdIn(gs, c); }
     /** the existence tuples a laid fact holds; the least fact for each wanted one no laid fact holds */
     const witness = new Set<string>(), wanting = new Map<string, string>();
     const tuple = (ki: number, k: Key, f: { rel: string; cells: string[] }) => `${f.rel}\0${ki}\0${k.at.map((j) => f.cells[j]).join('\0')}`;
@@ -769,7 +808,7 @@ export class CoreRouter {
     };
     for (const l of this.free) consider(l, this.facts.get(l)!);
     for (let more = true; more;) {
-      while (todo.length) for (const l of this.at.get(todo.pop()!) ?? []) consider(l, this.facts.get(l)!);
+      while (todo.length) for (const l of todo.pop()!) consider(l, this.facts.get(l)!);
       more = false;
       for (const [t, l] of wanting) if (!witness.has(t) && !laid.has(l)) { lay(l, this.facts.get(l)!); more = true; }
       wanting.clear();

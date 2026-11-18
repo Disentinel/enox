@@ -5499,8 +5499,8 @@
    "file": "src/federation.ts",
    "edits": [
     [
-     "const from = k.from[i]!, h = held.get(this.group.get(from)!), x = k.calc?.[i]",
-     "const from = k.from[i]!, h = new Set([...held.values()].flatMap((s) => [...s])), x = k.calc?.[i]"
+     "const from = k.from[i]!, h = held[this.group.get(from)!], x = k.calc?.[i]",
+     "const from = k.from[i]!, h = { has: (v: string) => held.some((s) => s.has(v)) }, x = k.calc?.[i]"
     ]
    ],
    "red": [
@@ -5575,6 +5575,48 @@
    ],
    "red": [
     "pods: a pod holds the core its files reach; a core change reaches only the pods it moves; a string no file holds leaves"
+   ]
+  },
+  {
+   "id": "P14",
+   "title": "a core fact is indexed at one open position of its key only: held last at another, it is never considered again, and too little is laid",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "        if (vs.some((v) => from.values.has(v))) return;\n",
+     "        if (open || vs.some((v) => from.values.has(v))) return;\n"
+    ]
+   ],
+   "red": [
+    "core routed by key: a program of more groups than one word of bits, keys of two open positions and a constant"
+   ]
+  },
+  {
+   "id": "P15",
+   "title": "a value's groups in one word of bits are lost when its groups cross into the next word: the router of a program of more than 30 groups lays too little",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "        if (i !== wi) { if (now !== was) w!.set(c, now); wi = i;",
+     "        if (i !== wi) { wi = i;"
+    ]
+   ],
+   "red": [
+    "core routed by key: a program of more groups than one word of bits, keys of two open positions and a constant"
+   ]
+  },
+  {
+   "id": "P16",
+   "title": "a core fact taken out stays in the router's index (the index not kept with the core on an edit)",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "      for (const [g, v] of this.entries(f).at) this.at[g]?.get(v)?.delete(l);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "core routed by key: the router lays what a router with no index lays, through edits of the core and the files"
    ]
   },
   {

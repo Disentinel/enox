@@ -630,10 +630,33 @@ strings (~110 facts a file of the pod) and the part of the listing its walks
 and the names reach (75% of it at 1 067 files, 64% at 1 727: ~15 000 facts at
 11 100): ~170 000 facts (~180 MB) with 8 pods, ~55 000 (~60 MB) with 32.
 What still grows with the corpus: the router, which holds the whole core once
-beside the scanner and routes slower than with one set of values (1.6 s for 13
-pods at 1 727 files, against 0.3 s), and computes the stem once for each
-distinct segment a pod holds (40 803 at 1 727 files, ~0.2 s, kept for the
-next route).
+beside the scanner, and computes the stem once for each distinct segment a pod
+holds (40 803 at 1 727 files, ~0.2 s, kept for the next route).
+
+**The router's index** (2026-11-18). Keyed per position, the router routed 4.7
+times slower than with one set of values (1.6 s for 13 pods at 1 727 files,
+against 0.35 s): a key's constant (`str_seg(S, 0, _)`, the first segment) was
+indexed like a value, and every pod's route began by visiting every fact of the
+corpus holding it: the 13 routes considered 920 000 facts, 766 000 of them
+str_seg; now 310 000 in all. A
+fact is now indexed only at the positions its key's constants do not hold, by
+the position's group and the value, and a value's groups are bits of one number,
+not an entry in a set per group. The work of a pod's route is now in the core
+its files reach, not in the corpus. The shares are the same, pod for pod
+(`scripts/core-scale.ts`, every pod's share hashed against the commit before);
+a router with no index (test/core-router.test.ts) is the oracle. Medians of
+three runs, alternated, the commit before per key (9894aa1) as the control:
+
+| 1 727 files, 13 pods | one set of values | per key, before | per key, now |
+|---|---|---|---|
+| route ms, all pods, first | 355 | 1 719 | 587 |
+| route ms, all pods again | 282 | 1 340 | 355 |
+| a new string in pod 0, routed ms | 22 | 102 | 26 |
+| a file of pod 0 out and back, ms | 56 | 231 | 68 |
+
+The first route is 1.65 times the one set's: of it, ~190 ms are the stems
+computed for the first time (the builtins run forward, ~40 000 segments), kept
+for every later route.
 
 **What does not scale yet:** (an edit that takes facts out cost the pod's
 whole evaluation while the engine retracted one fact per request, 343 ms a
