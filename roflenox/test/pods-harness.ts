@@ -16,7 +16,7 @@ import { RoflPort } from '@grafema/rofl/port';
 import { publish } from '../src/client.ts';
 import { DEFAULT_ROFL_BIN } from '../src/engine.ts';
 import { decodeCell, type Fact } from '../src/facts.ts';
-import { decodeRules, escapesOf, Pod, splitFacts, WALLS, type Escape, type Published } from '../src/federation.ts';
+import { cellsOf, coreDemand, CoreRouter, decodeRules, escapesOf, Pod, splitFacts, WALLS, type Escape, type Published } from '../src/federation.ts';
 import { invitation, pull, start, subscribe, tmpDir, vouch, type Clock, type Running, type Stream } from './helpers.ts';
 
 const PKG = path.dirname(fileURLToPath(import.meta.resolve('@grafema/rofl/package.json')));
@@ -41,17 +41,22 @@ export const ESCAPES = escapesOf([...RULES, `question :- ${QUESTION}.`]);
 
 const wall = (): Clock => ({ get t() { return Date.now(); }, set t(_v: number) { /* the wall clock */ } }) as Clock;
 
-/** The facts of a directory, as the scanner writes them. With `only`, that one file alone, at its path. */
-export function scan(root: string, only?: string): string {
-  let dir = root;
-  if (only) {
-    dir = tmpDir('pods-scan');
-    fs.mkdirSync(path.dirname(path.join(dir, only)), { recursive: true });
-    fs.copyFileSync(path.join(root, only), path.join(dir, only));
-  }
+/** The facts of a directory, as the scanner writes them. */
+export function scan(root: string): string {
   const out = path.join(tmpDir('pods-out'), 'facts.rofl');
-  execFileSync(process.execPath, [ROFL_CLI, 'scan', dir, '--out', out], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 100_000 });
+  execFileSync(process.execPath, [ROFL_CLI, 'scan', root, '--out', out], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 100_000 });
   return fs.readFileSync(out, 'utf8');
+}
+
+const { codeFacts } = await import(path.join(PKG, 'playground/host.js')) as { codeFacts: (files: Record<string, string>) => { facts: string[]; host: string[] } };
+
+/** One file scanned alone, as `rofl scan DIR FILE` over a directory of that file scans it: its facts, and its share
+ *  of the core (the listing of its path, its strings). The scanner keeps no state across files, so the corpus's
+ *  core is the union of the files' shares; Federation.start holds that against the whole scan. */
+export function scanOne(root: string, file: string): { facts: Set<string>; core: Set<string> } {
+  const { facts, host } = codeFacts({ [file]: fs.readFileSync(path.join(root, file), 'utf8') });
+  const one = splitFacts([...facts, ...host].join('\n') + '\n', [file]);
+  return { facts: one.byFile.get(file)!, core: one.core };
 }
 
 /** The files a scan read, by their path from the root. */
@@ -98,13 +103,19 @@ export class Federation {
   readonly coord: Running;
   readonly pods: PodNode[];
   readonly sub: Stream;
-  core: Set<string>;
+  /** The core's facts, each with how many files' shares hold it: a fact no file holds any more leaves. */
+  readonly core: Map<string, number>;
+  /** Each file's share of the core. */
+  private readonly shareOf: Map<string, Set<string>>;
+  readonly router: CoreRouter;
   private readonly follower: ChildProcess | null;
   /** The pod of each file. */
   private readonly home = new Map<string, PodNode>();
+  private readonly facts: Map<string, Set<string>>;
 
-  private constructor(root: string, coord: Running, pods: PodNode[], sub: Stream, core: Set<string>, follower: ChildProcess | null) {
-    this.root = root; this.coord = coord; this.pods = pods; this.sub = sub; this.core = core; this.follower = follower;
+  private constructor(root: string, coord: Running, pods: PodNode[], sub: Stream, c: { core: Map<string, number>; shareOf: Map<string, Set<string>>; router: CoreRouter; facts: Map<string, Set<string>> }, follower: ChildProcess | null) {
+    this.root = root; this.coord = coord; this.pods = pods; this.sub = sub; this.follower = follower;
+    this.core = c.core; this.shareOf = c.shareOf; this.router = c.router; this.facts = c.facts;
     for (const p of pods) for (const f of p.files) this.home.set(f, p);
   }
 
@@ -112,24 +123,41 @@ export class Federation {
    *  'pull' (the test pulls each feed after a step: one executor tick) or
    *  'executor' (the follow executor, every `intervalMs`). */
   static async start(root: string, assign: (file: string, i: number) => number, n: number,
-    o: { follow?: 'pull' | 'executor'; intervalMs?: number; escapes?: Escape[] } = {}): Promise<{ fed: Federation; initial: { ms: number; pods: Published[]; frameMs: number } }> {
+    o: { follow?: 'pull' | 'executor'; intervalMs?: number; escapes?: Escape[]; wholeCore?: boolean } = {}): Promise<{ fed: Federation; initial: { ms: number; pods: Published[]; frameMs: number } }> {
     const t0 = performance.now();
     const text = scan(root);
     const files = filesOf(text, root);
-    const { core, byFile } = splitFacts(text, files);
+    const whole = splitFacts(text, files);
+    const byFile = new Map<string, Set<string>>();
+    const shareOf = new Map<string, Set<string>>();
+    const core = new Map<string, number>();
+    for (const f of files) {
+      const one = scanOne(root, f);
+      byFile.set(f, one.facts);
+      shareOf.set(f, one.core);
+      for (const l of one.core) core.set(l, (core.get(l) ?? 0) + 1);
+    }
+    // The positive control of the shares: the files scanned alone are the corpus scanned whole.
+    assert.deepEqual([...core.keys()].sort(), [...whole.core].sort(), 'the files\' shares of the core ≠ the whole scan\'s core');
+    for (const f of files) assert.deepEqual([...byFile.get(f)!].sort(), [...whole.byFile.get(f)!].sort(), `${f} scanned alone ≠ scanned whole`);
     const coord = await start(tmpDir('pods-coord'), 'coordinator', { clock: wall() });
     const escapes = o.escapes ?? ESCAPES;
+    const router = new CoreRouter(o.wholeCore ? null : await coreDemand(MODEL, escapes.map((e) => e.rel), new Set([...core.keys()].map((l) => cellsOf(l).rel))));
+    router.core(core.keys(), []);
+    const mineOf = files.map((f, k) => assign(f, k));
+    for (let i = 0; i < n; i++) router.files(i, files.filter((_f, k) => mineOf[k] === i).flatMap((f) => [...byFile.get(f)!]), []);
+    router.route();
     const pods: PodNode[] = [];
     const published: Published[] = [];
     for (let i = 0; i < n; i++) {
       const name = `pod-${i}`;
       const node = await start(tmpDir(`pods-${i}`), name, { clock: wall() });
-      const mine = files.filter((f, k) => assign(f, k) === i);
+      const mine = files.filter((_f, k) => mineOf[k] === i);
       // The pod's operator knows the coordinator, and lets it read the pod's book.
       await vouch(node, coord.me);
       await publish(node.url, node.me, [{ source: 'coordinator', relation: 'roflenox:grant', target: '2100-01-01T00:00:00.000Z', perspective: 'policy', confidence: 1 }]);
       const { pod, published: p } = await Pod.start({ program: MODEL, escapes, publish: async (f: Fact[]) => { await publish(node.url, node.me, f); } },
-        core, new Map(mine.map((f) => [f, byFile.get(f)!])));
+        router.share(i), new Map(mine.map((f) => [f, byFile.get(f)!])));
       pods.push({ name, node, pod, files: mine });
       published.push(p);
     }
@@ -145,7 +173,7 @@ export class Federation {
     const t1 = performance.now();
     const sub = await subscribe(coord.url, `/subscribe?query=${encodeURIComponent(QUESTION)}`, { authorization: `Bearer ${coord.node.operatorToken()}` });
     assert.equal(sub.status, 200, JSON.stringify(sub.body));
-    const fed = new Federation(root, coord, pods, sub, core, follower);
+    const fed = new Federation(root, coord, pods, sub, { core, shareOf, router, facts: byFile }, follower);
     return { fed, initial: { ms: t1 - t0, pods: published, frameMs: 0 } };
   }
 
@@ -168,35 +196,36 @@ export class Federation {
     }
   }
 
-  /** Edit (or, with null, delete) one file in the corpus, as a person would; its pod takes the delta. */
-  async edit(file: string, content: string | null): Promise<{ t0: number; pod: Published; others: Published[] }> {
+  /** Edit (or, with null, delete) one file in the corpus, as a person would; its pod takes the delta, and the core
+   *  facts that came and went reach only the pods whose share they move (`others`). */
+  async edit(file: string, content: string | null): Promise<{ t0: number; pod: Published; others: Published[]; core: { in: number; out: number } }> {
     const at = path.join(this.root, file);
     const owner = this.home.get(file) ?? this.pods[0]!;
     const t0 = performance.now();
-    let facts: Set<string> | null = null;
-    let core = this.core;
+    let now: { facts: Set<string>; core: Set<string> } | null = null;
     if (content === null) {
       fs.rmSync(at);
-      // The listing's facts that name the file go with it.
-      const named = JSON.stringify(file);
-      core = new Set([...this.core].filter((l) => !l.includes(named)));
       this.home.delete(file);
     } else {
       fs.mkdirSync(path.dirname(at), { recursive: true });
       fs.writeFileSync(at, content);
-      const one = splitFacts(scan(this.root, file), [file]);
-      facts = one.byFile.get(file)!;
-      core = new Set([...this.core, ...one.core]);
+      now = scanOne(this.root, file);
       this.home.set(file, owner);
     }
-    const moved = core.size !== this.core.size || [...core].some((l) => !this.core.has(l));
-    this.core = core;
-    const pod = await owner.pod.edit(file, facts, core);
-    // Every other pod holds the core too.
+    const was = { facts: this.facts.get(file) ?? new Set<string>(), core: this.shareOf.get(file) ?? new Set<string>() };
+    const coreIn: string[] = [], coreOut: string[] = [];
+    for (const l of was.core) if (!now?.core.has(l)) { const n = this.core.get(l)! - 1; if (n === 0) { this.core.delete(l); coreOut.push(l); } else this.core.set(l, n); }
+    for (const l of now?.core ?? []) if (!was.core.has(l)) { const n = (this.core.get(l) ?? 0) + 1; this.core.set(l, n); if (n === 1) coreIn.push(l); }
+    if (now) { this.facts.set(file, now.facts); this.shareOf.set(file, now.core); } else { this.facts.delete(file); this.shareOf.delete(file); }
+    const i = this.pods.indexOf(owner);
+    this.router.core(coreIn, coreOut);
+    this.router.files(i, [...now?.facts ?? []].filter((l) => !was.facts.has(l)), [...was.facts].filter((l) => !now?.facts.has(l)));
+    const moved = this.router.route();
+    const pod = await owner.pod.edit(file, now?.facts ?? null, this.router.share(i));
     const others: Published[] = [];
-    if (moved) for (const p of this.pods) if (p !== owner) others.push(await p.pod.edit('', null, core));
+    for (const [k, share] of moved) if (k !== i) others.push(await this.pods[k]!.pod.edit('', null, share));
     if (!this.follower) for (const p of this.pods) await pull(this.coord, p.node.url, p.name, this.coord.me);
-    return { t0, pod, others };
+    return { t0, pod, others, core: { in: coreIn.length, out: coreOut.length } };
   }
 
   async close(): Promise<void> {

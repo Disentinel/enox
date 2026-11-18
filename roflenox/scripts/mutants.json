@@ -5449,6 +5449,48 @@
    ]
   },
   {
+   "id": "P5",
+   "title": "a pod is not sent a core fact it reaches when the fact arrives (the router marks no pod for an added fact)",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "for (const p of this.pods.values()) if (!p.dirty && this.passes(f, p.held)) p.dirty = true;",
+     "for (const p of this.pods.values()) if (false && !p.dirty && this.passes(f, p.held)) p.dirty = true;"
+    ]
+   ],
+   "red": [
+    "pods: a pod holds the core its files reach; a core change reaches only the pods it moves; a string no file holds leaves"
+   ]
+  },
+  {
+   "id": "P6",
+   "title": "the core a pod reaches stops at its files' own values (a laid fact's values are not held)",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "for (const c of f.cells) if (!held.has(c)) { held.add(c); queue.push(c); }",
+     "for (const c of f.cells) if (false && !held.has(c)) { held.add(c); queue.push(c); }"
+    ]
+   ],
+   "red": [
+    "pods: a pod holds the core its files reach; a core change reaches only the pods it moves; a string no file holds leaves"
+   ]
+  },
+  {
+   "id": "P7",
+   "title": "a string no file holds any more stays in the corpus's core",
+   "file": "test/pods-harness.ts",
+   "edits": [
+    [
+     "if (n === 0) { this.core.delete(l); coreOut.push(l); } else this.core.set(l, n);",
+     "if (false) { this.core.delete(l); coreOut.push(l); } else this.core.set(l, n);"
+    ]
+   ],
+   "red": [
+    "pods: a pod holds the core its files reach; a core change reaches only the pods it moves; a string no file holds leaves"
+   ]
+  },
+  {
    "id": "MC1",
    "title": "view links: expiry not checked",
    "file": "src/viewlink.ts",

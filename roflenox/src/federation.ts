@@ -24,10 +24,19 @@
 // CURRENT assertion (asserted, confidence above 0).
 //
 // THE CORE is what a scan writes naming no node (n<16 hex>_, the scanner's
-// file prefix): the directory listing, the strings cut as specifiers. Every
-// pod holds the corpus's core, as the engine's own volumes do (docs/cli.md of
-// Disentinel/rofl, *A corpus larger than one heap*: "the facts naming no file
-// ... read by all"); a file's facts are those naming its prefix.
+// file prefix): the directory listing, the strings cut as specifiers; a
+// file's facts are those naming its prefix. A pod holds only the core its
+// files reach BY THE PROGRAM'S KEYS (coreDemand, CoreRouter), as the engine's
+// volumes lay a fact where a rule joins it (finding
+// f_volumes_cross_by_the_rules_keys): the escapes are demanded whole, and
+// demand flows from a rule's head to its premises in a sideways order (the
+// relations with no core facts first), a premise keyed at the positions the
+// head's demand or an earlier premise binds to a STORED value (one some base
+// fact holds, never one a builtin computed). A core fact is laid in a pod when
+// one of its relation's keys holds, at each keyed position, a value of the
+// pod's world: its files' facts, the program's constants, the core facts laid
+// so far (to a fixpoint). It is magic sets with the magic relations widened
+// to one set of values, so every fact the escapes' derivations read is laid.
 //
 // THE CUT IS SOUND WHEN every row a pod derives of an escape holds in the
 // whole world, and every row the whole world derives is a pod's or the
@@ -37,10 +46,13 @@
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { EngineRefusal, RoflPort, type RoflSession } from '@grafema/rofl/port';
 import { DEFAULT_ROFL_BIN, termCell, type Change } from './engine.ts';
 import { roflString, type Fact } from './facts.ts';
 import { BUILTIN, splitTop } from './rules.ts';
+
+const PARSER = path.join(path.dirname(fileURLToPath(import.meta.resolve('@grafema/rofl/package.json'))), 'dist/src/parser.js');
 
 export const ROW = 'row:';
 /** The walls of a pod's world: a corpus's program runs far past the engine's default rows. */
@@ -135,6 +147,260 @@ export function splitFacts(text: string, files: string[]): { core: Set<string>; 
     byFile.get(f)!.add(l);
   }
   return { core, byFile };
+}
+
+type Term = { k: 'v' | 'a'; name: string } | { k: 'i'; v: number | bigint } | { k: 's'; v: string } | { k: 'f'; name: string; args: Term[] };
+interface Lit { rel: string; args: Term[] }
+type Elem = { t: 'pos' | 'neg'; lit: Lit } | { t: 'bi'; op: string; l: Term; r: Term } | { t: 'agg'; body: Elem[] };
+interface Clause { head: Lit; body: Elem[]; structure?: { kind: string; closure?: string; source?: Lit }; lattice?: string; dominator?: unknown; want?: boolean; ord?: unknown }
+
+/** A value as the router compares it: s<text>, i<digits>, a<atom>. */
+const valueOf = (t: Term): string | null => (t.k === 's' ? `s${t.v}` : t.k === 'i' ? `i${t.v}` : t.k === 'a' ? `a${t.name}` : null);
+
+/** What the program reads of the core: per relation its keys (the positions a fact's values must be held at), and the program's own values. */
+export interface Demand { keys: Map<string, number[][]>; constants: Set<string> }
+
+/** The program's demand on the relations of `homeless` (those the core holds facts of), from the escapes down;
+ *  null where the program holds a construct the analysis does not model (then a pod is given the whole core). */
+export async function coreDemand(program: string, roots: string[], homeless: Set<string>): Promise<Demand | null> {
+  const { parseProgram } = await import(PARSER) as { parseProgram: (src: string) => Clause[] };
+  const clauses: Clause[] = [];
+  for (const f of programFiles(program)) clauses.push(...parseProgram(fs.readFileSync(f, 'utf8')));
+  const constants = new Set<string>();
+  const constantsOf = (t: Term) => { const v = valueOf(t); if (v !== null) constants.add(v); if (t.k === 'f') t.args.forEach(constantsOf); };
+  const elemTerms = (e: Elem): Term[] => (e.t === 'bi' ? [e.l, e.r] : e.t === 'agg' ? e.body.flatMap(elemTerms) : e.lit.args);
+  const rules = new Map<string, { head: Lit; body: Elem[] }[]>();
+  const rule = (head: Lit, body: Elem[]) => { const r = rules.get(head.rel) ?? []; r.push({ head, body }); rules.set(head.rel, r); };
+  for (const c of clauses) {
+    if (c.lattice !== undefined || c.dominator !== undefined || c.want || c.ord !== undefined) return null;
+    c.head.args.forEach(constantsOf); c.body.flatMap(elemTerms).forEach(constantsOf);
+    const s = c.structure;
+    if (!s) rule(c.head, c.body);
+    else if (s.kind === 'alias' && s.source) rule(c.head, [{ t: 'pos', lit: s.source }]);
+    else if (s.kind === 'tree' && s.closure && c.head.args.length === 2) {
+      const [X, Y, Z] = ['X', 'Y', 'Z'].map((name) => ({ k: 'v', name }) as Term);
+      rule({ rel: s.closure, args: [X!, Y!] }, [{ t: 'pos', lit: { rel: c.head.rel, args: [X!, Y!] } }]);
+      rule({ rel: s.closure, args: [X!, Z!] }, [{ t: 'pos', lit: { rel: c.head.rel, args: [X!, Y!] } }, { t: 'pos', lit: { rel: s.closure, args: [Y!, Z!] } }]);
+    } else if (s.kind !== 'function') return null;
+  }
+  // A position is STORED when every value it takes is a value of some base fact or a constant of the program:
+  // the greatest fixpoint, a position falling where a rule writes a computed value (`is`, a compound) there.
+  const stored = new Map<string, boolean[]>();
+  const isStored = (rel: string, j: number) => stored.get(rel)?.[j] ?? true;
+  const storedVars = (body: Elem[], into = new Set<string>()) => {
+    for (const e of body) if (e.t === 'pos') e.lit.args.forEach((a, j) => { if (a.k === 'v' && isStored(e.lit.rel, j)) into.add(a.name); });
+    for (let more = true; more;) {
+      more = false;
+      for (const e of body) {
+        if (e.t !== 'bi' || e.op !== '=') continue;
+        for (const [x, y] of [[e.l, e.r], [e.r, e.l]] as const) {
+          if (x.k === 'v' && !into.has(x.name) && ((y.k === 'v' && into.has(y.name)) || valueOf(y) !== null)) { into.add(x.name); more = true; }
+        }
+      }
+    }
+    return into;
+  };
+  for (const [rel, rs] of rules) stored.set(rel, rs[0]!.head.args.map(() => true));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [rel, rs] of rules) {
+      const st = stored.get(rel)!;
+      for (const r of rs) {
+        const sv = storedVars(r.body);
+        r.head.args.forEach((a, j) => { if (st[j] && !(a.k === 'v' ? sv.has(a.name) : valueOf(a) !== null)) { st[j] = false; changed = true; } });
+      }
+    }
+  }
+  // ANCHORED: every derivation of the relation reads a fact the core does not hold (a file's), so its values come
+  // from the pod's own world; the greatest fixpoint.
+  const anchor = new Map<string, boolean>([...rules.keys()].map((r) => [r, true]));
+  const anchored = (rel: string) => anchor.get(rel) ?? !homeless.has(rel);
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [rel, rs] of rules) {
+      if (anchor.get(rel) && rs.some((r) => !r.body.some((e) => e.t === 'pos' && anchored(e.lit.rel)))) { anchor.set(rel, false); changed = true; }
+    }
+  }
+  // Demand, from the escapes down: rel -> its keys ('' all of it).
+  const alts = new Map<string, Set<string>>();
+  const queue: [string, number[]][] = [];
+  const want = (rel: string, at: number[]) => {
+    const a = alts.get(rel) ?? new Set<string>();
+    alts.set(rel, a);
+    const k = at.join(',');
+    if (a.has('') || a.has(k)) return;
+    a.add(k);
+    queue.push([rel, at]);
+  };
+  const body = (els: Elem[], bound: Set<string>) => {
+    const left = els.filter((e): e is Elem & { t: 'pos' } => e.t === 'pos');
+    const keyed = (l: Lit) => l.args.flatMap((a, j) => ((a.k === 'v' && bound.has(a.name)) || valueOf(a) !== null ? [j] : []));
+    // Sideways, greedily: next a premise over an anchored relation, then one something already binds, then the one
+    // bound at most places; else the first written.
+    const rank = (e: Elem & { t: 'pos' }) => { const k = keyed(e.lit).length; return (anchored(e.lit.rel) ? 4 : 0) + (k > 0 ? 2 : 0) + k / 100; };
+    while (left.length) {
+      let i = 0;
+      for (let j = 1; j < left.length; j++) if (rank(left[j]!) > rank(left[i]!)) i = j;
+      const e = left.splice(i, 1)[0]!;
+      want(e.lit.rel, keyed(e.lit));
+      e.lit.args.forEach((a, j) => { if (a.k === 'v' && isStored(e.lit.rel, j)) bound.add(a.name); });
+      storedVars(els.filter((x) => x.t === 'bi'), bound);
+    }
+    for (const e of els) {
+      if (e.t === 'neg') want(e.lit.rel, keyed(e.lit));
+      if (e.t === 'agg') body(e.body, new Set(bound));
+    }
+  };
+  for (const r of roots) want(r, []);
+  while (queue.length) {
+    const [rel, at] = queue.pop()!;
+    if (at.length && alts.get(rel)!.has('')) continue;
+    for (const r of rules.get(rel) ?? []) {
+      const bound = new Set<string>();
+      for (const j of at) { const a = r.head.args[j]; if (a?.k === 'v') bound.add(a.name); }
+      body(r.body, bound);
+    }
+  }
+  const keys = new Map<string, number[][]>();
+  for (const rel of homeless) {
+    const a = alts.get(rel);
+    if (!a) continue;
+    const ks = a.has('') ? [[]] : [...a].map((k) => k.split(',').map(Number));
+    // A key that holds another adds nothing: the smaller one already lays every fact the larger does.
+    keys.set(rel, ks.filter((k) => !ks.some((o) => o !== k && o.length < k.length && o.every((j) => k.includes(j)))));
+  }
+  return { keys, constants };
+}
+
+const ESC: Record<string, string> = { n: '\n', t: '\t', r: '\r', '\\': '\\', '"': '"', b: '\b', f: '\f' };
+/** A fact's relation and its cells as values (valueOf), read off its text. */
+export function cellsOf(line: string): { rel: string; cells: string[] } {
+  const open = line.indexOf('(');
+  const name = line.slice(0, open);
+  const rel = name.includes('[') ? name.slice(0, name.indexOf('[')) : name;
+  const cells: string[] = [];
+  let i = open + 1;
+  const fail = () => { throw new Error(`a fact the router cannot read: ${line.slice(0, 160)}`); };
+  for (;;) {
+    while (line[i] === ' ') i++;
+    if (line[i] === ')') break;
+    if (line[i] === '"') {
+      let v = '';
+      for (i++; line[i] !== '"'; i++) {
+        if (i >= line.length) fail();
+        if (line[i] === '\\') {
+          const e = line[++i]!;
+          if (e === 'u') { v += String.fromCharCode(parseInt(line.slice(i + 1, i + 5), 16)); i += 4; } else v += ESC[e] ?? fail();
+        } else v += line[i];
+      }
+      i++;
+      cells.push(`s${v}`);
+    } else {
+      const m = /^-?\d+|^[a-z][A-Za-z0-9_]*/.exec(line.slice(i, i + 200)) ?? fail();
+      cells.push(/^-?\d/.test(m[0]) ? `i${BigInt(m[0])}` : `a${m[0]}`);
+      i += m[0].length;
+    }
+    while (line[i] === ' ') i++;
+    if (line[i] === ',') i++; else if (line[i] !== ')') fail();
+  }
+  return { rel, cells };
+}
+
+const NODE_CELL = /^an[0-9a-f]{16}_/;
+/** Count the values of facts in (d 1) or out (d -1); a node never stands in a core fact, so nodes are not counted. */
+export function countValues(lines: Iterable<string>, into: Map<string, number>, d: 1 | -1): void {
+  for (const l of lines) {
+    for (const c of cellsOf(l).cells) {
+      if (NODE_CELL.test(c)) continue;
+      const n = (into.get(c) ?? 0) + d;
+      if (n === 0) into.delete(c); else into.set(c, n);
+    }
+  }
+}
+
+/** The corpus's core, routed: each pod is given the core facts its files reach by the program's keys (coreDemand),
+ *  and a change of the core reaches only the pods whose share it moves. With no demand (null) every pod is given all. */
+export class CoreRouter {
+  private readonly d: Demand | null;
+  private readonly facts = new Map<string, { rel: string; cells: string[] }>();
+  /** value -> the core facts holding it at a keyed position */
+  private readonly at = new Map<string, Set<string>>();
+  /** the core facts a key with no position lays everywhere */
+  private readonly free = new Set<string>();
+  private readonly pods = new Map<number, { values: Map<string, number>; held: Set<string>; laid: Set<string>; dirty: boolean }>();
+
+  constructor(d: Demand | null) { this.d = d; }
+
+  private keysOf(rel: string): number[][] | undefined { return this.d ? this.d.keys.get(rel) : [[]]; }
+  private passes(f: { rel: string; cells: string[] }, held: Set<string>): boolean {
+    return (this.keysOf(f.rel) ?? []).some((k) => k.every((j) => held.has(f.cells[j]!)));
+  }
+
+  /** The corpus's core changed: facts in and out. Pods whose share it may move are marked to be routed again. */
+  core(added: Iterable<string>, removed: Iterable<string>): void {
+    for (const l of removed) {
+      const f = this.facts.get(l);
+      if (!f) continue;
+      this.facts.delete(l);
+      this.free.delete(l);
+      for (const k of this.keysOf(f.rel) ?? []) for (const j of k) this.at.get(f.cells[j]!)?.delete(l);
+      for (const p of this.pods.values()) if (p.laid.has(l)) p.dirty = true;
+    }
+    for (const l of added) {
+      if (this.facts.has(l)) continue;
+      const f = cellsOf(l.replace(/\.$/, ''));
+      this.facts.set(l, f);
+      if ((this.keysOf(f.rel) ?? []).some((k) => k.length === 0)) this.free.add(l);
+      for (const k of this.keysOf(f.rel) ?? []) for (const j of k) { const s = this.at.get(f.cells[j]!) ?? new Set<string>(); s.add(l); this.at.set(f.cells[j]!, s); }
+      for (const p of this.pods.values()) if (!p.dirty && this.passes(f, p.held)) p.dirty = true;
+    }
+  }
+
+  /** A pod's file facts in and out. */
+  files(pod: number, added: Iterable<string>, removed: Iterable<string>): void {
+    const p = this.pods.get(pod) ?? { values: new Map<string, number>(), held: new Set<string>(), laid: new Set<string>(), dirty: true };
+    this.pods.set(pod, p);
+    countValues(added, p.values, 1);
+    countValues(removed, p.values, -1);
+    p.dirty = true;
+  }
+
+  /** The pods whose share moved, each with its share now. */
+  route(): Map<number, Set<string>> {
+    const out = new Map<number, Set<string>>();
+    for (const [id, p] of this.pods) {
+      if (!p.dirty) continue;
+      p.dirty = false;
+      const laid = this.reach(p);
+      if (laid.size !== p.laid.size || [...laid].some((l) => !p.laid.has(l))) out.set(id, laid);
+      p.laid = laid;
+    }
+    return out;
+  }
+
+  /** A pod's share now. */
+  share(pod: number): Set<string> { return this.pods.get(pod)?.laid ?? new Set(); }
+
+  /** The fixpoint: a fact is laid when a key of its relation holds at each position a value held, and its values are then held. */
+  private reach(p: { values: Map<string, number>; held: Set<string> }): Set<string> {
+    const laid = new Set<string>();
+    const held = new Set<string>([...(this.d?.constants ?? []), ...p.values.keys()]);
+    const lay = (l: string, f: { rel: string; cells: string[] }) => {
+      laid.add(l);
+      for (const c of f.cells) if (!held.has(c)) { held.add(c); queue.push(c); }
+    };
+    const queue = [...held];
+    for (const l of this.free) lay(l, this.facts.get(l)!);
+    while (queue.length) {
+      for (const l of this.at.get(queue.pop()!) ?? []) {
+        if (laid.has(l)) continue;
+        const f = this.facts.get(l)!;
+        if (this.passes(f, held)) lay(l, f);
+      }
+    }
+    p.held = held;
+    return laid;
+  }
 }
 
 /** The files of a program: a `.files` list (one path a line, from its directory), or one file. */
