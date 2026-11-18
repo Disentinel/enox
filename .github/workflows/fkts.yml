@@ -99,7 +99,7 @@ jobs:
             roflenox/executors/embedder/package-lock.json
       - run: npm ci
       # the embedder's own mutants red its meaning test, which runs the learned model (~130 MB, fetched once, kept)
-      - run: npm ci
+      - run: npm ci --onnxruntime-node-install-cuda=skip
         working-directory: roflenox/executors/embedder
       - id: model
         uses: actions/cache@v4
