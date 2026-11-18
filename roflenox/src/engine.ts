@@ -265,7 +265,7 @@ export class Engine {
     try {
       await w.load(rofl, SYSTEM_WHO);
       await w.evaluate();
-      const r = await this.port.send({ op: 'whynot', session: w.id, query });
+      const r = await this.port.send(whynotOf(w.id, query));
       return r.text as string;
     } finally {
       await w.close();
@@ -286,7 +286,7 @@ export class Engine {
       await work.load(rofl, SYSTEM_WHO);
       await work.evaluate();
       if ((await work.ask(query)).rows.length > 0) return { holds: true, whynot: '' };
-      const r = await this.port.send({ op: 'whynot', session: work.id, query });
+      const r = await this.port.send(whynotOf(work.id, query));
       return { holds: false, whynot: r.text as string };
     } finally {
       await work.close();
@@ -302,7 +302,7 @@ export class Engine {
   /** The engine's own explanation of why a system fact does not hold. */
   async sysWhynot(query: string): Promise<string> {
     await this.ensure();
-    const r = await this.port.send({ op: 'whynot', session: this.session.id, query });
+    const r = await this.port.send(whynotOf(this.session.id, query));
     return r.text as string;
   }
 
@@ -359,12 +359,22 @@ export class Engine {
   }
 }
 
+/** Every whynot FKTS asks prints the whole walk (`all`): a refusal fails
+ *  because EVERY rule that could admit it fails, and the engine's nearest
+ *  failure names one of them — not always the one the refusal is about (a
+ *  stolen key's rotation is blocked by changes_recovery, not by "not signed
+ *  by the recovery key"). The walk is the same either way and stays inside
+ *  the engine's depth and node bounds; 1.5.0 printed it whole by default. */
+function whynotOf(session: number, query: string) {
+  return { op: 'whynot', session, query, all: true };
+}
+
 /** An engine error on a question is the question's fault (400) — the engine
  *  reports a malformed literal as an error answer, not a crash. */
 /** `why` refuses a fact that does not hold, with the reference's text; a
  *  query it cannot read is refused too, and whynot tells the two apart. */
 async function explainOne(port: RoflPort, session: number, op: 'why' | 'whynot', query: string): Promise<{ holds: boolean; text: string }> {
-  const whynot = () => engineCall(() => port.send({ op: 'whynot', session, query }));
+  const whynot = () => engineCall(() => port.send(whynotOf(session, query)));
   if (op === 'whynot') {
     const r = await whynot();
     return { holds: r.holds as boolean, text: r.text as string };

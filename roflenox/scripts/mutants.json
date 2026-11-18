@@ -5648,6 +5648,20 @@
    "red": [
     "a link has one spelling: a non-canonical base64url of its claims or signature is refused"
    ]
+  },
+  {
+   "id": "MWN1",
+   "title": "a refusal's whynot loses the rule a negation blocked (the decisive reason dropped)",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "return { holds: false, whynot: r.text as string };",
+     "return { holds: false, whynot: (r.text as string).replace(/\\n  rule [^\\n]*\\n    failed premise: not [^\\n]*/g, '') };"
+    ]
+   ],
+   "red": [
+    "a stolen current key cannot rotate the identity away from its recovery key"
+   ]
   }
  ]
 }
