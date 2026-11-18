@@ -1,6 +1,7 @@
 // A view link (src/viewlink.ts): a grantee who reads by signature opens a
 // view's page in a browser with a capability its own key minted — for one
-// view, on one node, until a time — and reads exactly what ask gives it.
+// view, on one node, until a time — and reads exactly what ask gives it, and
+// what a node rebuilt from the log gives it (test/helpers.ts, oracle).
 // Needs a `rofl` engine with `watch` (ROFL_BIN).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -12,20 +13,14 @@ import type { Fact } from '../src/facts.ts';
 import { mintViewLink, VIEW_LINK_MAX_SEC } from '../src/viewlink.ts';
 import { canonicalize } from '../src/jcs.ts';
 import { callOp } from '../src/ops.ts';
-import { exportRule, identityAt, post, start, subscribe, T0, tmpDir, vouch, type Running, type Stream } from './helpers.ts';
+import { asked, exportRule, identityAt, oracle, post, start, subscribe, T0, tmpDir, vouch, type Running, type Stream } from './helpers.ts';
 
 const TOY = path.join(import.meta.dirname, 'fixtures/invariants');
 const toy = (f: string): Fact[] => fs.readFileSync(path.join(TOY, `${f}.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Fact);
-const key = (r: { identity: string; cells: unknown[] }) => JSON.stringify([r.identity, r.cells]);
 const pubAs = (n: Running, who: LocalIdentity, facts: Fact[]) => publish(n.url, who, facts, () => n.clock.t);
 const VIEW = '/view/home.node/shown';
 const withLink = (t: string) => ({ authorization: `RoflenoxView ${t}` });
 
-async function asked(n: Running, query: string, as?: LocalIdentity): Promise<string[]> {
-  const a = await post(n.url, '/ask', { query }, as ? { as } : {});
-  assert.equal(a.status, 200, JSON.stringify(a.body));
-  return (a.body.rows as { identity: string; cells: unknown[] }[]).map(key).sort();
-}
 const rowsOf = (s: Stream) => [...s.rows.keys()].sort();
 
 test('a grantee\'s view link opens the view\'s stream with the grantee\'s rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line', async () => {
@@ -44,7 +39,7 @@ test('a grantee\'s view link opens the view\'s stream with the grantee\'s rows o
     // As the CLI mints it (roflenox view_link home.node shown --ttl 600): eve's key, on eve's machine.
     const minted = await callOp('view_link', { owner: 'home.node', name: 'shown', ttl: 600 }, {
       node: null, caller: 'eve', dataDir: eveDir, now: () => n.clock.t, url: n.url,
-      call: async (op) => (await post(n.url, `/op/${op}`, {}, { as: eve })).body }, 'local') as { link: string; jti: string };
+      call: async (op, args) => (await post(n.url, `/op/${op}`, args ?? {}, { as: eve })).body }, 'local') as { link: string; jti: string };
     assert.ok(minted.link.startsWith(`${n.url}${VIEW}#link=`), minted.link);
     const token = minted.link.slice(minted.link.indexOf('#link=') + 6);
     const claims = JSON.parse(Buffer.from(token.split('.')[0]!, 'base64url').toString('utf8')) as ReturnType<typeof mintViewLink>['claims'];
@@ -58,7 +53,7 @@ test('a grantee\'s view link opens the view\'s stream with the grantee\'s rows o
     assert.equal(s.status, 200, JSON.stringify(s.body));
     const f0 = await s.next();
     assert.equal(f0.kind, 'full');
-    assert.deepEqual(rowsOf(s), await asked(n, q, eve), 'exactly what ask gives eve');
+    await oracle(n, s, q, eve);
     assert.ok(rowsOf(s).length < (await asked(n, q)).length, 'and less than the operator reads');
     assert.ok(rowsOf(s).every((k) => /"shows"|"roflenox:view"/.test(k)), 'eve\'s rows only');
     // A batch reaches the link's stream as a delta, still as eve.
@@ -66,7 +61,7 @@ test('a grantee\'s view link opens the view\'s stream with the grantee\'s rows o
     const d = await s.next();
     assert.equal(d.kind, 'delta', JSON.stringify(d));
     assert.equal(d.added!.length, 1, 'the new shows fact; not the supersedes eve may not read');
-    assert.deepEqual(rowsOf(s), await asked(n, q, eve));
+    await oracle(n, s, q, eve);
 
     const refused = async (headers: Record<string, string>, p = VIEW, why = 'bad_view_link') => {
       const r = await subscribe(n.url, p, headers);
@@ -85,7 +80,11 @@ test('a grantee\'s view link opens the view\'s stream with the grantee\'s rows o
     await refused(withLink(forge({ ...claims, iss: 'home.node' })));
     await refused(withLink(forge({ ...claims, exp: claims.exp + 3600 })));
     await refused(withLink(`${Buffer.from(JSON.stringify(Object.fromEntries(Object.entries(claims).reverse()))).toString("base64url")}.${sig}`));
-    await refused(withLink(`${body}.${sig!.slice(0, -2)}${sig!.slice(-2) === 'AA' ? 'AB' : 'AA'}`));
+    // (A byte of the signature flipped: its last characters carry padding bits, and an
+    // Ed25519 signature's top bits are zero, so rewriting them left it valid one run in 16.)
+    const flipped = Buffer.from(sig!, 'base64url');
+    flipped[20]! ^= 1;
+    await refused(withLink(`${body}.${flipped.toString('base64url')}`));
     assert.throws(() => mintViewLink(eve, 'home.node', 'home.node', 'shown', n.clock.t, VIEW_LINK_MAX_SEC + 1));
 
     // Expired.
@@ -104,7 +103,7 @@ test('a grantee\'s view link opens the view\'s stream with the grantee\'s rows o
     await refused(withLink(token));
 
     // The owner's grant withdrawn: a fresh link opens nothing either.
-    const fresh = mintViewLink(eve, 'home.node', 'home.node', 'shown', n.clock.t, 600).token;
+    const fresh = mintViewLink(eve, 'home.node', 'home.node', 'shown', n.clock.t, 600, claims.lit).token;
     const open = await subscribe(n.url, VIEW, withLink(fresh));
     assert.equal(open.status, 200);
     await open.next();
