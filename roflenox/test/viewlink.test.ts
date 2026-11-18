@@ -70,8 +70,8 @@ test('a grantee\'s view link opens the view\'s stream with the grantee\'s rows o
       assert.ok(!JSON.stringify(r.body).includes(token), 'a refusal never echoes the link');
     };
     // Another view, another node, another route.
-    await refused(withLink(mintViewLink(eve, 'home.node', 'home.node', 'other', n.clock.t, 600).token));
-    await refused(withLink(mintViewLink(eve, 'elsewhere.node', 'home.node', 'shown', n.clock.t, 600).token));
+    await refused(withLink(mintViewLink(eve, 'home.node', 'home.node', 'other', n.clock.t, 600, claims.lit).token));
+    await refused(withLink(mintViewLink(eve, 'elsewhere.node', 'home.node', 'shown', n.clock.t, 600, claims.lit).token));
     await refused(withLink(token), `/subscribe?query=${encodeURIComponent(q)}`);
     assert.equal((await fetch(`${n.url}/op/ask`, { method: 'POST', headers: { 'content-type': 'application/json', ...withLink(token) }, body: JSON.stringify({ query: q }) })).status, 401);
     // Tampered: a claim changed (eve → the owner; a longer life), the claims re-ordered, the signature changed, a life past the cap.
@@ -88,7 +88,7 @@ test('a grantee\'s view link opens the view\'s stream with the grantee\'s rows o
     assert.throws(() => mintViewLink(eve, 'home.node', 'home.node', 'shown', n.clock.t, VIEW_LINK_MAX_SEC + 1));
 
     // Expired.
-    const short = mintViewLink(eve, 'home.node', 'home.node', 'shown', n.clock.t, 60).token;
+    const short = mintViewLink(eve, 'home.node', 'home.node', 'shown', n.clock.t, 60, claims.lit).token;
     n.clock.t = T0 + 61_000;
     await refused(withLink(short));
     n.clock.t = T0;

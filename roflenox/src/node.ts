@@ -42,9 +42,16 @@ import { Hub, type Frame, type Sink } from './subscribe.ts';
 import { whyNotDelegated, whyNotReadable } from './expiry.ts';
 import { open as openSealed, type Envelope } from './seal.ts';
 import { OAuth, type OAuthOptions } from './oauth.ts';
-import { checkViewLink, REVOKE_LINK, type ViewLinkClaims } from './viewlink.ts';
+import { REVOKE_LINK, verifyViewLink, viewLiteralOf, viewLit, type ViewLinkClaims } from './viewlink.ts';
 
 export const DEFAULT_FRESHNESS_SEC = 300;
+/** The open streams one view link may hold at once (a browser tab, a reload
+ *  racing the old one), and the open subscriptions one reader may hold —
+ *  every anonymous reader counted as one: beyond them a subscription is
+ *  refused (429 too_many_streams), so a leaked link or one reader cannot
+ *  hold the node's subscriptions without bound. */
+export const MAX_STREAMS_PER_LINK = 4;
+export const MAX_STREAMS_PER_READER = 32;
 
 /** The predicates every book answers, with their arities where fixed: the
  *  engine's (src/facts.ts toRofl, src/assertions.ts control rows, the system
@@ -266,7 +273,7 @@ const RECENT_OVERHEAD = 320;
 
 /** What a stranger's failed admission may say about a held identity:
  *  exactly what it would say about an unknown one (RoflenoxNode.asStranger). */
-const STRANGER_SEES = new Set(['key_changed', 'unknown_key', 'bad_signature', 'unknown_identity', 'bad_identity_doc', 'identity_mismatch']);
+const STRANGER_SEES = new Set(['key_taken', 'key_changed', 'unknown_key', 'bad_signature', 'unknown_identity', 'bad_identity_doc', 'identity_mismatch']);
 const notVouched = (identity: string) => new Refusal(403, 'not_vouched',
   `${identity} is not known here and nobody this node trusts vouched for it: its operator introduces it or pulls it by invitation, or an identity pinned here delegates to it`);
 
@@ -349,8 +356,13 @@ export class RoflenoxNode {
   /** Frames the journals were sent, waiting to be turned into a signed batch. */
   private readonly journalFrames: { name: string; literal: string; frame: Frame }[] = [];
   private expiryTimer: NodeJS.Timeout | null = null;
-  /** Open streams read by a view link, by issuer and jti: ended when the issuer revokes the link. */
-  private readonly linkEnds = new Map<string, Set<() => void>>();
+  /** Open streams read by a view link, by subscription: ended when the link
+   *  stops being good — revoked, its key no longer valid, the view redefined. */
+  private readonly links = new Map<number, { claims: ViewLinkClaims; end: (error: string, message: string) => void }>();
+  /** Open subscriptions, by subscription: whose (a reader, '' anonymous). */
+  private readonly readers = new Map<number, string>();
+  /** Which identity each key signs for: the first to list it (r_key_one_identity). */
+  private readonly keyOwners = new Map<string, string>();
 
   private constructor(o: NodeOptions) {
     this.dataDir = o.dataDir;
@@ -556,8 +568,28 @@ export class RoflenoxNode {
     } else {
       await this.decideUpdate(have[have.length - 1]!, d);
     }
+    if (commit) this.refuseTakenKeys(d);
     if (commit) this.log.appendIdentity(d, receivedAt);
     this.idDocs.set(id, [...have, d]);
+    this.ownKeys(d);
+  }
+
+  /** A KEY SIGNS FOR ONE IDENTITY (r_key_one_identity): a document lists its
+   *  keys by their public halves, and only the one that signs it is proven
+   *  held, so a document listing a key another identity holds would make that
+   *  identity's signatures — requests, view links — read as this one's.
+   *  Refused when it arrives; a log written before is replayed as it was. */
+  private refuseTakenKeys(d: IdentityDoc): void {
+    for (const k of d.doc.keys) {
+      const other = this.keyOwners.get(k.key_id) ?? (this.identity && k.key_id === this.identity.keyId ? this.identity.name : undefined);
+      if (other !== undefined && other !== d.doc.identity) {
+        throw new Refusal(409, 'key_taken', `${d.doc.identity}'s identity document lists a key of ${other}'s: a key signs for one identity only`);
+      }
+    }
+  }
+
+  private ownKeys(d: IdentityDoc): void {
+    for (const k of d.doc.keys) if (!this.keyOwners.has(k.key_id)) this.keyOwners.set(k.key_id, d.doc.identity);
   }
 
   /** Is `next` an accepted successor of `cur`? Refuses with the engine's whynot. */
@@ -608,7 +640,9 @@ export class RoflenoxNode {
     if (!this.idDocs.has(identity)) await this.vouch(identity, docs[0]!, by, receivedAt);
     if (pendingOk && !this.idDocs.has(identity) && docs.length === 1) {
       this.notFuture(docs[0]!.doc.issued_at, receivedAt, `${identity}'s identity document`);
-      return verifyIdentityDoc(docs[0]);
+      const first = verifyIdentityDoc(docs[0]);
+      this.refuseTakenKeys(first);
+      return first;
     }
     for (const d of docs) await this.applyDoc(d, receivedAt, true);
     return null;
@@ -665,6 +699,7 @@ export class RoflenoxNode {
       // A new version of the node's own identity (a rotation, a recovery): the
       // session keys derived from the old key are gone; so are their sessions.
       if (pinned && before > 0 && first.doc.identity === this.identity?.name) await this.ownerKeyChanged();
+      if (pinned) await this.endStaleLinks();
       return { identity: first.doc.identity, pinned };
     }));
   }
@@ -684,39 +719,85 @@ export class RoflenoxNode {
     if (this.identity && keyId === this.identity.keyId) {
       return { identity: this.identity.name, key: this.identity.identityDoc().doc.keys.find((k) => k.key_id === keyId)! };
     }
-    for (const [identity, docs] of this.idDocs) {
-      const key = docs[docs.length - 1]!.doc.keys.find((k) => k.key_id === keyId);
-      if (key && keyValidAt(key, this.now())) return { identity, key };
-    }
-    return null;
+    const identity = this.keyOwners.get(keyId);
+    const docs = identity === undefined ? undefined : this.idDocs.get(identity);
+    const key = docs?.[docs.length - 1]!.doc.keys.find((k) => k.key_id === keyId);
+    return key && keyValidAt(key, this.now()) ? { identity: identity!, key } : null;
   }
 
-  /** A VIEW LINK (src/viewlink.ts) checked for `owner`'s view `name` on
-   *  this node now: its claims, whose `iss` the view is then read as; a 401
-   *  otherwise. */
-  viewLink(token: string, owner: string, name: string): Promise<ViewLinkClaims> {
-    return this.serial(async () => {
-      if (!this.identity) throw new Refusal(404, 'no_identity', 'this node has no identity a link could be for');
-      return checkViewLink(token, {
-        lookup: (k) => this.keyFor(k), audience: this.identity.name, owner, name, nowMs: this.now(),
-        revoked: async (iss, jti) => this.chains.has(iss) && (await this.engine.sysRows(`edge[${bookOf(iss)}](F, ${roflString(jti)}, ${roflString(REVOKE_LINK)}, T)`))
-          .some((r) => (this.assertions.of(iss).get(String(r[0]))?.C ?? 0) > 0),
-      });
+  /** A VIEW LINK's stream (src/viewlink.ts): `owner`'s view `name` read as
+   *  the link's issuer, sent to `sink`; `end` is called with the reason when
+   *  the link stops being good while the stream is open. The link's own claims
+   *  are checked before the node's queue (a forged one never waits on it);
+   *  then, in ONE serial slot, what the node holds — the issuer's key still
+   *  valid, the link not revoked, the view's definition the one the link was
+   *  signed for, the caps — and the stream registered. A revoke, a rotation or
+   *  a redefinition is admitted in a slot of its own, before (the open is
+   *  refused) or after (the stream is ended): never in between. */
+  async subscribeLink(token: string, owner: string, name: string, sink: Sink, end: (error: string, message: string) => void): Promise<{ claims: ViewLinkClaims; close: () => Promise<void> }> {
+    if (!this.identity) throw new Refusal(404, 'no_identity', 'this node has no identity a link could be for');
+    const claims = verifyViewLink(token, { lookup: (k) => this.keyFor(k), audience: this.identity.name, owner, name, nowMs: this.now() });
+    const bad = (why: string) => new Refusal(401, 'bad_view_link', `the view link ${why}`);
+    const id = await this.serial(async () => {
+      if (this.keyFor(claims.kid)?.identity !== claims.iss) throw bad('is signed by a key not valid here for its issuer');
+      if (await this.linkRevoked(claims.iss, claims.jti)) throw bad('was revoked by its issuer');
+      const open = [...this.links.values()].filter((l) => l.claims.iss === claims.iss && l.claims.jti === claims.jti).length;
+      if (open >= MAX_STREAMS_PER_LINK) throw new Refusal(429, 'too_many_streams', `this view link holds ${MAX_STREAMS_PER_LINK} open streams, the most one link may; close one`);
+      const L = await this.viewLiteralNow(owner, name, claims.iss);
+      if (L === null) throw new Refusal(404, 'no_view', `no view ${name} of ${owner} that this reader can see`);
+      if (viewLit(L) !== claims.lit) throw bad('was signed for another definition of the view');
+      const n = await this.subscribeNow(L, claims.iss, sink);
+      this.links.set(n, { claims, end });
+      return n;
     });
+    return { claims, close: () => this.serial(() => this.unsubscribe(id)) };
+  }
+
+  /** Has `iss` revoked its link `jti` (a live roflenox:revoke_link in its book)? */
+  private async linkRevoked(iss: string, jti: string): Promise<boolean> {
+    return this.chains.has(iss) && (await this.engine.sysRows(`edge[${bookOf(iss)}](F, ${roflString(jti)}, ${roflString(REVOKE_LINK)}, T)`))
+      .some((r) => (this.assertions.of(iss).get(String(r[0]))?.C ?? 0) > 0);
+  }
+
+  /** End a link's stream: tell it why, then stop it. In a serial slot. */
+  private async endLink(id: number, error: string, message: string): Promise<void> {
+    const l = this.links.get(id);
+    if (!l) return;
+    this.links.delete(id);
+    l.end(error, message);
+    await this.unsubscribe(id);
+  }
+
+  /** End the streams of links whose key no longer signs for their issuer
+   *  here: rotated, recovered, revoked, or past its validity. In a serial slot. */
+  private async endStaleLinks(): Promise<void> {
+    for (const [id, l] of [...this.links]) {
+      if (this.keyFor(l.claims.kid)?.identity !== l.claims.iss) await this.endLink(id, 'link_key_invalid', 'the key that signed the view link is no longer valid here for its issuer');
+    }
+  }
+
+  /** After a batch: end the streams of links it revoked, and of links to a
+   *  view of its author's whose definition it changed. In the batch's slot,
+   *  before its rows are sent. */
+  private async endLinksBy(v: Verified): Promise<void> {
+    if (this.links.size === 0) return;
+    const by = v.manifest.identity;
+    for (const f of v.facts) {
+      if (f.relation !== REVOKE_LINK || f.confidence <= 0) continue;
+      for (const [id, l] of [...this.links]) if (l.claims.iss === by && l.claims.jti === f.source) await this.endLink(id, 'link_revoked', 'the view link was revoked by its issuer');
+    }
+    if (v.facts.some((f) => f.relation === VIEW)) {
+      for (const [id, l] of [...this.links]) {
+        if (l.claims.owner !== by) continue;
+        const L = await this.viewLiteralNow(l.claims.owner, l.claims.name, l.claims.iss);
+        if (L === null || viewLit(L) !== l.claims.lit) await this.endLink(id, 'view_redefined', 'the view was redefined since the link was signed: a link opens the definition it was signed for');
+      }
+    }
+    await this.endStaleLinks();
   }
 
   /** The node's clock, in ms. */
   clockMs(): number { return this.now(); }
-
-  /** Call `end` when `iss` revokes its link `jti`; returns the call that stops watching. */
-  onLinkRevoked(iss: string, jti: string, end: () => void): () => void {
-    const k = `${iss}\0${jti}`;
-    const s = this.linkEnds.get(k) ?? new Set();
-    s.add(end);
-    this.linkEnds.set(k, s);
-    return () => { s.delete(end); if (s.size === 0) this.linkEnds.delete(k); };
-  }
-
 
   /** `mirrored`: the batch came by a feed or an envelope, not from its author
    *  posting here — its rules are inert until trusted (r_foreign_rules_opt_in). */
@@ -756,7 +837,7 @@ export class RoflenoxNode {
       this.recentFacts -= e.facts.length;
       this.recentBytes -= e.bytes;
     }
-    if (v.pin) this.idDocs.set(id, [v.pin]);
+    if (v.pin) { this.idDocs.set(id, [v.pin]); this.ownKeys(v.pin); }
     const chain = this.chains.get(id) ?? [];
     chain.push(v.manifest.digest);
     this.chains.set(id, chain);
@@ -1105,15 +1186,12 @@ export class RoflenoxNode {
   private async afterAdmission(v: Verified, seq: number, plan: { before: Map<string, Current | null>; load: string; retract: string[] }, fresh: boolean): Promise<void> {
     try {
       await this.advanceWorlds(v, seq, plan);
+      await this.endLinksBy(v);
       const access = fresh || v.rules.length > 0 || v.facts.some((f) => MOVES_ACCESS.has(f.relation));
       await this.hub.settle(v.manifest.digest, access, { book: bookOf(v.manifest.identity), facts: new Set(v.facts.map(factId)) });
       if (v.manifest.identity === this.identity?.name && v.facts.some((f) => f.relation === JOURNAL)) await this.configureJournals();
       this.drainJournals();
       await this.armExpiry();
-      for (const f of v.facts) {
-        if (f.relation !== REVOKE_LINK || f.confidence <= 0) continue;
-        for (const end of [...this.linkEnds.get(`${v.manifest.identity}\0${f.source}`) ?? []]) end();
-      }
     } catch (e) {
       if (!this.engine.dead) process.stderr.write(`roflenox: subscriptions after ${v.manifest.digest}: ${(e as Error).message}\n`);
     }
@@ -1183,15 +1261,28 @@ export class RoflenoxNode {
    *  `ask` answers with: `sink` is sent the whole answer now, then after every
    *  admission the rows that came and went. Returns the call that ends it. */
   async subscribe(query: string, requester: string | null, sink: Sink): Promise<() => Promise<void>> {
-    const id = await this.serial(async () => {
-      const lits = parseQuery(query);
-      if (lits.length !== 1 || lits[0]!.neg) throw new Refusal(400, 'bad_query', 'a subscription is to one positive literal, rel(Args) or rel[book](Args)');
-      await this.requireBook(query, requester, await this.scopeFor(requester), false);
-      const n = await this.hub.add(query, requester, sink);
-      await this.armExpiry();
-      return n;
-    });
-    return () => this.serial(() => this.hub.remove(id));
+    const id = await this.serial(() => this.subscribeNow(query, requester, sink));
+    return () => this.serial(() => this.unsubscribe(id));
+  }
+
+  private async subscribeNow(query: string, requester: string | null, sink: Sink): Promise<number> {
+    const lits = parseQuery(query);
+    if (lits.length !== 1 || lits[0]!.neg) throw new Refusal(400, 'bad_query', 'a subscription is to one positive literal, rel(Args) or rel[book](Args)');
+    const who = requester ?? '';
+    if ([...this.readers.values()].filter((r) => r === who).length >= MAX_STREAMS_PER_READER) {
+      throw new Refusal(429, 'too_many_streams', `${requester ?? 'anonymous readers'} hold${requester ? 's' : ''} ${MAX_STREAMS_PER_READER} open subscriptions here, the most a reader may; close one`);
+    }
+    await this.requireBook(query, requester, await this.scopeFor(requester), false);
+    const n = await this.hub.add(query, requester, sink);
+    this.readers.set(n, who);
+    await this.armExpiry();
+    return n;
+  }
+
+  private async unsubscribe(id: number): Promise<void> {
+    this.readers.delete(id);
+    this.links.delete(id);
+    await this.hub.remove(id);
   }
 
   /** Carry every subscription to the node's clock: rows a grant's expiry
@@ -1199,6 +1290,7 @@ export class RoflenoxNode {
    *  it at the next expiry; a test with an injected clock calls it itself. */
   tick(): Promise<void> {
     return this.serial(async () => {
+      await this.endStaleLinks();
       await this.hub.settle('clock', false);
       this.drainJournals();
       await this.armExpiry();
@@ -1213,6 +1305,13 @@ export class RoflenoxNode {
     if (this.expiryTimer) { clearTimeout(this.expiryTimer); this.expiryTimer = null; }
     const now = Math.floor(this.now() / 1000);
     let t = this.hub.nextExpiry();
+    for (const l of this.links.values()) {
+      const k = this.keyFor(l.claims.kid)?.key;
+      for (const at of [k?.valid_until, k?.revoked_at]) {
+        const u = at ? Math.ceil(Date.parse(at) / 1000) : NaN;
+        if (u > now && (t === null || u < t)) t = u;
+      }
+    }
     if (this.hub.size) {
       for (const author of this.worlds.keys()) {
         for (const r of await this.engine.sysRows(`readable_until[${SYSTEM_BOOK}](${roflString(author)}, B, U)`)) {
@@ -1231,19 +1330,20 @@ export class RoflenoxNode {
    *  live {source: name, relation: "roflenox:view", target: literal} in its
    *  book — read as `requester`, with a literal naming no book put in the
    *  owner's. Null if there is none `requester` can see. */
-  async viewLiteral(owner: string, name: string, requester: string | null): Promise<string | null> {
-    const b = bookOf(owner);
+  viewLiteral(owner: string, name: string, requester: string | null): Promise<string | null> {
+    return this.serial(() => this.viewLiteralNow(owner, name, requester), true);
+  }
+
+  private async viewLiteralNow(owner: string, name: string, requester: string | null): Promise<string | null> {
     let a: AskAnswer;
     try {
-      a = await this.ask(`live[${b}](F, ${roflString(name)}, ${roflString(VIEW)}, L)`, requester, null, { order: 'admission' });
+      a = await this.askNow(`live[${bookOf(owner)}](F, ${roflString(name)}, ${roflString(VIEW)}, L)`, requester, null, { order: 'admission' });
     } catch (e) {
       if (e instanceof Refusal && (e.status === 403 || e.status === 404 || e.status === 410)) return null;
       throw e;
     }
     const L = a.rows.at(-1)?.cells[1];
-    if (typeof L !== 'string') return null;
-    const { rel, book, args } = parseLiteral(L);
-    return book === null ? `${rel}[${b}](${args})` : L;
+    return typeof L === 'string' ? viewLiteralOf(owner, L) : null;
   }
 
   /** The journals the node's own book names — {source: name, relation:

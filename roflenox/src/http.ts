@@ -15,9 +15,9 @@ import { handleRpc } from './mcp.ts';
 import { serveOAuth } from './oauth.ts';
 import { callOp, isLocal, OPS, viewQuery, type Ctx, type Op } from './ops.ts';
 import type { RoflenoxNode } from './node.ts';
-import type { Frame } from './subscribe.ts';
-import { VIEW_PAGE } from './view.ts';
-import { linkOf, type ViewLinkClaims } from './viewlink.ts';
+import type { Frame, Sink } from './subscribe.ts';
+import { VIEW_HEADERS, VIEW_PAGE } from './view.ts';
+import { linkOf } from './viewlink.ts';
 
 const MAX_BODY = 16 * 1024 * 1024;
 
@@ -120,7 +120,16 @@ export function createServer(node: RoflenoxNode): http.Server {
   const streams = new Set<http.ServerResponse>();
   const server = http.createServer(async (req, res) => {
     try {
-      const url = new URL(req.url ?? '/', 'http://local');
+      // Routed on the request's own path: one that a URL parser would read
+      // otherwise — `//host/…` or `/\host/…` (a host), `.` or `..` segments,
+      // percent-encoded or not — is refused, never routed as the path it
+      // normalises to (a page served at //evil/view/… would read its stream
+      // from evil).
+      const rawUrl = req.url ?? '/';
+      const url = new URL(rawUrl, 'http://local');
+      if (!rawUrl.startsWith('/') || url.host !== 'local' || url.pathname !== rawUrl.split('?')[0]) {
+        return send(res, 400, { error: 'bad_path', message: 'a request path is one absolute path: no leading //, no backslash, no "." or ".." segment' });
+      }
       const p = url.pathname;
       const method = req.method ?? 'GET';
       const target = targetsOf(node, req);
@@ -174,28 +183,33 @@ export function createServer(node: RoflenoxNode): http.Server {
         }
       }
       if (!op) return send(res, 404, { error: 'not_found', message: `${method} ${p}` });
-      // A view link (src/viewlink.ts) is a caller only at the GET of the view it names.
+      // A view link (src/viewlink.ts) is a caller only on the stream of the view it names.
       const token = linkOf(req.headers.authorization);
-      let link: ViewLinkClaims | null = null;
-      if (token !== null) {
-        if (op.name !== 'view' || method !== 'GET' || p.startsWith('/op/')) callerOf(node, method, target, req.headers, raw);
-        link = await node.viewLink(token, String(args.owner), String(args.name));
-      }
-      const who = () => (link ? link.iss : callerOf(node, method, target, req.headers, raw));
-      // A subscription's alias (r_subscribe): its page, or its stream, by what the reader accepts.
       const accept = String(req.headers.accept ?? '');
-      if (op.stream && method === 'GET' && !p.startsWith('/op/')) {
-        if (op.stream.page && accept.includes('text/html')) {
-          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      const alias = op.stream && method === 'GET' && !p.startsWith('/op/');
+      if (token !== null && !(alias && op.name === 'view' && !accept.includes('text/html') && accept.includes('text/event-stream'))) {
+        callerOf(node, method, target, req.headers, raw);
+      }
+      // A subscription's alias (r_subscribe): its page, or its stream, by what the reader accepts.
+      if (alias) {
+        if (op.stream!.page && accept.includes('text/html')) {
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...VIEW_HEADERS });
           res.end(VIEW_PAGE);
           return;
         }
         if (accept.includes('text/event-stream')) {
-          const caller = who();
-          return await stream(node, req, res, op.name === 'view' ? await viewQuery(node, args, caller) : String(args.query ?? ''), caller, streams, link);
+          if (token !== null) {
+            return await stream(req, res, streams, async (sink, over) => {
+              const l = await node.subscribeLink(token, String(args.owner), String(args.name), sink, over);
+              return { close: l.close, exp: l.claims.exp };
+            }, node);
+          }
+          const caller = callerOf(node, method, target, req.headers, raw);
+          const query = op.name === 'view' ? await viewQuery(node, args, caller) : String(args.query ?? '');
+          return await stream(req, res, streams, async (sink) => ({ close: await node.subscribe(query, caller, sink) }), node);
         }
       }
-      const caller = who();
+      const caller = callerOf(node, method, target, req.headers, raw);
       const result = await callOp(op.name, args, ctx(caller), 'network');
       return send(res, op.http && !p.startsWith('/op/') ? op.http.status ?? 200 : 200, result);
     } catch (e) {
@@ -211,31 +225,41 @@ export function createServer(node: RoflenoxNode): http.Server {
 
 /** One subscription as server-sent events: `event: full|delta|refused`,
  *  `data:` the frame as JSON (src/subscribe.ts). A refusal before the first
- *  frame is an ordinary JSON error with its status. */
-async function stream(node: RoflenoxNode, req: http.IncomingMessage, res: http.ServerResponse, query: string, caller: string | null,
-  streams: Set<http.ServerResponse>, link: ViewLinkClaims | null = null): Promise<void> {
-  let open = false;
+ *  frame is an ordinary JSON error with its status. `open` starts it with the
+ *  sink and a call that ends it with a reason; a link's stream also ends at
+ *  the link's `exp`. */
+async function stream(req: http.IncomingMessage, res: http.ServerResponse, streams: Set<http.ServerResponse>,
+  open: (sink: Sink, over: (error: string, message: string) => void) => Promise<{ close: () => Promise<void>; exp?: number }>, node: RoflenoxNode): Promise<void> {
+  let started = false;
   const held: Frame[] = [];
   const write = (f: Frame) => {
+    if (res.writableEnded) return;
     res.write(`event: ${f.kind}\ndata: ${JSON.stringify(f)}\n\n`);
     if (f.kind === 'refused') res.end();
   };
-  const end = await node.subscribe(query, caller, (f) => { if (open) write(f); else held.push(f); });
+  const deliver = (f: Frame) => { if (started) write(f); else held.push(f); };
+  const over = (error: string, message: string) => deliver({ kind: 'refused', head: null, cause: null, error, message });
+  const sub = await open(deliver, over);
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
-  open = true;
+  started = true;
   for (const f of held.splice(0)) write(f);
   streams.add(res);
-  // A stream opened by a view link ends when the link does: at its expiry, or when its issuer revokes it.
-  const ends: (() => void)[] = [];
-  if (link) {
-    const over = (error: string, message: string) => { if (!res.writableEnded) write({ kind: 'refused', head: null, cause: null, error, message }); };
-    const t = setTimeout(() => over('link_expired', 'the view link has expired'), Math.max(0, link.exp * 1000 - node.clockMs()));
+  let t: NodeJS.Timeout | null = null;
+  if (sub.exp !== undefined) {
+    t = setTimeout(() => over('link_expired', 'the view link has expired'), Math.max(0, sub.exp * 1000 - node.clockMs()));
     t.unref();
-    ends.push(() => clearTimeout(t), node.onLinkRevoked(link.iss, link.jti, () => over('link_revoked', 'the view link was revoked by its issuer')));
   }
-  const close = () => { streams.delete(res); for (const e of ends.splice(0)) e(); void end().catch(() => {}); };
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    streams.delete(res);
+    if (t) clearTimeout(t);
+    void sub.close().catch(() => {});
+  };
   req.on('close', close);
   res.on('close', close);
+  if (res.writableEnded) close();
 }
 
 export function listen(server: http.Server, port: number, host = '127.0.0.1'): Promise<string> {
