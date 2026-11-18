@@ -1,0 +1,11 @@
+{"confidence":1,"perspective":"enox","relation":"enox:type","source":"enox://example.org/graph/main/cs/gamma","target":"concept"}
+{"confidence":1,"perspective":"enox","relation":"enox:domain","source":"enox://example.org/graph/main/cs/gamma","target":"cs"}
+{"confidence":1,"perspective":"enox","relation":"enox:label","source":"enox://example.org/graph/main/cs/gamma","target":"Gamma"}
+{"confidence":1,"perspective":"enox","relation":"enox:created_at","source":"enox://example.org/graph/main/cs/gamma","target":"2026-11-17T21:14:29.169Z"}
+{"confidence":1,"perspective":"enox","relation":"enox:updated_at","source":"enox://example.org/graph/main/cs/gamma","target":"2026-11-17T21:14:29.169Z"}
+{"confidence":1,"perspective":"enox","relation":"uses","source":"enox://example.org/graph/main/cs/alpha","target":"enox://example.org/graph/main/cs/gamma"}
+{"confidence":1,"perspective":"enox","relation":"enox:asserted_by","source":"fde7ad95a45488286d7027e6f9152b25089376a8532667bc6a68feeb0ef66587","target":"sd4c2633268.node-a"}
+{"confidence":1,"perspective":"enox","relation":"enox:fact_id","source":"fde7ad95a45488286d7027e6f9152b25089376a8532667bc6a68feeb0ef66587","target":"457df7f7bc5030a5b604f7447f2a7904441e0cba91de95134f823fab65622d6e"}
+{"confidence":1,"perspective":"enox","relation":"enox:updated_at","source":"fde7ad95a45488286d7027e6f9152b25089376a8532667bc6a68feeb0ef66587","target":"2026-11-17T21:14:29.169Z"}
+{"confidence":1,"perspective":"enox","relation":"enox:created_at","source":"fde7ad95a45488286d7027e6f9152b25089376a8532667bc6a68feeb0ef66587","target":"2026-11-17T21:14:29.169Z"}
+{"confidence":1,"perspective":"enox","relation":"enox:proof_depth","source":"fde7ad95a45488286d7027e6f9152b25089376a8532667bc6a68feeb0ef66587","target":"0"}

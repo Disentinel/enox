@@ -1,0 +1,16 @@
+{"confidence":1,"perspective":"enox","relation":"enox:type","source":"enox://example.org/graph/main/cs/alpha","target":"concept"}
+{"confidence":1,"perspective":"enox","relation":"enox:domain","source":"enox://example.org/graph/main/cs/alpha","target":"cs"}
+{"confidence":1,"perspective":"enox","relation":"enox:label","source":"enox://example.org/graph/main/cs/alpha","target":"Alpha"}
+{"confidence":1,"perspective":"enox","relation":"enox:created_at","source":"enox://example.org/graph/main/cs/alpha","target":"2026-11-17T21:14:29.116Z"}
+{"confidence":1,"perspective":"enox","relation":"enox:updated_at","source":"enox://example.org/graph/main/cs/alpha","target":"2026-11-17T21:14:29.116Z"}
+{"confidence":1,"perspective":"enox","relation":"enox:type","source":"enox://example.org/graph/main/cs/beta","target":"concept"}
+{"confidence":1,"perspective":"enox","relation":"enox:domain","source":"enox://example.org/graph/main/cs/beta","target":"cs"}
+{"confidence":1,"perspective":"enox","relation":"enox:label","source":"enox://example.org/graph/main/cs/beta","target":"Beta"}
+{"confidence":1,"perspective":"enox","relation":"enox:created_at","source":"enox://example.org/graph/main/cs/beta","target":"2026-11-17T21:14:29.116Z"}
+{"confidence":1,"perspective":"enox","relation":"enox:updated_at","source":"enox://example.org/graph/main/cs/beta","target":"2026-11-17T21:14:29.116Z"}
+{"confidence":1,"perspective":"enox","relation":"uses","source":"enox://example.org/graph/main/cs/alpha","target":"enox://example.org/graph/main/cs/beta"}
+{"confidence":1,"perspective":"enox","relation":"enox:asserted_by","source":"c3fac1c2882e853cf08f78f2552f9a1c01cafa254c1a71d1a76c59b9a9aba6a0","target":"node-a"}
+{"confidence":1,"perspective":"enox","relation":"enox:fact_id","source":"c3fac1c2882e853cf08f78f2552f9a1c01cafa254c1a71d1a76c59b9a9aba6a0","target":"dc91c8197c6547aa301140097d9a377a8bc5459324b8a45b084260e0bcb48131"}
+{"confidence":1,"perspective":"enox","relation":"enox:updated_at","source":"c3fac1c2882e853cf08f78f2552f9a1c01cafa254c1a71d1a76c59b9a9aba6a0","target":"2026-11-17T21:14:29.116Z"}
+{"confidence":1,"perspective":"enox","relation":"enox:created_at","source":"c3fac1c2882e853cf08f78f2552f9a1c01cafa254c1a71d1a76c59b9a9aba6a0","target":"2026-11-17T21:14:29.116Z"}
+{"confidence":1,"perspective":"enox","relation":"enox:proof_depth","source":"c3fac1c2882e853cf08f78f2552f9a1c01cafa254c1a71d1a76c59b9a9aba6a0","target":"0"}

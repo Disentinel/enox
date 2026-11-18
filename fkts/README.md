@@ -1,6 +1,8 @@
 # FKTS quickstart
 
-FKTS is a signed-log knowledge server. Every fact is part of a batch signed
+FKTS (Federated Knowledge Tracking Server) is the implementation of the Enox
+protocol on the ROFL engine; it was called Roflenox until 2026-11-17. It is a
+signed-log knowledge server. Every fact is part of a batch signed
 by an identity, and the ROFL engine (`rofl serve`, from the npm package `@grafema/rofl`) is the index you query.
 The only npm dependency is that engine. The CLI is `src/cli.ts`, run by Node's
 built-in TypeScript stripping.
@@ -291,7 +293,7 @@ rm -rf "$DEMO"
 
 ## 9. Subscribe to a question's conclusions, views, journals
 
-A node (FKTS, for people; `fkts` on the wire) keeps a question answered as
+A node keeps a question answered as
 batches arrive. A **subscription** names one positive literal, e.g.
 `red(P, X)` or `red("home", X)` or `red[b_…](P, X)`; it is sent the whole
 answer once, then after every admitted batch only the rows that came and went.
@@ -667,6 +669,22 @@ crosses files through another relation (here `may_be_node`, behind
 `export { x }` of an imported `x`) must be among the coordinator's rules or the
 oracle goes red; a cell's type is lost on the wire (an atom and a string
 arrive as one text, an integer as its digits).
+## 11. Moving a node written before the rename
+
+A data directory written as Roflenox (signatures `roflenox-*-v1`, relations
+`roflenox:*`) does not open under FKTS. Copy it into a fresh directory, every
+batch signed again by the key that signed it:
+
+```sh
+npm run migrate:roflenox -- ~/.roflenox ~/.fkts [--also OLD_EXECUTOR_DIR=NEW_EXECUTOR_DIR]...
+```
+
+The old directory is only read (the old node may keep running); the new one
+must not exist and is opened as a node before the command succeeds. Sessions
+get new names, derived from the same grants. `--also` is each other identity
+whose key signed batches there (the embedder executor). A batch that cannot be
+signed again (another node's identity mirrored in, a rotated key) refuses the
+whole migration and is named. See `scripts/migrate.ts`.
 
 ## Known defects (found while writing this guide)
 

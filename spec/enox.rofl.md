@@ -166,6 +166,12 @@ Declared as facts:
 - `r_revocation_receipt` is to be checked by "a revoked grant answers 410 on the next read, while facts read before the revocation still verify against their batch digest".
 - `r_revocation_receipt` says "revoking a share stops future reads with status 410; what was already read stays attested by its digest".
 - `r_revocation_receipt` is stated in "PROTOCOL.md#1.2".
+- `r_migrate_roflenox` is about `transfer`.
+- `r_migrate_roflenox` binds as `must`.
+- `r_migrate_roflenox` says "a node written before the rename to FKTS (signature contexts roflenox-*-v1, relations roflenox:*) is copied into a fresh FKTS data directory with every batch signed again by the key that signed it; the old directory is only read".
+- `r_migrate_roflenox` is stated in "owner 2026-11-17".
+- `r_migrate_roflenox` is to be checked by "an old node migrates into a fresh FKTS node: every batch signed again, the same facts under the new names, sessions renamed with their grants, the old directory untouched".
+- `r_migrate_roflenox` is to be checked by "a migration that meets a batch it cannot sign again writes nothing".
 
 ### Доступ
 
@@ -274,7 +280,7 @@ Declared as facts:
 - `r_no_orphan_tests` binds as `must`.
 - `r_no_orphan_tests` says "every test case in the repository guards at least one requirement; test names are static strings; the list of test cases is read by a deterministic scanner and compared with the test runner's own list, so a test the scanner cannot see fails the gate instead of passing unseen".
 - `r_no_orphan_tests` is stated in "owner 2026-09-27: a scanner lists every test case, and no test case is unlinked".
-- `r_no_orphan_tests` says "the scanner and the runner compare top-level test names; a subtest (t.test) may carry a dynamic name, so a loop of cases is one static top-level test with subtests; the scan covers roflenox/test, roflenox/executors/*/test and spec/check.test.mjs; the implementer owns spec/check.mjs and spec/check.test.mjs for this".
+- `r_no_orphan_tests` says "the scanner and the runner compare top-level test names; a subtest (t.test) may carry a dynamic name, so a loop of cases is one static top-level test with subtests; the scan covers fkts/test, fkts/executors/*/test and spec/check.test.mjs; the implementer owns spec/check.mjs and spec/check.test.mjs for this".
 - `r_no_orphan_tests` is to be checked by "a test that guards no requirement fails the spec gate, and linking it passes".
 - `r_no_orphan_tests` is to be checked by "a test the scanner cannot read, or one the runner lists and the scanner does not, fails the spec gate".
 - `r_no_orphan_tests` is to be checked by "an accepted requirement whose checks guard no existing test fails the spec gate".
@@ -310,7 +316,7 @@ Declared as facts:
 - `r_mcp_oauth` says "only the owner can approve: the authorize page grants nothing until the owner proves the operator secret on that page, it names the client and the exact redirect host being approved, and wrong secrets are rate-limited and never distinguishable by timing".
 - `r_mcp_oauth` says "a code is single-use, lives at most a minute, and is redeemed only by the client it was issued to, with the same redirect_uri and the matching PKCE verifier; access tokens are short-lived, refresh tokens rotate on use and a reused refresh token revokes its whole family; tokens are stored only as hashes and the owner can list and revoke them".
 - `r_mcp_oauth` says "a token issued through OAuth acts as the owner through a grant the owner can revoke, and is limited to the MCP endpoint of this node (audience-bound); the public pages, including the authorize page, reveal no host paths, user names or key locations".
-- `r_mcp_oauth` is stated in "owner 2026-09-29: the claude.ai connector cannot reach ROFLENOX with header-only auth; implement OAuth, and only the owner connects to the personal graph".
+- `r_mcp_oauth` is stated in "owner 2026-09-29: the claude.ai connector cannot reach FKTS with header-only auth; implement OAuth, and only the owner connects to the personal graph".
 - `r_mcp_oauth` is to be checked by "a client registered dynamically completes authorize with the owner's secret, PKCE S256 and its redirect_uri, gets an access token, and lists tools over /mcp with it".
 - `r_mcp_oauth` is to be checked by "authorize without the owner's secret, with a wrong secret, with plain PKCE, with a redirect_uri other than the registered one, or a code redeemed twice or by another client, yields no token".
 - `r_mcp_oauth` is to be checked by "a reused refresh token revokes its family, a revoked or expired access token gets 401, and an access token minted for another resource is refused".
@@ -493,7 +499,7 @@ Declared as facts:
 - `r_balanced` is stated in "owner 2026-09-26: a skew must be caught at once".
 - `r_balanced` is to be checked by "flipping features to security past 3/2 fails balance".
 
-### Архитектура ROFLENOX (решения 2026-09-26)
+### Архитектура FKTS (решения 2026-09-26)
 
 > Минимализм, надёжность, масштабируемость. Один процесс Node на узел, ноль
 > runtime-зависимостей (как у rofl), движок вывода — Rust `rofl-serve` через
@@ -511,7 +517,7 @@ Declared as facts:
 > 3. Канонизация — RFC 8785 (JCS). Строка JSONL = JCS одного факта;
 >    digest батча = SHA-256 байтов JSONL; `fact_id` = SHA-256 от JCS массива
 >    `[source, relation, target]`. Этим закрыт открытый вопрос `r_fact_id_derived`.
-> 4. Подпись — Ed25519 над `"roflenox-batch-v1\n" + JCS(манифест без sig)`
+> 4. Подпись — Ed25519 над `"enox-batch-v1\n" + JCS(манифест без sig)`
 >    (разделение доменов). Манифест несёт: identity, key id, prev (digest
 >    предыдущего батча этой идентичности), claimed_at, count, digest, sig —
 >    и подписано всё, кроме самой подписи: иначе `prev` можно переписать
@@ -522,7 +528,7 @@ Declared as facts:
 >    identity`, то есть только в книгу подписанта. Квитанция — received_at и
 >    digest, дозаписью в индекс.
 > 6. Ключ сервера — файл 0600 вне журнала; у людей — системный keychain.
-> 7. HTTP: `GET /.well-known/roflenox/identity` (подписанная история ключей),
+> 7. HTTP: `GET /.well-known/enox/identity` (подписанная история ключей),
 >    `POST /batches` (допуск), `GET /feeds/<identity>?after=<digest>` (батчи
 >    как есть, с исходными подписями), `POST /ask` (запрос с why, в пределах
 >    книг, которые запрашивающему разрешено видеть), `GET /health`.
@@ -593,7 +599,7 @@ Declared as facts:
 > идентичности 1–128 символов `[A-Za-z0-9._@-]`; книга = `b_` + 16 hex
 > SHA-256 имени; key_id = SHA-256 публичного ключа, ключи и подписи в
 > base64url; файл ключа 0600 в каталоге 0700, вне журнала; документ
-> идентичности подписан над `"roflenox-identity-v1\n" + JCS(doc)`; первый
+> идентичности подписан над `"enox-identity-v1\n" + JCS(doc)`; первый
 > контакт — доверие при первом использовании, документ закрепляется в том же
 > коммите журнала, что и первый батч; время — RFC 3339 UTC с миллисекундами,
 > ключ действует в `valid_from ≤ t < valid_until`; JSONL строгий, пустой
@@ -713,7 +719,7 @@ Declared as facts:
 - `r_revocation_bound` is to be checked by "a backdated batch received after revocation is rejected".
 - `r_domain_vouch` is about `identity`.
 - `r_domain_vouch` binds as `should`.
-- `r_domain_vouch` says "optionally, a node whose operator turns it on lets the domain of a user@domain identity vouch for its first key: the domain publishes the identity's first document at https://domain/.well-known/roflenox/<local part, percent-encoded>, and that answer pins first contact the way an invitation link does; off by default".
+- `r_domain_vouch` says "optionally, a node whose operator turns it on lets the domain of a user@domain identity vouch for its first key: the domain publishes the identity's first document at https://domain/.well-known/enox/<local part, percent-encoded>, and that answer pins first contact the way an invitation link does; off by default".
 - `r_domain_vouch` says "a domain vouches only for names under it, only over HTTPS with a valid certificate and no redirect to another host, and only for first contact: it never replaces a key already pinned, which still changes only by a rotation signed by the key or the recovery key".
 - `r_domain_vouch` is stated in "owner 2026-09-27: add domain vouching as an optional variant".
 - `r_domain_vouch` is to be checked by "with domain vouching on, a first contact with user@domain pins the key its domain publishes over HTTPS, and with it off the same contact needs an invitation".
@@ -799,6 +805,7 @@ Kinds of the requirements:
 - `r_grants` is of `feature`.
 - `r_encrypt_private` is of `feature`.
 - `r_backup` is of `feature`.
+- `r_migrate_roflenox` is of `feature`.
 - `r_substrate_independent` is of `feature`.
 - `r_verify_without_author` is of `feature`.
 - `r_revocation_receipt` is of `feature`.
@@ -959,6 +966,7 @@ The queue:
 - `r_default_deny` is queued at 77.
 - `r_chain` is queued at 78.
 - `r_backup` is queued at 79.
+- `r_migrate_roflenox` is queued at 115.
 - `r_confidence` is queued at 69.
 - `r_enox_compat` is queued at 80.
 - `r_no_orphan_tests` is queued at 76.
@@ -1054,8 +1062,8 @@ Accepted after verification:
 - `r_foreign_rules_opt_in` is accepted at "092801d551b6840886541f5d5d2249e5c2fae1eb".
 - `r_engine_crash_recovery` is accepted at "81647a8c36ae605b2ffc51a449fb870dcf399d29".
 - `r_snapshot_is_cache` is accepted at "81647a8c36ae605b2ffc51a449fb870dcf399d29".
-- `r_rule_budget` is accepted at "roflenox tree verified 2026-09-27, rules.test.ts 3/3 under load 80".
-- `r_answer_limits` is accepted at "roflenox tree verified 2026-09-27, suite 68/68".
+- `r_rule_budget` is accepted at "fkts tree verified 2026-09-27, rules.test.ts 3/3 under load 80".
+- `r_answer_limits` is accepted at "fkts tree verified 2026-09-27, suite 68/68".
 - `r_public_url_local` is accepted at "cc469048fba19185bbf5dd4887aba590cd83e675".
 - `r_mcp_oauth` is accepted at "80c11531fe867af06dcac3149f4392d487ec6bd5".
 - `r_oauth_lockout` is accepted at "90919f04e155273b0abb638291406340b1d48bb2".
@@ -1101,7 +1109,7 @@ Accepted after verification:
 > движке появится инкрементальный evaluate, системная логика возвращается в
 > правила: это обход ограничения, а не принцип. Паника rofl-serve в
 > store.rs:985 воспроизводится на синтетике примерно в одном прогоне из трёх
-> (roflenox/scripts/engine-panic-repro.ts, docs/engine-panic.md).
+> (fkts/scripts/engine-panic-repro.ts, docs/engine-panic.md).
 
 ### Находки по хостам 2026-09-26 (данные для r_uc_observability)
 
@@ -1134,217 +1142,221 @@ Accepted after verification:
 
 ## Проверки
 
-> Проверки, которые реально есть: тесты `personal-node` на `origin/master` и тесты `roflenox/test`, привязанные по точному совпадению названия с `is to be checked by`. Проверка головы журнала в снапшоте — фильтр-оптимизация, не защита: её перекрывает сверка набора батчей (мутант M6 выживает).
+> Проверки, которые реально есть: тесты `personal-node` на `origin/master` и тесты `fkts/test`, привязанные по точному совпадению названия с `is to be checked by`. Проверка головы журнала в снапшоте — фильтр-оптимизация, не защита: её перекрывает сверка набора батчей (мутант M6 выживает).
 > Проверка без файла — тоже находка.
 
 The checks that exist:
 
 - "a node whose imported ids sit under another URI prefix says so at startup" guards `r_uri_prefix_stable`.
-- "a node whose imported ids sit under another URI prefix says so at startup" lives in "roflenox/test/import.test.ts".
+- "a node whose imported ids sit under another URI prefix says so at startup" lives in "fkts/test/import.test.ts".
 - "a requirement with an unknown kind fails typing" guards `r_typed`.
 - "a requirement with an unknown kind fails typing" lives in "spec/check.test.mjs".
 - "flipping features to security past 3/2 fails balance" guards `r_balanced`.
 - "flipping features to security past 3/2 fails balance" lives in "spec/check.test.mjs".
 - "killing the engine during an admission leaves the log consistent, refuses that batch, and the node answers after it rebuilds" guards `r_engine_crash_recovery`.
-- "killing the engine during an admission leaves the log consistent, refuses that batch, and the node answers after it rebuilds" lives in "roflenox/test/durability.test.ts".
+- "killing the engine during an admission leaves the log consistent, refuses that batch, and the node answers after it rebuilds" lives in "fkts/test/durability.test.ts".
 - "killing the engine during an ask never yields a plain answer: the asker gets an error or unknown, and the next ask is answered" guards `r_engine_crash_recovery`.
-- "killing the engine during an ask never yields a plain answer: the asker gets an error or unknown, and the next ask is answered" lives in "roflenox/test/durability.test.ts".
+- "killing the engine during an ask never yields a plain answer: the asker gets an error or unknown, and the next ask is answered" lives in "fkts/test/durability.test.ts".
 - "a batch of 2000 facts is admitted within one second with 200000 facts held" guards `r_batch_write`.
-- "a batch of 2000 facts is admitted within one second with 200000 facts held" lives in "roflenox/test/perf/write.test.ts".
+- "a batch of 2000 facts is admitted within one second with 200000 facts held" lives in "fkts/test/perf/write.test.ts".
 - "a rule published by alice derives facts in her book from bob's granted facts, and cannot conclude into bob's book" guards `r_user_rules`.
-- "a rule published by alice derives facts in her book from bob's granted facts, and cannot conclude into bob's book" lives in "roflenox/test/rules.test.ts".
+- "a rule published by alice derives facts in her book from bob's granted facts, and cannot conclude into bob's book" lives in "fkts/test/rules.test.ts".
 - "a mirrored rule does not run until the reader trusts its author for rules, and then it does" guards `r_foreign_rules_opt_in`.
-- "a mirrored rule does not run until the reader trusts its author for rules, and then it does" lives in "roflenox/test/rules.test.ts".
+- "a mirrored rule does not run until the reader trusts its author for rules, and then it does" lives in "fkts/test/rules.test.ts".
 - "an unbounded rule yields unknown with its budget named, and another identity's batch is admitted meanwhile without delay" guards `r_rule_budget`.
-- "an unbounded rule yields unknown with its budget named, and another identity's batch is admitted meanwhile without delay" lives in "roflenox/test/rules.test.ts".
+- "an unbounded rule yields unknown with its budget named, and another identity's batch is admitted meanwhile without delay" lives in "fkts/test/rules.test.ts".
 - "an answer longer than the limit is marked cut and the rest is fetched page by page to the same total" guards `r_answer_limits`.
-- "an answer longer than the limit is marked cut and the rest is fetched page by page to the same total" lives in "roflenox/test/limits.test.ts".
+- "an answer longer than the limit is marked cut and the rest is fetched page by page to the same total" lives in "fkts/test/limits.test.ts".
 - "a sub-agent is refused as soon as any identity above it in the delegation chain is" guards `r_agents_as_identities`.
-- "a sub-agent is refused as soon as any identity above it in the delegation chain is" lives in "roflenox/test/agents.test.ts".
+- "a sub-agent is refused as soon as any identity above it in the delegation chain is" lives in "fkts/test/agents.test.ts".
 - "a follower converges to the publisher's head after new batches without a manual pull" guards `r_follow`.
-- "a follower converges to the publisher's head after new batches without a manual pull" lives in "roflenox/test/follow.test.ts".
+- "a follower converges to the publisher's head after new batches without a manual pull" lives in "fkts/test/follow.test.ts".
 - "an Enox read right after a write answers within one second with 200000 facts held" guards `r_enox_compat`.
-- "an Enox read right after a write answers within one second with 200000 facts held" lives in "roflenox/test/perf/write.test.ts".
+- "an Enox read right after a write answers within one second with 200000 facts held" lives in "fkts/test/perf/write.test.ts".
 - "a node holding 200000 facts reopens from its log within 30 seconds" guards `r_snapshot_is_cache`.
-- "a node holding 200000 facts reopens from its log within 30 seconds" lives in "roflenox/test/perf/reopen.test.ts".
+- "a node holding 200000 facts reopens from its log within 30 seconds" lives in "fkts/test/perf/reopen.test.ts".
 - "an MCP client lists the tools, asserts a fact, and asks it back with why, all under the node's access rules" guards `r_mcp_adapter`.
-- "an MCP client lists the tools, asserts a fact, and asks it back with why, all under the node's access rules" lives in "roflenox/test/mcp.test.ts".
+- "an MCP client lists the tools, asserts a fact, and asks it back with why, all under the node's access rules" lives in "fkts/test/mcp.test.ts".
 - "why names the facts and the rule an answer stands on, and whynot names the missing premise" guards `r_ask_explain`.
-- "why names the facts and the rule an answer stands on, and whynot names the missing premise" lives in "roflenox/test/rules.test.ts".
+- "why names the facts and the rule an answer stands on, and whynot names the missing premise" lives in "fkts/test/rules.test.ts".
 - "an intent derived by a rule is answered by an executor and why of the result reaches the rule" guards `r_intent_loop`.
-- "an intent derived by a rule is answered by an executor and why of the result reaches the rule" lives in "roflenox/test/executor.test.ts".
+- "an intent derived by a rule is answered by an executor and why of the result reaches the rule" lives in "fkts/test/executor.test.ts".
 - "a delegated agent key publishes until its expiry and is refused after it" guards `r_agents_as_identities`.
-- "a delegated agent key publishes until its expiry and is refused after it" lives in "roflenox/test/agents.test.ts".
+- "a delegated agent key publishes until its expiry and is refused after it" lives in "fkts/test/agents.test.ts".
 - "the same data directory answers the same over stdio and over HTTP" guards `r_local_stdio`.
-- "the same data directory answers the same over stdio and over HTTP" lives in "roflenox/test/stdio.test.ts".
+- "the same data directory answers the same over stdio and over HTTP" lives in "fkts/test/stdio.test.ts".
 - "importing an Enox snapshot twice gives the same log head and every imported assertion answers by ask with its original author" guards `r_import`.
-- "importing an Enox snapshot twice gives the same log head and every imported assertion answers by ask with its original author" lives in "roflenox/test/import.test.ts".
+- "importing an Enox snapshot twice gives the same log head and every imported assertion answers by ask with its original author" lives in "fkts/test/import.test.ts".
 - "the tool calls an Enox client made on 2026-09-26 run unchanged against a node and get answers of the same shape" guards `r_enox_compat`.
-- "the tool calls an Enox client made on 2026-09-26 run unchanged against a node and get answers of the same shape" lives in "roflenox/test/enox.test.ts".
+- "the tool calls an Enox client made on 2026-09-26 run unchanged against a node and get answers of the same shape" lives in "fkts/test/enox.test.ts".
 - "a census of the source finds no second store, queue, wire format or proof of who" guards `r_minimal_parts`.
-- "a census of the source finds no second store, queue, wire format or proof of who" lives in "roflenox/test/census.test.ts".
+- "a census of the source finds no second store, queue, wire format or proof of who" lives in "fkts/test/census.test.ts".
 - "every operation in the table is reachable with the same name and schema over MCP, CLI and HTTP, and nothing outside the table is" guards `r_interface_parity`.
-- "every operation in the table is reachable with the same name and schema over MCP, CLI and HTTP, and nothing outside the table is" lives in "roflenox/test/parity.test.ts".
+- "every operation in the table is reachable with the same name and schema over MCP, CLI and HTTP, and nothing outside the table is" lives in "fkts/test/parity.test.ts".
 - "re-asserting a fact with a new confidence leaves exactly one confidence for that identity, the latest" guards `r_confidence`.
-- "re-asserting a fact with a new confidence leaves exactly one confidence for that identity, the latest" lives in "roflenox/test/model.test.ts".
+- "re-asserting a fact with a new confidence leaves exactly one confidence for that identity, the latest" lives in "fkts/test/model.test.ts".
 - "a question restricted to one perspective sees only the facts asserted under it" guards `r_perspective`.
-- "a question restricted to one perspective sees only the facts asserted under it" lives in "roflenox/test/model.test.ts".
+- "a question restricted to one perspective sees only the facts asserted under it" lives in "fkts/test/model.test.ts".
 - "a committed log file that cannot be read stops the node instead of an empty start" guards `r_no_silent_reset`.
-- "a committed log file that cannot be read stops the node instead of an empty start" lives in "roflenox/test/durability.test.ts".
+- "a committed log file that cannot be read stops the node instead of an empty start" lives in "fkts/test/durability.test.ts".
 - "a node rebuilt from its latest backup answers every question the same as the node up to that backup" guards `r_backup`.
-- "a node rebuilt from its latest backup answers every question the same as the node up to that backup" lives in "roflenox/test/durability.test.ts".
+- "a node rebuilt from its latest backup answers every question the same as the node up to that backup" lives in "fkts/test/durability.test.ts".
 - "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one" guards `r_substrate_independent`.
-- "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one" lives in "roflenox/test/freshness.test.ts".
+- "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one" lives in "fkts/test/freshness.test.ts".
 - "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one" guards `r_verify_without_author`.
-- "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one" lives in "roflenox/test/freshness.test.ts".
+- "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one" lives in "fkts/test/freshness.test.ts".
 - "an ask answers within one second while an executor saturates its CPU budget" guards `r_executors_off_read_path`.
-- "an ask answers within one second while an executor saturates its CPU budget" lives in "roflenox/test/executor.test.ts".
+- "an ask answers within one second while an executor saturates its CPU budget" lives in "fkts/test/executor.test.ts".
 - "a flood of challenge requests neither grows memory nor stops an honest mirror" guards `r_challenge_stateless`.
-- "a flood of challenge requests neither grows memory nor stops an honest mirror" lives in "roflenox/test/freshness.test.ts".
+- "a flood of challenge requests neither grows memory nor stops an honest mirror" lives in "fkts/test/freshness.test.ts".
 - "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused" guards `r_mirror_old_batches`.
-- "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused" lives in "roflenox/test/freshness.test.ts".
+- "a batch a week old mirrors from a live peer, and the same feed replayed without a fresh challenge is refused" lives in "fkts/test/freshness.test.ts".
 - "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one" guards `r_static_feed`.
-- "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one" lives in "roflenox/test/freshness.test.ts".
+- "a feed copied to a static directory mirrors under a fresh checkpoint and is refused under an expired one" lives in "fkts/test/freshness.test.ts".
 - "a fresh install that publishes a signed batch with no manual key step" guards `r_keys_automatic`.
-- "a fresh install that publishes a signed batch with no manual key step" lives in "roflenox/test/keys.test.ts".
+- "a fresh install that publishes a signed batch with no manual key step" lives in "fkts/test/keys.test.ts".
 - "a re-attested batch keeps its digest and gains a second, fresh signature" guards `r_reattest`.
-- "a re-attested batch keeps its digest and gains a second, fresh signature" lives in "roflenox/test/freshness.test.ts".
+- "a re-attested batch keeps its digest and gains a second, fresh signature" lives in "fkts/test/freshness.test.ts".
 - "a rotation in the middle of a chain is followed without a warning" guards `r_rotation`.
-- "a rotation in the middle of a chain is followed without a warning" lives in "roflenox/test/keys.test.ts".
+- "a rotation in the middle of a chain is followed without a warning" lives in "fkts/test/keys.test.ts".
 - "a stolen current key cannot rotate the identity away from its recovery key" guards `r_recovery`.
-- "a stolen current key cannot rotate the identity away from its recovery key" lives in "roflenox/test/keys.test.ts".
+- "a stolen current key cannot rotate the identity away from its recovery key" lives in "fkts/test/keys.test.ts".
 - "a thief future-dating a rotation cannot lock out the recovery key" guards `r_recovery`.
-- "a thief future-dating a rotation cannot lock out the recovery key" lives in "roflenox/test/keys.test.ts".
+- "a thief future-dating a rotation cannot lock out the recovery key" lives in "fkts/test/keys.test.ts".
 - "an identity document dated past the allowed skew is refused" guards `r_no_future_docs`.
-- "an identity document dated past the allowed skew is refused" lives in "roflenox/test/keys.test.ts".
+- "an identity document dated past the allowed skew is refused" lives in "fkts/test/keys.test.ts".
 - "a backdated batch received after revocation is rejected" guards `r_revocation_bound`.
-- "a backdated batch received after revocation is rejected" lives in "roflenox/test/keys.test.ts".
+- "a backdated batch received after revocation is rejected" lives in "fkts/test/keys.test.ts".
 - "a node that swaps its key without rotation is refused with a whynot" guards `r_key_change_loud`.
-- "a node that swaps its key without rotation is refused with a whynot" lives in "roflenox/test/keys.test.ts".
+- "a node that swaps its key without rotation is refused with a whynot" lives in "fkts/test/keys.test.ts".
 - "a request signed by an identity with no grant is refused and whynot names the missing grant" guards `r_grants`.
-- "a request signed by an identity with no grant is refused and whynot names the missing grant" lives in "roflenox/test/access.test.ts".
+- "a request signed by an identity with no grant is refused and whynot names the missing grant" lives in "fkts/test/access.test.ts".
 - "a fact with no export rule never appears in a published batch" guards `r_default_deny`.
-- "a fact with no export rule never appears in a published batch" lives in "roflenox/test/access.test.ts".
+- "a fact with no export rule never appears in a published batch" lives in "fkts/test/access.test.ts".
 - "a guessed secret cannot be confirmed from a withheld manifest" guards `r_withheld_unguessable`.
-- "a guessed secret cannot be confirmed from a withheld manifest" lives in "roflenox/test/access.test.ts".
+- "a guessed secret cannot be confirmed from a withheld manifest" lives in "fkts/test/access.test.ts".
 - "a request signed for the public https URL verifies at a node listening on plain http behind a proxy" guards `r_sig_behind_proxy`.
-- "a request signed for the public https URL verifies at a node listening on plain http behind a proxy" lives in "roflenox/test/access.test.ts".
+- "a request signed for the public https URL verifies at a node listening on plain http behind a proxy" lives in "fkts/test/access.test.ts".
 - "a static host holding a private batch cannot decrypt it, a recipient can" guards `r_encrypt_private`.
-- "a static host holding a private batch cannot decrypt it, a recipient can" lives in "roflenox/test/private.test.ts".
+- "a static host holding a private batch cannot decrypt it, a recipient can" lives in "fkts/test/private.test.ts".
 - "a sealed batch opened a day later is admitted, and one signed by a key revoked before it was sealed is refused" guards `r_offline_admission`.
-- "a sealed batch opened a day later is admitted, and one signed by a key revoked before it was sealed is refused" lives in "roflenox/test/private.test.ts".
+- "a sealed batch opened a day later is admitted, and one signed by a key revoked before it was sealed is refused" lives in "fkts/test/private.test.ts".
 - "the mutation gate fails when a listed mutant survives" guards `r_mutation_gate`.
-- "the mutation gate fails when a listed mutant survives" lives in "roflenox/test/gate.test.ts".
+- "the mutation gate fails when a listed mutant survives" lives in "fkts/test/gate.test.ts".
 - "fact_id equals SHA-256 of the RFC 8785 serialisation of [source, relation, target] for a fixed vector" guards `r_fact_id_derived`.
-- "fact_id equals SHA-256 of the RFC 8785 serialisation of [source, relation, target] for a fixed vector" lives in "roflenox/test/canonical.test.ts".
+- "fact_id equals SHA-256 of the RFC 8785 serialisation of [source, relation, target] for a fixed vector" lives in "fkts/test/canonical.test.ts".
 - "delete everything except the log, restart, and every ask returns the same answers" guards `r_log_is_truth`.
-- "delete everything except the log, restart, and every ask returns the same answers" lives in "roflenox/test/durability.test.ts".
+- "delete everything except the log, restart, and every ask returns the same answers" lives in "fkts/test/durability.test.ts".
 - "package.json declares one dependency, the ROFL engine" guards `r_zero_deps`.
-- "package.json declares one dependency, the ROFL engine" lives in "roflenox/test/hermetic.test.ts".
+- "package.json declares one dependency, the ROFL engine" lives in "fkts/test/hermetic.test.ts".
 - "the full test suite passes with no network and no model files" guards `r_core_without_executors`.
-- "the full test suite passes with no network and no model files" lives in "roflenox/test/hermetic5/hermetic5.test.ts".
+- "the full test suite passes with no network and no model files" lives in "fkts/test/hermetic5/hermetic5.test.ts".
 - "an end-to-end pull between two nodes whose transcript contains no key material" guards `r_identity_names`.
-- "an end-to-end pull between two nodes whose transcript contains no key material" lives in "roflenox/test/federation.test.ts".
+- "an end-to-end pull between two nodes whose transcript contains no key material" lives in "fkts/test/federation.test.ts".
 - "a batch with one byte changed is rejected" guards `r_signed_batch`.
-- "a batch with one byte changed is rejected" lives in "roflenox/test/admission.test.ts".
+- "a batch with one byte changed is rejected" lives in "fkts/test/admission.test.ts".
 - "a batch inserted into the middle of a chain is rejected" guards `r_chain`.
-- "a batch inserted into the middle of a chain is rejected" lives in "roflenox/test/admission.test.ts".
+- "a batch inserted into the middle of a chain is rejected" lives in "fkts/test/admission.test.ts".
 - "a batch whose prev was rewritten after signing is rejected" guards `r_chain`.
-- "a batch whose prev was rewritten after signing is rejected" lives in "roflenox/test/admission.test.ts".
+- "a batch whose prev was rewritten after signing is rejected" lives in "fkts/test/admission.test.ts".
 - "a batch signed by B that writes into the book of A is refused" guards `r_admit_by_signer`.
-- "a batch signed by B that writes into the book of A is refused" lives in "roflenox/test/admission.test.ts".
+- "a batch signed by B that writes into the book of A is refused" lives in "fkts/test/admission.test.ts".
 - "a batch claiming a time outside the window is marked stale and a re-attestation is requested" guards `r_freshness`.
-- "a batch claiming a time outside the window is marked stale and a re-attestation is requested" lives in "roflenox/test/admission.test.ts".
+- "a batch claiming a time outside the window is marked stale and a re-attestation is requested" lives in "fkts/test/admission.test.ts".
 - "auth: missing/wrong token -> 401, revoked -> 410, expired -> 410" guards `r_revocation_receipt`.
 - "auth: missing/wrong token -> 401, revoked -> 410, expired -> 410" lives in "personal-node/src/shares/shares.test.ts".
 - "manifest paths 410 once a share is revoked, including an unknown subpath" guards `r_revocation_receipt`.
 - "manifest paths 410 once a share is revoked, including an unknown subpath" lives in "personal-node/src/shares/shares.test.ts".
 - "a batch line that is not a relation between two entities is refused" guards `r_relation_primary`.
-- "a batch line that is not a relation between two entities is refused" lives in "roflenox/test/admission.test.ts".
+- "a batch line that is not a relation between two entities is refused" lives in "fkts/test/admission.test.ts".
 - "a name made only of invisible or text-direction characters is refused, the same way by the client and the node" guards `r_relation_primary`.
-- "a name made only of invisible or text-direction characters is refused, the same way by the client and the node" lives in "roflenox/test/admission.test.ts".
+- "a name made only of invisible or text-direction characters is refused, the same way by the client and the node" lives in "fkts/test/admission.test.ts".
 - "every admitted fact reads back asserted by the identity that signed its batch, whatever the batch claims" guards `r_asserted_by`.
-- "every admitted fact reads back asserted by the identity that signed its batch, whatever the batch claims" lives in "roflenox/test/enox.test.ts".
+- "every admitted fact reads back asserted by the identity that signed its batch, whatever the batch claims" lives in "fkts/test/enox.test.ts".
 - "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing" guards `r_confidence`.
-- "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing" lives in "roflenox/test/model.test.ts".
+- "each control fact retired at confidence 0 stops acting: a retired grant reads nothing, a retired delegation vouches for nobody and stops its agent, a retired rule derives nothing, a retired export publishes nothing" lives in "fkts/test/model.test.ts".
 - "a node killed at each write step reopens with the whole batch or none of it" guards `r_atomic_write`.
-- "a node killed at each write step reopens with the whole batch or none of it" lives in "roflenox/test/durability.test.ts".
+- "a node killed at each write step reopens with the whole batch or none of it" lives in "fkts/test/durability.test.ts".
 - "a backup killed between any two of its steps leaves a readable backup at the latest path" guards `r_atomic_write`.
-- "a backup killed between any two of its steps leaves a readable backup at the latest path" lives in "roflenox/test/durability.test.ts".
+- "a backup killed between any two of its steps leaves a readable backup at the latest path" lives in "fkts/test/durability.test.ts".
 - "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent" guards `r_derived_rebuildable`.
-- "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent" lives in "roflenox/test/search.test.ts".
+- "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent" lives in "fkts/test/search.test.ts".
 - "a node holding 200000 facts stays under 1.5 GB of resident memory while idle" guards `r_bounded_memory`.
-- "a node holding 200000 facts stays under 1.5 GB of resident memory while idle" lives in "roflenox/test/perf/memory.test.ts".
+- "a node holding 200000 facts stays under 1.5 GB of resident memory while idle" lives in "fkts/test/perf/memory.test.ts".
 - "the MCP endpoint issues no session id and keeps no state per client" guards `r_session_eviction`.
-- "the MCP endpoint issues no session id and keeps no state per client" lives in "roflenox/test/mcp.test.ts".
+- "the MCP endpoint issues no session id and keeps no state per client" lives in "fkts/test/mcp.test.ts".
 - "a revoked grant answers 410 on the next read, while facts read before the revocation still verify against their batch digest" guards `r_revocation_receipt`.
-- "a revoked grant answers 410 on the next read, while facts read before the revocation still verify against their batch digest" lives in "roflenox/test/access.test.ts".
+- "a revoked grant answers 410 on the next read, while facts read before the revocation still verify against their batch digest" lives in "fkts/test/access.test.ts".
 - "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent" guards `r_semantic_search`.
-- "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent" lives in "roflenox/test/search.test.ts".
+- "a meaning search returns a fact after the embedder answers its intent, and the core answers the same with the embedder absent" lives in "fkts/test/search.test.ts".
 - "a meaning search finds a fact that shares none of the query's words" guards `r_semantic_search`.
-- "a meaning search finds a fact that shares none of the query's words" lives in "roflenox/executors/embedder/test/meaning.test.ts".
+- "a meaning search finds a fact that shares none of the query's words" lives in "fkts/executors/embedder/test/meaning.test.ts".
 - "a search the operator asks is never published by a wildcard export" guards `r_semantic_search`.
-- "a search the operator asks is never published by a wildcard export" lives in "roflenox/test/search.test.ts".
+- "a search the operator asks is never published by a wildcard export" lives in "fkts/test/search.test.ts".
 - "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why" guards `r_uc_observability`.
-- "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why" lives in "roflenox/test/observability.test.ts".
+- "rules over host feeds rediscover the four host findings of 2026-09-26 and explain each with why" lives in "fkts/test/observability.test.ts".
 - "a fleet rule written once covers every followed host, including a host followed after the rule was written" guards `r_uc_observability`.
-- "a fleet rule written once covers every followed host, including a host followed after the rule was written" lives in "roflenox/test/observability.test.ts".
+- "a fleet rule written once covers every followed host, including a host followed after the rule was written" lives in "fkts/test/observability.test.ts".
 - "a followed feed that no rule reads is reported as unknown, never as all-clear" guards `r_uc_observability`.
-- "a followed feed that no rule reads is reported as unknown, never as all-clear" lives in "roflenox/test/observability.test.ts".
+- "a followed feed that no rule reads is reported as unknown, never as all-clear" lives in "fkts/test/observability.test.ts".
 - "a follow retired with confidence 0 stops every rule ranging over that host's book" guards `r_uc_observability`.
-- "a follow retired with confidence 0 stops every rule ranging over that host's book" lives in "roflenox/test/observability.test.ts".
+- "a follow retired with confidence 0 stops every rule ranging over that host's book" lives in "fkts/test/observability.test.ts".
 - "a first contact over plain HTTP is refused without an invitation link and pins with one whose key id matches" guards `r_key_change_loud`.
-- "a first contact over plain HTTP is refused without an invitation link and pins with one whose key id matches" lives in "roflenox/test/keys.test.ts".
+- "a first contact over plain HTTP is refused without an invitation link and pins with one whose key id matches" lives in "fkts/test/keys.test.ts".
 - "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins" guards `r_key_change_loud`.
-- "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins" lives in "roflenox/test/keys.test.ts".
+- "an identity nobody vouched for cannot be pinned by writing, introducing or pushing a feed, and the invited pull of the real one still pins" lives in "fkts/test/keys.test.ts".
 - "a delegation to a name outside the parent's own names pins nothing, and the invited pull of that name's real owner still pins" guards `r_key_change_loud`.
-- "a delegation to a name outside the parent's own names pins nothing, and the invited pull of that name's real owner still pins" lives in "roflenox/test/keys.test.ts".
+- "a delegation to a name outside the parent's own names pins nothing, and the invited pull of that name's real owner still pins" lives in "fkts/test/keys.test.ts".
 - "RFC 8785 appendix B: number serialisation vectors" guards `r_signed_batch`.
-- "RFC 8785 appendix B: number serialisation vectors" lives in "roflenox/test/canonical.test.ts".
+- "RFC 8785 appendix B: number serialisation vectors" lives in "fkts/test/canonical.test.ts".
 - "RFC 8785 section 3.2.2: the example object canonicalises exactly" guards `r_signed_batch`.
-- "RFC 8785 section 3.2.2: the example object canonicalises exactly" lives in "roflenox/test/canonical.test.ts".
+- "RFC 8785 section 3.2.2: the example object canonicalises exactly" lives in "fkts/test/canonical.test.ts".
 - "RFC 8785 section 3.2.3: members sort by UTF-16 code units" guards `r_signed_batch`.
-- "RFC 8785 section 3.2.3: members sort by UTF-16 code units" lives in "roflenox/test/canonical.test.ts".
+- "RFC 8785 section 3.2.3: members sort by UTF-16 code units" lives in "fkts/test/canonical.test.ts".
 - "batch digest is SHA-256 of the salt followed by the JSONL bytes" guards `r_signed_batch`.
-- "batch digest is SHA-256 of the salt followed by the JSONL bytes" lives in "roflenox/test/canonical.test.ts".
+- "batch digest is SHA-256 of the salt followed by the JSONL bytes" lives in "fkts/test/canonical.test.ts".
 - "a batch whose JSONL is not canonical is refused, naming the line" guards `r_signed_batch`.
-- "a batch whose JSONL is not canonical is refused, naming the line" lives in "roflenox/test/admission.test.ts".
+- "a batch whose JSONL is not canonical is refused, naming the line" lives in "fkts/test/admission.test.ts".
 - "createAssertion requires asserted_by: a batch with no identity or signature is not admitted" guards `r_admit_by_signer`.
-- "createAssertion requires asserted_by: a batch with no identity or signature is not admitted" lives in "roflenox/test/admission.test.ts".
+- "createAssertion requires asserted_by: a batch with no identity or signature is not admitted" lives in "fkts/test/admission.test.ts".
 - "negation over an ungranted book is no oracle" guards `r_default_deny`.
-- "negation over an ungranted book is no oracle" lives in "roflenox/test/rules.test.ts".
+- "negation over an ungranted book is no oracle" lives in "fkts/test/rules.test.ts".
 - "a key file that is not the identity the log knows stops the node" guards `r_key_change_loud`.
-- "a key file that is not the identity the log knows stops the node" lives in "roflenox/test/durability.test.ts".
+- "a key file that is not the identity the log knows stops the node" lives in "fkts/test/durability.test.ts".
 - "a checkpoint one second past the window is refused and one second inside it mirrors" guards `r_static_feed`.
-- "a checkpoint one second past the window is refused and one second inside it mirrors" lives in "roflenox/test/freshness.test.ts".
+- "a checkpoint one second past the window is refused and one second inside it mirrors" lives in "fkts/test/freshness.test.ts".
 - "an anonymous caller of every open endpoint learns the node's own name and liveness and nothing about the identities, facts or batches it holds" guards `r_default_deny`.
-- "an anonymous caller of every open endpoint learns the node's own name and liveness and nothing about the identities, facts or batches it holds" lives in "roflenox/test/access.test.ts".
+- "an anonymous caller of every open endpoint learns the node's own name and liveness and nothing about the identities, facts or batches it holds" lives in "fkts/test/access.test.ts".
 - "a node given a second signed successor of the same batch keeps both signatures as fork proof and marks every answer over that book" guards `r_chain`.
-- "a node given a second signed successor of the same batch keeps both signatures as fork proof and marks every answer over that book" lives in "roflenox/test/admission.test.ts".
+- "a node given a second signed successor of the same batch keeps both signatures as fork proof and marks every answer over that book" lives in "fkts/test/admission.test.ts".
 - "a backup syncs every file and directory it holds before it becomes the latest" guards `r_backup`.
-- "a backup syncs every file and directory it holds before it becomes the latest" lives in "roflenox/test/durability.test.ts".
+- "a backup syncs every file and directory it holds before it becomes the latest" lives in "fkts/test/durability.test.ts".
+- "an old node migrates into a fresh FKTS node: every batch signed again, the same facts under the new names, sessions renamed with their grants, the old directory untouched" guards `r_migrate_roflenox`.
+- "an old node migrates into a fresh FKTS node: every batch signed again, the same facts under the new names, sessions renamed with their grants, the old directory untouched" lives in "fkts/test/migrate.test.ts".
+- "a migration that meets a batch it cannot sign again writes nothing" guards `r_migrate_roflenox`.
+- "a migration that meets a batch it cannot sign again writes nothing" lives in "fkts/test/migrate.test.ts".
 - "an agent label given to an Enox write reads back as claimed_by next to the signing identity, and a forged label changes nothing but claimed_by" guards `r_enox_compat`.
-- "an agent label given to an Enox write reads back as claimed_by next to the signing identity, and a forged label changes nothing but claimed_by" lives in "roflenox/test/enox.test.ts".
+- "an agent label given to an Enox write reads back as claimed_by next to the signing identity, and a forged label changes nothing but claimed_by" lives in "fkts/test/enox.test.ts".
 - "a claimed label holding brackets, a newline or 5000 characters can neither forge a signer nor add a line to a text view" guards `r_enox_compat`.
-- "a claimed label holding brackets, a newline or 5000 characters can neither forge a signer nor add a line to a text view" lives in "roflenox/test/enox.test.ts".
+- "a claimed label holding brackets, a newline or 5000 characters can neither forge a signer nor add a line to a text view" lives in "fkts/test/enox.test.ts".
 - "every test file exits on its own without force-exit, leaving no engine process behind" guards `r_mutation_gate`.
-- "every test file exits on its own without force-exit, leaving no engine process behind" lives in "roflenox/test/hermetic5/hermetic5.test.ts".
+- "every test file exits on its own without force-exit, leaving no engine process behind" lives in "fkts/test/hermetic5/hermetic5.test.ts".
 - "a failing mutant shard fails the whole mutant gate" guards `r_mutation_gate`.
-- "a failing mutant shard fails the whole mutant gate" lives in "roflenox/test/gate.test.ts".
+- "a failing mutant shard fails the whole mutant gate" lives in "fkts/test/gate.test.ts".
 - "a mutant whose red test already fails on the unmutated tree is reported as a broken baseline, never as killed" guards `r_mutation_gate`.
-- "a mutant whose red test already fails on the unmutated tree is reported as a broken baseline, never as killed" lives in "roflenox/test/gate.test.ts".
+- "a mutant whose red test already fails on the unmutated tree is reported as a broken baseline, never as killed" lives in "fkts/test/gate.test.ts".
 - "the hermetic suite passes five runs in a row, and a nested failure prints the failing test's own error" guards `r_mutation_gate`.
-- "the hermetic suite passes five runs in a row, and a nested failure prints the failing test's own error" lives in "roflenox/test/hermetic5/hermetic5.test.ts".
+- "the hermetic suite passes five runs in a row, and a nested failure prints the failing test's own error" lives in "fkts/test/hermetic5/hermetic5.test.ts".
 - "a batch signed after its key's invalid_from is refused, and one dated 301 seconds past its receipt is refused as future-dated" guards `r_rotation`.
-- "a batch signed after its key's invalid_from is refused, and one dated 301 seconds past its receipt is refused as future-dated" lives in "roflenox/test/keys.test.ts".
+- "a batch signed after its key's invalid_from is refused, and one dated 301 seconds past its receipt is refused as future-dated" lives in "fkts/test/keys.test.ts".
 - "after a batch signed by the new key, a batch signed by the rotated key is refused whatever time it claims, and a batch claiming a time earlier than its predecessor is refused" guards `r_rotation`.
-- "after a batch signed by the new key, a batch signed by the rotated key is refused whatever time it claims, and a batch claiming a time earlier than its predecessor is refused" lives in "roflenox/test/keys.test.ts".
+- "after a batch signed by the new key, a batch signed by the rotated key is refused whatever time it claims, and a batch claiming a time earlier than its predecessor is refused" lives in "fkts/test/keys.test.ts".
 - "a publisher whose clock steps back publishes on without a refusal, each batch claiming no earlier than the one before" guards `r_rotation`.
-- "a publisher whose clock steps back publishes on without a refusal, each batch claiming no earlier than the one before" lives in "roflenox/test/keys.test.ts".
+- "a publisher whose clock steps back publishes on without a refusal, each batch claiming no earlier than the one before" lives in "fkts/test/keys.test.ts".
 - "a node killed at each point of a later batch restarts with it or at the previous head" guards `r_atomic_write`.
-- "a node killed at each point of a later batch restarts with it or at the previous head" lives in "roflenox/test/durability.test.ts".
+- "a node killed at each point of a later batch restarts with it or at the previous head" lives in "fkts/test/durability.test.ts".
 - "two nodes: publish on A, mirror into B, identical ask answers; mirrored batches keep their original signer's book on B" guards `r_follow`.
-- "two nodes: publish on A, mirror into B, identical ask answers; mirrored batches keep their original signer's book on B" lives in "roflenox/test/federation.test.ts".
+- "two nodes: publish on A, mirror into B, identical ask answers; mirrored batches keep their original signer's book on B" lives in "fkts/test/federation.test.ts".
 - "ROFL_DIR is set for this test run" guards `r_typed`.
 - "ROFL_DIR is set for this test run" lives in "spec/check.test.mjs".
 - "without ROFL_DIR the gate fails and says where to point it" guards `r_typed`.
@@ -1368,21 +1380,21 @@ The checks that exist:
 - "a guard with no `lives in` fact fails links" guards `r_no_orphan_tests`.
 - "a guard with no `lives in` fact fails links" lives in "spec/check.test.mjs".
 - "a name with a space or a text-direction mark is refused, and names at the label and total length limits are accepted" guards `r_identity_names`.
-- "a name with a space or a text-direction mark is refused, and names at the label and total length limits are accepted" lives in "roflenox/test/keys.test.ts".
+- "a name with a space or a text-direction mark is refused, and names at the label and total length limits are accepted" lives in "fkts/test/keys.test.ts".
 - "admin@example.org@evil.example, ada@@example.org and ada.@example.org are refused, so no name reads as an identity of a domain it does not belong to" guards `r_identity_names`.
-- "admin@example.org@evil.example, ada@@example.org and ada.@example.org are refused, so no name reads as an identity of a domain it does not belong to" lives in "roflenox/test/keys.test.ts".
+- "admin@example.org@evil.example, ada@@example.org and ada.@example.org are refused, so no name reads as an identity of a domain it does not belong to" lives in "fkts/test/keys.test.ts".
 - "a user part holding any of < > ( ) [ ] : ; , a backslash or a double quote is refused, while one with + or ' is accepted, as email atext allows" guards `r_identity_names`.
-- "a user part holding any of < > ( ) [ ] : ; , a backslash or a double quote is refused, while one with + or ' is accepted, as email atext allows" lives in "roflenox/test/keys.test.ts".
+- "a user part holding any of < > ( ) [ ] : ; , a backslash or a double quote is refused, while one with + or ' is accepted, as email atext allows" lives in "fkts/test/keys.test.ts".
 - "Node-A, node-a and NODE-A are one identity, and so are a composed and a decomposed accent and a name with a zero-width mark" guards `r_identity_names`.
-- "Node-A, node-a and NODE-A are one identity, and so are a composed and a decomposed accent and a name with a zero-width mark" lives in "roflenox/test/keys.test.ts".
+- "Node-A, node-a and NODE-A are one identity, and so are a composed and a decomposed accent and a name with a zero-width mark" lives in "fkts/test/keys.test.ts".
 - "a label mixing Cyrillic and Latin letters is refused, while an all-Cyrillic name is accepted and shown in Cyrillic" guards `r_identity_names`.
-- "a label mixing Cyrillic and Latin letters is refused, while an all-Cyrillic name is accepted and shown in Cyrillic" lives in "roflenox/test/keys.test.ts".
+- "a label mixing Cyrillic and Latin letters is refused, while an all-Cyrillic name is accepted and shown in Cyrillic" lives in "fkts/test/keys.test.ts".
 - "a grant, a delegation and a follow written with a differently cased or composed name act on the same identity" guards `r_identity_names`.
-- "a grant, a delegation and a follow written with a differently cased or composed name act on the same identity" lives in "roflenox/test/keys.test.ts".
+- "a grant, a delegation and a follow written with a differently cased or composed name act on the same identity" lives in "fkts/test/keys.test.ts".
 - "ada@example.org, Ada@Example.ORG and a fullwidth spelling of it are one identity; ada@пример.рф is accepted and shown in Cyrillic; bot.ada@example.org is its delegated agent's name" guards `r_identity_names`.
-- "ada@example.org, Ada@Example.ORG and a fullwidth spelling of it are one identity; ada@пример.рф is accepted and shown in Cyrillic; bot.ada@example.org is its delegated agent's name" lives in "roflenox/test/keys.test.ts".
+- "ada@example.org, Ada@Example.ORG and a fullwidth spelling of it are one identity; ada@пример.рф is accepted and shown in Cyrillic; bot.ada@example.org is its delegated agent's name" lives in "fkts/test/keys.test.ts".
 - "a live batch dated 301 seconds ahead of its receipt is refused as future-dated, while one dated 301 seconds behind is refused as stale with a request to re-attest" guards `r_freshness`.
-- "a live batch dated 301 seconds ahead of its receipt is refused as future-dated, while one dated 301 seconds behind is refused as stale with a request to re-attest" lives in "roflenox/test/admission.test.ts".
+- "a live batch dated 301 seconds ahead of its receipt is refused as future-dated, while one dated 301 seconds behind is refused as stale with a request to re-attest" lives in "fkts/test/admission.test.ts".
 - "a test that guards no requirement fails the spec gate, and linking it passes" guards `r_no_orphan_tests`.
 - "a test that guards no requirement fails the spec gate, and linking it passes" lives in "spec/check.test.mjs".
 - "a test the scanner cannot read, or one the runner lists and the scanner does not, fails the spec gate" guards `r_no_orphan_tests`.
@@ -1392,121 +1404,121 @@ The checks that exist:
 - "a test that matches a planned check of an accepted requirement but has no guards line is an orphan, and an accepted requirement with one unguarded planned check fails the spec gate" guards `r_no_orphan_tests`.
 - "a test that matches a planned check of an accepted requirement but has no guards line is an orphan, and an accepted requirement with one unguarded planned check fails the spec gate" lives in "spec/check.test.mjs".
 - "with domain vouching on, a first contact with user@domain pins the key its domain publishes over HTTPS, and with it off the same contact needs an invitation" guards `r_domain_vouch`.
-- "with domain vouching on, a first contact with user@domain pins the key its domain publishes over HTTPS, and with it off the same contact needs an invitation" lives in "roflenox/test/domain.test.ts".
+- "with domain vouching on, a first contact with user@domain pins the key its domain publishes over HTTPS, and with it off the same contact needs an invitation" lives in "fkts/test/domain.test.ts".
 - "a domain vouches for no name outside it, never over plain HTTP or across a redirect to another host, and never replaces an already pinned key" guards `r_domain_vouch`.
-- "a domain vouches for no name outside it, never over plain HTTP or across a redirect to another host, and never replaces an already pinned key" lives in "roflenox/test/domain.test.ts".
+- "a domain vouches for no name outside it, never over plain HTTP or across a redirect to another host, and never replaces an already pinned key" lives in "fkts/test/domain.test.ts".
 - "an anonymous first contact as user@127.0.0.1, user@localhost or a user at a name resolving to a private address makes no outbound connection" guards `r_domain_vouch`.
-- "an anonymous first contact as user@127.0.0.1, user@localhost or a user at a name resolving to a private address makes no outbound connection" lives in "roflenox/test/domain.test.ts".
+- "an anonymous first contact as user@127.0.0.1, user@localhost or a user at a name resolving to a private address makes no outbound connection" lives in "fkts/test/domain.test.ts".
 - "a flood of first contacts naming many domains opens a bounded number of domain lookups at a time and repeats none within the cache time" guards `r_domain_vouch`.
-- "a flood of first contacts naming many domains opens a bounded number of domain lookups at a time and repeats none within the cache time" lives in "roflenox/test/domain.test.ts".
+- "a flood of first contacts naming many domains opens a bounded number of domain lookups at a time and repeats none within the cache time" lives in "fkts/test/domain.test.ts".
 - "an internal IPv4 written in any IPv6 form, NAT64, 6to4, IPv4-compatible or mapped, is not a public address" guards `r_domain_vouch`.
-- "an internal IPv4 written in any IPv6 form, NAT64, 6to4, IPv4-compatible or mapped, is not a public address" lives in "roflenox/test/domain.test.ts".
+- "an internal IPv4 written in any IPv6 form, NAT64, 6to4, IPv4-compatible or mapped, is not a public address" lives in "fkts/test/domain.test.ts".
 - "recall finds an entity from a natural-language question that shares no word with its name" guards `r_compat_parity`.
-- "recall finds an entity from a natural-language question that shares no word with its name" lives in "roflenox/test/compat.test.ts".
+- "recall finds an entity from a natural-language question that shares no word with its name" lives in "fkts/test/compat.test.ts".
 - "semantic_search results carry age_days and stale like the base" guards `r_compat_parity`.
-- "semantic_search results carry age_days and stale like the base" lives in "roflenox/test/compat.test.ts".
+- "semantic_search results carry age_days and stale like the base" lives in "fkts/test/compat.test.ts".
 - "a fractional proof_depth is refused" guards `r_compat_parity`.
-- "a fractional proof_depth is refused" lives in "roflenox/test/compat.test.ts".
+- "a fractional proof_depth is refused" lives in "fkts/test/compat.test.ts".
 - "the embedder embeds a book of mixed text lengths in bounded memory and finishes although writes land during its read" guards `r_compat_parity`.
-- "the embedder embeds a book of mixed text lengths in bounded memory and finishes although writes land during its read" lives in "roflenox/test/compat.test.ts".
+- "the embedder embeds a book of mixed text lengths in bounded memory and finishes although writes land during its read" lives in "fkts/test/compat.test.ts".
 - "update_assertion and delete_assertion answer within 100 ms and a read after a write within one second while writes keep arriving" guards `r_compat_parity`.
-- "update_assertion and delete_assertion answer within 100 ms and a read after a write within one second while writes keep arriving" lives in "roflenox/test/perf/compat.test.ts".
+- "update_assertion and delete_assertion answer within 100 ms and a read after a write within one second while writes keep arriving" lives in "fkts/test/perf/compat.test.ts".
 - "why agrees with ask for every literal ask returns, including conf" guards `r_compat_parity`.
-- "why agrees with ask for every literal ask returns, including conf" lives in "roflenox/test/compat.test.ts".
+- "why agrees with ask for every literal ask returns, including conf" lives in "fkts/test/compat.test.ts".
 - "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing" guards `r_single_writer`.
-- "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing" lives in "roflenox/test/lock.test.ts".
+- "a second serve or stdio on a data directory another process holds refuses to start, names the holder and changes nothing" lives in "fkts/test/lock.test.ts".
 - "eight concurrent local publishes through one serve are all admitted, in one chain, and the node records no fork of its own identity" guards `r_single_writer`.
-- "eight concurrent local publishes through one serve are all admitted, in one chain, and the node records no fork of its own identity" lives in "roflenox/test/lock.test.ts".
+- "eight concurrent local publishes through one serve are all admitted, in one chain, and the node records no fork of its own identity" lives in "fkts/test/lock.test.ts".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" guards `r_asserted_by`.
 - "a node with a public URL admits an operator-signed local import sent to 127.0.0.1 and still refuses a signature made for another host" guards `r_public_url_local`.
-- "a node with a public URL admits an operator-signed local import sent to 127.0.0.1 and still refuses a signature made for another host" lives in "roflenox/test/access.test.ts".
+- "a node with a public URL admits an operator-signed local import sent to 127.0.0.1 and still refuses a signature made for another host" lives in "fkts/test/access.test.ts".
 - "a client registered dynamically completes authorize with the owner's secret, PKCE S256 and its redirect_uri, gets an access token, and lists tools over /mcp with it" guards `r_mcp_oauth`.
-- "a client registered dynamically completes authorize with the owner's secret, PKCE S256 and its redirect_uri, gets an access token, and lists tools over /mcp with it" lives in "roflenox/test/oauth.test.ts".
+- "a client registered dynamically completes authorize with the owner's secret, PKCE S256 and its redirect_uri, gets an access token, and lists tools over /mcp with it" lives in "fkts/test/oauth.test.ts".
 - "authorize without the owner's secret, with a wrong secret, with plain PKCE, with a redirect_uri other than the registered one, or a code redeemed twice or by another client, yields no token" guards `r_mcp_oauth`.
-- "authorize without the owner's secret, with a wrong secret, with plain PKCE, with a redirect_uri other than the registered one, or a code redeemed twice or by another client, yields no token" lives in "roflenox/test/oauth.test.ts".
+- "authorize without the owner's secret, with a wrong secret, with plain PKCE, with a redirect_uri other than the registered one, or a code redeemed twice or by another client, yields no token" lives in "fkts/test/oauth.test.ts".
 - "a reused refresh token revokes its family, a revoked or expired access token gets 401, and an access token minted for another resource is refused" guards `r_mcp_oauth`.
-- "a reused refresh token revokes its family, a revoked or expired access token gets 401, and an access token minted for another resource is refused" lives in "roflenox/test/oauth.test.ts".
+- "a reused refresh token revokes its family, a revoked or expired access token gets 401, and an access token minted for another resource is refused" lives in "fkts/test/oauth.test.ts".
 - "wrong secrets from one address lock that address only: the owner approves from another address meanwhile, and a forwarded address from a non-loopback peer is ignored" guards `r_oauth_lockout`.
-- "wrong secrets from one address lock that address only: the owner approves from another address meanwhile, and a forwarded address from a non-loopback peer is ignored" lives in "roflenox/test/oauth.test.ts".
+- "wrong secrets from one address lock that address only: the owner approves from another address meanwhile, and a forwarded address from a non-loopback peer is ignored" lives in "fkts/test/oauth.test.ts".
 - "a hundred and one wrong secrets from distinct IPv6 addresses in one /64 lock that /64 only, and the owner at a fresh address still approves after any number of wrong secrets from other addresses" guards `r_oauth_lockout`.
-- "a hundred and one wrong secrets from distinct IPv6 addresses in one /64 lock that /64 only, and the owner at a fresh address still approves after any number of wrong secrets from other addresses" lives in "roflenox/test/oauth.test.ts".
+- "a hundred and one wrong secrets from distinct IPv6 addresses in one /64 lock that /64 only, and the owner at a fresh address still approves after any number of wrong secrets from other addresses" lives in "fkts/test/oauth.test.ts".
 - "a write over OAuth without asserted_by is claimed by the approved client's name, and every read tool shows asserted_by and claimed_by on that edge" guards `r_claimed_author`.
-- "a write over OAuth without asserted_by is claimed by the approved client's name, and every read tool shows asserted_by and claimed_by on that edge" lives in "roflenox/test/oauth.test.ts".
+- "a write over OAuth without asserted_by is claimed by the approved client's name, and every read tool shows asserted_by and claimed_by on that edge" lives in "fkts/test/oauth.test.ts".
 - "recent_activity with and without a limit agrees on its first rows, and a write made now comes first in both" guards `r_recent_order`.
-- "recent_activity with and without a limit agrees on its first rows, and a write made now comes first in both" lives in "roflenox/test/recent.test.ts".
+- "recent_activity with and without a limit agrees on its first rows, and a write made now comes first in both" lives in "fkts/test/recent.test.ts".
 - "a second search on an unchanged book is answered within ten seconds, and a search after five new facts within ten seconds too" guards `r_search_latency`.
-- "a second search on an unchanged book is answered within ten seconds, and a search after five new facts within ten seconds too" lives in "roflenox/test/perf/search.test.ts".
+- "a second search on an unchanged book is answered within ten seconds, and a search after five new facts within ten seconds too" lives in "fkts/test/perf/search.test.ts".
 - "an embedder whose embedding takes longer than the freshness window still has every request admitted" guards `r_search_latency`.
-- "an embedder whose embedding takes longer than the freshness window still has every request admitted" lives in "roflenox/test/search.test.ts".
+- "an embedder whose embedding takes longer than the freshness window still has every request admitted" lives in "fkts/test/search.test.ts".
 - "graph_stats by default stays under 4 KB on the owner's book and its full form still matches the Enox breakdown" guards `r_stats_bounded`.
-- "graph_stats by default stays under 4 KB on the owner's book and its full form still matches the Enox breakdown" lives in "roflenox/test/stats.test.ts".
+- "graph_stats by default stays under 4 KB on the owner's book and its full form still matches the Enox breakdown" lives in "fkts/test/stats.test.ts".
 - "ask with an unquoted relation, a misspelt relation, an unknown predicate or an unknown perspective answers no rows with a note naming the cause and the nearest existing names" guards `r_empty_explains`.
-- "ask with an unquoted relation, a misspelt relation, an unknown predicate or an unknown perspective answers no rows with a note naming the cause and the nearest existing names" lives in "roflenox/test/empty.test.ts".
+- "ask with an unquoted relation, a misspelt relation, an unknown predicate or an unknown perspective answers no rows with a note naming the cause and the nearest existing names" lives in "fkts/test/empty.test.ts".
 - "ask whose question is well formed but matches nothing answers no rows and no note" guards `r_empty_explains`.
-- "ask whose question is well formed but matches nothing answers no rows and no note" lives in "roflenox/test/empty.test.ts".
+- "ask whose question is well formed but matches nothing answers no rows and no note" lives in "fkts/test/empty.test.ts".
 - "on an owner-sized book a misspelt relation and an unknown constant are answered with their note within one second" guards `r_empty_explains`.
-- "on an owner-sized book a misspelt relation and an unknown constant are answered with their note within one second" lives in "roflenox/test/perf/empty.test.ts".
+- "on an owner-sized book a misspelt relation and an unknown constant are answered with their note within one second" lives in "fkts/test/perf/empty.test.ts".
 - "update_assertion, delete_assertion and why accept either the Enox fact_id or the fact id ask returns, and add_assertion returns both" guards `r_one_fact_id`.
-- "update_assertion, delete_assertion and why accept either the Enox fact_id or the fact id ask returns, and add_assertion returns both" lives in "roflenox/test/retest.test.ts".
+- "update_assertion, delete_assertion and why accept either the Enox fact_id or the fact id ask returns, and add_assertion returns both" lives in "fkts/test/retest.test.ts".
 - "after delete_assertion the edge is gone from live and still in edge with confidence zero" guards `r_live_view`.
-- "after delete_assertion the edge is gone from live and still in edge with confidence zero" lives in "roflenox/test/retest.test.ts".
+- "after delete_assertion the edge is gone from live and still in edge with confidence zero" lives in "fkts/test/retest.test.ts".
 - "after update_node only the new description holds in live while the old one stays in edge" guards `r_live_view`.
-- "after update_node only the new description holds in live while the old one stays in edge" lives in "roflenox/test/retest.test.ts".
+- "after update_node only the new description holds in live while the old one stays in edge" lives in "fkts/test/retest.test.ts".
 - "a grant replaced by a newer grant to the same grantee leaves exactly one grant in live" guards `r_live_view`.
-- "a grant replaced by a newer grant to the same grantee leaves exactly one grant in live" lives in "roflenox/test/retest.test.ts".
+- "a grant replaced by a newer grant to the same grantee leaves exactly one grant in live" lives in "fkts/test/retest.test.ts".
 - "add_assertion that creates its target node leaves that node without a description and keeps the context on the edge" guards `r_edge_context_stays`.
-- "add_assertion that creates its target node leaves that node without a description and keeps the context on the edge" lives in "roflenox/test/retest.test.ts".
+- "add_assertion that creates its target node leaves that node without a description and keeps the context on the edge" lives in "fkts/test/retest.test.ts".
 - "retract_node removes a node and its edges from explore, traverse, query_graph and live in one batch, and they remain in edge with confidence zero" guards `r_retract_node`.
-- "retract_node removes a node and its edges from explore, traverse, query_graph and live in one batch, and they remain in edge with confidence zero" lives in "roflenox/test/retest.test.ts".
+- "retract_node removes a node and its edges from explore, traverse, query_graph and live in one batch, and they remain in edge with confidence zero" lives in "fkts/test/retest.test.ts".
 - "delete_assertion retracts a fact asserted through assert under another perspective" guards `r_delete_any_perspective`.
-- "delete_assertion retracts a fact asserted through assert under another perspective" lives in "roflenox/test/retest.test.ts".
+- "delete_assertion retracts a fact asserted through assert under another perspective" lives in "fkts/test/retest.test.ts".
 - "assert returns the batch digest, its chain position and every admitted fact id, and they match chain and ask" guards `r_assert_receipt`.
-- "assert returns the batch digest, its chain position and every admitted fact id, and they match chain and ask" lives in "roflenox/test/retest.test.ts".
+- "assert returns the batch digest, its chain position and every admitted fact id, and they match chain and ask" lives in "fkts/test/retest.test.ts".
 - "the schema tool lists every predicate ask answers with its arity and every perspective present, and asking each listed predicate with its arity is never refused" guards `r_introspect`.
-- "the schema tool lists every predicate ask answers with its arity and every perspective present, and asking each listed predicate with its arity is never refused" lives in "roflenox/test/retest.test.ts".
+- "the schema tool lists every predicate ask answers with its arity and every perspective present, and asking each listed predicate with its arity is never refused" lives in "fkts/test/retest.test.ts".
 - "wrong arity, a conjunction, a negation and a fact held only under another perspective each get one consistent explanation without engine internals" guards `r_query_errors`.
-- "wrong arity, a conjunction, a negation and a fact held only under another perspective each get one consistent explanation without engine internals" lives in "roflenox/test/retest.test.ts".
+- "wrong arity, a conjunction, a negation and a fact held only under another perspective each get one consistent explanation without engine internals" lives in "fkts/test/retest.test.ts".
 - "chain pages with a limit, semantic_search cuts descriptions to the cap, and why on an Enox edge answers once with the batch and claim of its axiom" guards `r_bounded_reads`.
-- "chain pages with a limit, semantic_search cuts descriptions to the cap, and why on an Enox edge answers once with the batch and claim of its axiom" lives in "roflenox/test/retest.test.ts".
+- "chain pages with a limit, semantic_search cuts descriptions to the cap, and why on an Enox edge answers once with the batch and claim of its axiom" lives in "fkts/test/retest.test.ts".
 - "tools/list holds no tool described as not offered, and re-adding a deleted edge answers restored" guards `r_tool_list_clean`.
-- "tools/list holds no tool described as not offered, and re-adding a deleted edge answers restored" lives in "roflenox/test/retest.test.ts".
+- "tools/list holds no tool described as not offered, and re-adding a deleted edge answers restored" lives in "fkts/test/retest.test.ts".
 - "two asks at the same head answer the same rows while writes land between them, and an ask at a head older than the node keeps is refused naming the oldest it keeps" guards `r_ask_at_revision`.
-- "two asks at the same head answer the same rows while writes land between them, and an ask at a head older than the node keeps is refused naming the oldest it keeps" lives in "roflenox/test/retest.test.ts".
+- "two asks at the same head answer the same rows while writes land between them, and an ask at a head older than the node keeps is refused naming the oldest it keeps" lives in "fkts/test/retest.test.ts".
 - "ask since a digest answers only the facts admitted after it, and its cost on an owner-sized book grows with the new facts, not the log" guards `r_ask_since`.
-- "ask since a digest answers only the facts admitted after it, and its cost on an owner-sized book grows with the new facts, not the log" lives in "roflenox/test/perf/since.test.ts".
+- "ask since a digest answers only the facts admitted after it, and its cost on an owner-sized book grows with the new facts, not the log" lives in "fkts/test/perf/since.test.ts".
 - "ask ordered by admission lists rows in the order their batches were admitted, the same after a restart" guards `r_admission_order`.
-- "ask ordered by admission lists rows in the order their batches were admitted, the same after a restart" lives in "roflenox/test/retest.test.ts".
+- "ask ordered by admission lists rows in the order their batches were admitted, the same after a restart" lives in "fkts/test/retest.test.ts".
 - "two sessions that claim the same task at once each get an answer naming the same single winner, and no batch lands between a claim and its answer" guards `r_assert_then_ask`.
-- "two sessions that claim the same task at once each get an answer naming the same single winner, and no batch lands between a claim and its answer" lives in "roflenox/test/retest.test.ts".
+- "two sessions that claim the same task at once each get an answer naming the same single winner, and no batch lands between a claim and its answer" lives in "fkts/test/retest.test.ts".
 - "a batch that names the head its author knew keeps it through admission, mirroring and a restart, and a forged head breaks the signature" guards `r_knew_head`.
-- "a batch that names the head its author knew keeps it through admission, mirroring and a restart, and a forged head breaks the signature" lives in "roflenox/test/retest.test.ts".
+- "a batch that names the head its author knew keeps it through admission, mirroring and a restart, and a forged head breaks the signature" lives in "fkts/test/retest.test.ts".
 - "every tool shows times in one form, and a lease that expires by the node's admission times expires whatever time its writer claimed" guards `r_one_time`.
-- "every tool shows times in one form, and a lease that expires by the node's admission times expires whatever time its writer claimed" lives in "roflenox/test/retest.test.ts".
+- "every tool shows times in one form, and a lease that expires by the node's admission times expires whatever time its writer claimed" lives in "fkts/test/retest.test.ts".
 - "createAssertion requires asserted_by — 400 when missing, round-trips (with proof_depth) when present" lives in "personal-node/src/mcp/main-graph.test.ts".
 - "ask answers a conjunction joining edge and conf, refuses an unbound negation with a note, and stops at the budget with the budget named" guards `r_conjunction`.
-- "ask answers a conjunction joining edge and conf, refuses an unbound negation with a note, and stops at the budget with the budget named" lives in "roflenox/test/retest.test.ts".
+- "ask answers a conjunction joining edge and conf, refuses an unbound negation with a note, and stops at the budget with the budget named" lives in "fkts/test/retest.test.ts".
 - "a rule in the owner's book derives a predicate that ask answers and why explains with that rule" guards `r_owner_rules`.
-- "a rule in the owner's book derives a predicate that ask answers and why explains with that rule" lives in "roflenox/test/retest.test.ts".
+- "a rule in the owner's book derives a predicate that ask answers and why explains with that rule" lives in "fkts/test/retest.test.ts".
 - "a rule that concludes a built-in predicate or exceeds the budget is refused at admission and stored facts and grants are unchanged" guards `r_owner_rules`.
-- "a rule that concludes a built-in predicate or exceeds the budget is refused at admission and stored facts and grants are unchanged" lives in "roflenox/test/retest.test.ts".
+- "a rule that concludes a built-in predicate or exceeds the budget is refused at admission and stored facts and grants are unchanged" lives in "fkts/test/retest.test.ts".
 - "a rule written by a delegated session derives for the owner, and goes inert once that session is revoked" guards `r_owner_rules`.
-- "a rule written by a delegated session derives for the owner, and goes inert once that session is revoked" lives in "roflenox/test/retest.test.ts".
+- "a rule written by a delegated session derives for the owner, and goes inert once that session is revoked" lives in "fkts/test/retest.test.ts".
 - "two exports of one perspective at the same head are byte-identical, and an export after a retraction no longer holds the retracted fact" guards `r_perspective_export`.
-- "two exports of one perspective at the same head are byte-identical, and an export after a retraction no longer holds the retracted fact" lives in "roflenox/test/retest.test.ts".
+- "two exports of one perspective at the same head are byte-identical, and an export after a retraction no longer holds the retracted fact" lives in "fkts/test/retest.test.ts".
 - "delete_assertion with an attribute fact's id names the node and attribute and points to update_node or retract_node" guards `r_attribute_delete_explains`.
-- "delete_assertion with an attribute fact's id names the node and attribute and points to update_node or retract_node" lives in "roflenox/test/retest.test.ts".
+- "delete_assertion with an attribute fact's id names the node and attribute and points to update_node or retract_node" lives in "fkts/test/retest.test.ts".
 - "on an owner-sized book under a 1 GB heap, ten concurrent graph_stats, recall and ask calls while an embedder polls leave the node alive and answering, and graph_stats answers within 200 ms" guards `r_heap_headroom`.
-- "on an owner-sized book under a 1 GB heap, ten concurrent graph_stats, recall and ask calls while an embedder polls leave the node alive and answering, and graph_stats answers within 200 ms" lives in "roflenox/test/perf/headroom.test.ts".
+- "on an owner-sized book under a 1 GB heap, ten concurrent graph_stats, recall and ask calls while an embedder polls leave the node alive and answering, and graph_stats answers within 200 ms" lives in "fkts/test/perf/headroom.test.ts".
 - "two OAuth sessions write as two distinct identities delegated by the owner, neither can sign as the other or as the owner, and a revoked session can no longer write" guards `r_session_identity`.
-- "two OAuth sessions write as two distinct identities delegated by the owner, neither can sign as the other or as the owner, and a revoked session can no longer write" lives in "roflenox/test/sessions.test.ts".
+- "two OAuth sessions write as two distinct identities delegated by the owner, neither can sign as the other or as the owner, and a revoked session can no longer write" lives in "fkts/test/sessions.test.ts".
 - "a session token is refused for operator_token, the OAuth grant list and revocation, and after the owner's key rotates no session identity can write until approved again" guards `r_session_identity`.
-- "a session token is refused for operator_token, the OAuth grant list and revocation, and after the owner's key rotates no session identity can write until approved again" lives in "roflenox/test/sessions.test.ts".
+- "a session token is refused for operator_token, the OAuth grant list and revocation, and after the owner's key rotates no session identity can write until approved again" lives in "fkts/test/sessions.test.ts".
 - "a reader granted the owner's book reads what a session wrote while delegated, still reads it after the session is revoked, and a stranger reads none of it" guards `r_session_identity`.
-- "a reader granted the owner's book reads what a session wrote while delegated, still reads it after the session is revoked, and a stranger reads none of it" lives in "roflenox/test/sessions.test.ts".
+- "a reader granted the owner's book reads what a session wrote while delegated, still reads it after the session is revoked, and a stranger reads none of it" lives in "fkts/test/sessions.test.ts".
 - "a session that deletes an edge the owner or another session asserted removes it from live and from every Enox read alike, and conf shows it retired" guards `r_session_identity`.
-- "a session that deletes an edge the owner or another session asserted removes it from live and from every Enox read alike, and conf shows it retired" lives in "roflenox/test/sessions.test.ts".
+- "a session that deletes an edge the owner or another session asserted removes it from live and from every Enox read alike, and conf shows it retired" lives in "fkts/test/sessions.test.ts".
 - "a session's grant, export, delegation, trust or follow is refused at admission, a stranger it named reads nothing, and the owner's grant still works" guards `r_session_no_access_control`.
-- "a session's grant, export, delegation, trust or follow is refused at admission, a stranger it named reads nothing, and the owner's grant still works" lives in "roflenox/test/sessions.test.ts".
+- "a session's grant, export, delegation, trust or follow is refused at admission, a stranger it named reads nothing, and the owner's grant still works" lives in "fkts/test/sessions.test.ts".
 
 ## Что выводится
 
