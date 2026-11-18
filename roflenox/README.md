@@ -434,14 +434,15 @@ each row, so nothing is said twice or missed across a restart.
 
 A **pod** is a node of its own identity beside an engine that holds one
 program (the JS model of `@grafema/rofl`, or any ROFL files) over **only its
-files** of a corpus, plus the corpus's core (the facts a scan writes naming no
-file: the listing, the strings). A **coordinator** is a plain node that
+files** of a corpus, plus the part of the corpus's core (the facts a scan
+writes naming no file: the listing, the strings) that its files reach by the
+program's keys (below, *The core, routed*). A **coordinator** is a plain node that
 follows the pods' feeds and holds the cross-file rules and the question; a
 subscriber on it (step 9) is sent each pod's edit as a delta. `src/federation.ts`.
 
 ```
   pod-0 (files A)                 pod-1 (files B)
-  engine: program + core + A      engine: program + core + B
+  engine: program + core(A) + A   engine: program + core(B) + B
   watch(escapes) -> rows +/-      watch(escapes) -> rows +/-
   node pod-0: signed batches      node pod-1: signed batches
         \  roflenox:follow (pull)  /
@@ -498,6 +499,32 @@ fact taken out of the pod's world behind it, so the engine refuses the edit)
 goes anew. The planted faults `P1` (a pod never retires a row), `P2` (an
 escape omitted), `P3` (constants misread), `P4` (anew forgets what went) turn it red.
 
+**The core, routed** (`coreDemand`, `CoreRouter` in `src/federation.ts`). Which
+core facts a pod holds is decided by the program's rules, not by relation
+names, the way the engine's volumes lay a fact where a rule joins it
+(`f_volumes_cross_by_the_rules_keys` in Disentinel/rofl): the escapes are
+demanded whole; a rule's head demand flows to its premises in a sideways order
+(a premise over an anchored relation first, one whose every derivation reads a
+file's fact; then the ones already bound), and a premise is keyed at the
+positions that the head's demand, a constant or an earlier premise binds to a
+*stored* value (a position no `is` or compound writes, the greatest fixpoint).
+A core fact is laid in a pod when one key of its relation holds, at each keyed
+position, a value of the pod's world: its files' facts, the program's
+constants, the core facts laid so far, to a fixpoint. It is magic sets with
+each magic relation widened to that one set of values, so every core fact a
+derivation of an escape reads is laid; the oracle holds it to the whole world.
+For the JS model it reads `str_*` by the string, `fs_dir_of` by the file,
+`fs_parent` by the directory, `fs_dir_in` by directory and segment, `fs_file_in`
+by directory or by name. A program with a construct the analysis does not
+model (a lattice, a dominance rule, a `want`) gives every pod the whole core.
+
+The harness scans each file alone (as `rofl scan DIR FILE` does; the union of
+the shares is held against the whole scan at start) and counts, for each core
+fact, the files whose share holds it: an edit changes the file's share, a fact
+no file holds any more leaves the corpus, and the router re-routes only the
+pods whose files moved, that held a fact that left, or whose values reach a
+fact that came; each of them gets one `edit` of its core by delta.
+
 **`why` on the coordinator** reaches the pod's signed batch: the row's facts,
 their batch digest, admission and the pod's batch number, and the grant it
 reads by. Below that is the pod's own proof, which `pod.why(L)` answers in
@@ -518,10 +545,36 @@ The answer (903 rows) equals the whole world's. On `observableInternal` (39
 files, 2 pods) with the follow executor at 50 ms: frames 284 ms (an export
 added) and 1.3 s (a rename, the pod anew).
 
+**The core routed, measured** (`scripts/pods-cost.ts DIR N [--whole-core]`,
+the flag the control: every pod the whole core; `scripts/core-scale.ts ROOT N
+PREFIX...` routes without an engine; release semantics `fast`, shared laptop):
+
+| | core facts per pod, whole → routed | pod engine MB, whole → routed | pods a new string reaches | pods a new file reaches |
+|---|---|---|---|---|
+| observableInternal, 37 files, 2 pods | 1 062 → 742 / 525 | 182 / 189 → 192 / 197 | 2 → 1 | 2 → 2 |
+| base/common, 153 files, 3 pods | 17 302 → 5 265 / 6 777 / 7 535 | 452 / 682 / 641 → 458 / 674 / 699 | 3 → 1 | 3 → 3 |
+| vs/base, 304 files, 4 pods (router only) | 30 881 → 8 025 – 10 961 | | → 1 | |
+| base+platform, 1 067 files, 8 pods | 100 615 → 14 303 – 21 458 | | → 1 | |
+| base+platform+editor, 1 727 files, 13 pods | 151 363 → 12 282 – 22 349 | | → 1 | |
+
+The oracle equal at the end of every run. At these sizes the core is under 1%
+of what a pod's engine holds and the pod's memory does not move (within the
+noise); the program alone with 148 457 core facts (1 724 files) takes 241 MB
+against 111 MB with one 133-file pod's share of 17 083 (84 MB the program alone),
+about 1.06 KB a core fact. At 11 100 files the core is about 88 facts a file,
+~975 000 facts and ~1 GB in every pod before; routed, a pod holds its files'
+strings (~110 facts a file of the pod) and the part of the listing its walks
+and the names reach (75% of it at 1 067 files, 64% at 1 727: ~15 000 facts at
+11 100): ~170 000 facts (~180 MB) with 8 pods, ~55 000 (~60 MB) with 32.
+What still grows with the corpus: the listing a pod reaches (one value set for
+every key: a name like `index.ts` read by `last_ext` carries every directory
+holding one, and their files with it) and the router, which holds the whole
+core once beside the scanner.
+
 **What does not scale yet:** (an edit that takes facts out cost the pod's
 whole evaluation while the engine retracted one fact per request, 343 ms a
 fact; since `edit` it costs the facts that moved: on observableInternal, 2
-pods of 19 and 18 files, the rename 842 ms anew against 93 ms by `edit`.) Every pod holds the whole corpus's core; the cut (which
+pods of 19 and 18 files, the rename 842 ms anew against 93 ms by `edit`.) The cut (which
 rules are the coordinator's) is given, not derived, and a model rule that
 crosses files through another relation (here `may_be_node`, behind
 `export { x }` of an imported `x`) must be among the coordinator's rules or the
