@@ -42,6 +42,13 @@ const big = sizes.indexOf(Math.max(...sizes));
 const by: Record<string, number> = {}, all: Record<string, number> = {};
 for (const l of r.share(big)) { const k = cellsOf(l).rel; by[k] = (by[k] ?? 0) + 1; }
 for (const l of core.keys()) { const k = cellsOf(l).rel; all[k] = (all[k] ?? 0) + 1; }
+// The listing: the facts of the directory tree (fs_*), and the share of it each pod holds.
+const isListing = (l: string) => cellsOf(l).rel.startsWith('fs_');
+const listing = [...core.keys()].filter(isListing).length;
+const share = (keep: (l: string) => boolean, of: number) => Array.from({ length: pods }, (_, i) => Math.round((1000 * [...r.share(i)].filter(keep).length) / of) / 1000);
+const listingShare = share(isListing, listing);
+// fs_file_in: one fact a file of the corpus, the share of the corpus's files whose listing a pod holds.
+const fileShare = share((l) => cellsOf(l).rel === 'fs_file_in', all.fs_file_in ?? 1);
 // One file of pod 0 gains a string no other file holds: the core's change, routed.
 const s = '"pods-core-scale-probe"';
 const probe = [`str_segs[code](${s}, 1).`, `str_char0[code](${s}, "p").`, `str_seg[code](${s}, 0, ${s}).`];
@@ -49,4 +56,4 @@ r.core(probe, []);
 r.files(0, [`ast_attr[code](n0000000000000000_1, value, ${s}).`], []);
 const touched = r.route().size;
 console.log(JSON.stringify({ root, prefixes, files: mine.length, pods, scan_ms: Math.round(scanMs), route_ms: Math.round(routeMs), corpus_core: core.size,
-  core_by_relation: all, share_per_pod: sizes, largest_share_by_relation: by, a_new_string_reaches_pods: touched }, null, 1));
+  core_by_relation: all, share_per_pod: sizes, listing, listing_share_per_pod: listingShare, file_listing_share_per_pod: fileShare, largest_share_by_relation: by, a_new_string_reaches_pods: touched }, null, 1));

@@ -5468,8 +5468,8 @@
    "file": "src/federation.ts",
    "edits": [
     [
-     "for (const c of f.cells) if (!held.has(c)) { held.add(c); todo.push(c); }",
-     "for (const c of f.cells) if (false && !held.has(c)) { held.add(c); todo.push(c); }"
+     "      f.cells.forEach((c, j) => hold(`${f.rel}#${j}`, c));",
+     "      f.cells.forEach((c, j) => false && hold(`${f.rel}#${j}`, c));"
     ]
    ],
    "red": [
@@ -5488,6 +5488,48 @@
    ],
    "red": [
     "pods: a pod holds the core its files reach; a core change reaches only the pods it moves; a string no file holds leaves"
+   ]
+  },
+  {
+   "id": "P8",
+   "title": "the router shares one set of values across every key (a value held at one key opens another)",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "return from.values.has(c) || held.get(this.group.get(from)!)?.has(c) === true;",
+     "return from.values.has(c) || [...held.values()].some((h) => h.has(c));"
+    ]
+   ],
+   "red": [
+    "core routed by key: a name held at one key of the listing does not open the directories holding it"
+   ]
+  },
+  {
+   "id": "P9",
+   "title": "a premise that only asks whether some fact holds a value lays every such fact, not one witness",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "if (!k.exists) { lay(l, f); return; }",
+     "if (true) { lay(l, f); return; }"
+    ]
+   ],
+   "red": [
+    "core routed by key: a name held at one key of the listing does not open the directories holding it"
+   ]
+  },
+  {
+   "id": "P10",
+   "title": "a key reads a derived relation's values as if it held base facts (the sources it is derived from dropped)",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "      else for (const u of derived.get(t.slice(2)) ?? []) go(u);",
+     "      else sources.add(t.slice(2));"
+    ]
+   ],
+   "red": [
+    "core routed by key: a name held at one key of the listing does not open the directories holding it"
    ]
   },
   {

@@ -466,7 +466,7 @@ Run it (needs `ROFL_BIN`, a `rofl` with `watch`; nothing to build):
 ```sh
 export ROFL_BIN=/path/to/rofl            # Disentinel/rofl with watch
 node --experimental-strip-types --no-warnings --test test/pods.test.ts      # the oracle, ~13 s
-npm run mutants -- --only P1,P2,P3,P4                                         # its planted faults, all red
+npm run mutants -- --only P1,P2,P3,P4,P5,P6,P7,P8,P9,P10                     # its planted faults, all red
 node --experimental-strip-types --no-warnings scripts/pods-cost.ts DIR 3 --interleave   # the cost on a corpus
 ```
 
@@ -508,14 +508,24 @@ demanded whole; a rule's head demand flows to its premises in a sideways order
 file's fact; then the ones already bound), and a premise is keyed at the
 positions that the head's demand, a constant or an earlier premise binds to a
 *stored* value (a position no `is` or compound writes, the greatest fixpoint).
-A core fact is laid in a pod when one key of its relation holds, at each keyed
-position, a value of the pod's world: its files' facts, the program's
-constants, the core facts laid so far, to a fixpoint. It is magic sets with
-each magic relation widened to that one set of values, so every core fact a
-derivation of an escape reads is laid; the oracle holds it to the whole world.
-For the JS model it reads `str_*` by the string, `fs_dir_of` by the file,
-`fs_parent` by the directory, `fs_dir_in` by directory and segment, `fs_file_in`
-by directory or by name. A program with a construct the analysis does not
+Each keyed position carries where its values come from: the places of base
+relations that bind it (through the derived relations between, resolved) and
+the program's constants. A core fact is laid in a pod when one key of its
+relation holds, at each keyed position, a value that the pod's world holds at
+one of *that position's* sources (its files' facts and the core facts laid so
+far, to a fixpoint), so a value bound at one key does not open another. A
+premise whose other places are all `_` only asks whether some fact holds the
+keyed values; for it one fact of each such tuple (a witness, the least) is
+laid. It is magic sets with each magic relation widened to the values its
+sources hold, so every core fact a derivation of an escape reads is laid; the
+oracle holds it to the whole world. For the JS model it reads `str_*` by the
+string, `fs_dir_of` by the file a site or node names, `fs_parent` and
+`fs_file_in` by a directory a walk reaches, `fs_dir_in` by such a directory and
+a segment, and `fs_file_in` by name only for `last_ext` (a witness: the pod's
+own file of that name). Engine-free, `test/core-router.test.ts` holds it on a
+corpus where a string `"z.ts"` and the name `index.ts` must not open `other/`;
+planted faults P8 (one set of values for every key), P9 (no witness) and P10
+(a derived relation's sources dropped, which the engine oracles also see). A program with a construct the analysis does not
 model (a lattice, a dominance rule, a `want`) gives every pod the whole core.
 
 The harness scans each file alone (as `rofl scan DIR FILE` does; the union of
@@ -557,6 +567,27 @@ PREFIX...` routes without an engine; release semantics `fast`, shared laptop):
 | base+platform, 1 067 files, 8 pods | 100 615 → 14 303 – 21 458 | | → 1 | |
 | base+platform+editor, 1 727 files, 13 pods | 151 363 → 12 282 – 22 349 | | → 1 | |
 
+**Keyed per position** (2026-11-18; the same corpora, the router of the
+commit before as the control, run beside it; "listing" the `fs_*` facts,
+"files" the share of the corpus's `fs_file_in`, one fact a file):
+
+| | core facts per pod, one set → per key | listing per pod | files listed per pod | route ms, all pods |
+|---|---|---|---|---|
+| vs/base, 304 files, 4 pods | 8 029 – 10 964 → 7 595 – 10 575 | 42 – 53% → 24 – 32% | 70 – 83% → 55 – 71% | 50 → 124 |
+| base+platform, 1 067 files, 8 pods | 14 307 – 21 462 → 12 842 – 20 208 | 30 – 52% → 9 – 30% | 49 – 80% → 20 – 65% | 207 → 654 |
+| base+platform+editor, 1 727 files, 13 pods | 12 286 – 22 353 → 10 328 – 20 565 | 30 – 49% → 5 – 29% | 51 – 76% → 12 – 66% | 339 → 1 619 |
+| base/common, 153 files, 3 pods (pods-cost) | 8 218 / 6 113 / 4 938 → 8 090 / 5 918 / 4 746 | | | |
+
+On base/common the pods' engines are 693 / 545 / 597 MB before and 701 / 549 /
+583 MB after (noise), the oracle equal at the end of both runs (891 rows); a
+new string reaches 1 pod, a new file all 3 (one directory). What a pod's
+listing still holds is the whole listing of every directory its imports walk
+into: `file_stem` reads a directory's every file to find a stem it cuts with
+`str_sub`, which no key can bind, so a pod that imports into
+`base/common` holds its listing whole (on base/common, one directory, the
+files share stays 73 – 96%). The share falls with the corpus where the
+directories walked into do not grow with it.
+
 The oracle equal at the end of every run. At these sizes the core is under 1%
 of what a pod's engine holds and the pod's memory does not move (within the
 noise); the program alone with 148 457 core facts (1 724 files) takes 241 MB
@@ -566,10 +597,11 @@ about 1.06 KB a core fact. At 11 100 files the core is about 88 facts a file,
 strings (~110 facts a file of the pod) and the part of the listing its walks
 and the names reach (75% of it at 1 067 files, 64% at 1 727: ~15 000 facts at
 11 100): ~170 000 facts (~180 MB) with 8 pods, ~55 000 (~60 MB) with 32.
-What still grows with the corpus: the listing a pod reaches (one value set for
-every key: a name like `index.ts` read by `last_ext` carries every directory
-holding one, and their files with it) and the router, which holds the whole
-core once beside the scanner.
+What still grows with the corpus: the listing of the directories a pod's
+imports walk into (above; the keys no longer carry a name like `index.ts`
+into every directory holding one), and the router, which holds the whole core
+once beside the scanner and routes slower than with one set of values (1.6 s
+for 13 pods at 1 727 files, against 0.3 s).
 
 **What does not scale yet:** (an edit that takes facts out cost the pod's
 whole evaluation while the engine retracted one fact per request, 343 ms a
