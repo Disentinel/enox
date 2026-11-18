@@ -352,21 +352,38 @@ reask`).
 open "http://127.0.0.1:7380/view/node.example.org/stale-pages#token=<OPERATOR_TOKEN>"
 ```
 
-The page is static HTML+JS: it opens its own path as an event stream with the
-token from `#token=` (kept in the page's memory only, or typed in) and lights
-rows up as they come and dims them as they go. A literal with no book is the
-owner's book. The same path answers `Accept: text/event-stream` (the stream)
-and a plain call (the `view` op: one frame).
+The page is static HTML+JS: it opens the stream of `/view/<owner>/<name>` on
+its own origin (a prefix of path segments a reverse proxy adds is kept) with
+the token from `#token=` (kept in the page's memory only, or typed in) and
+lights rows up as they come and dims them as they go. It is served with a
+Content-Security-Policy that runs only its own script and style, connects
+only to its own origin (`connect-src 'self'`) and lets nobody frame it
+(`frame-ancestors 'none'`, `X-Frame-Options: DENY`). The node refuses (400
+`bad_path`) any request path a URL parser would read as another: a leading
+`//` or `/\` (a host), a `.` or `..` segment, plain or percent-encoded — so a
+reverse proxy must pass paths through as the browser sent them. A literal
+with no book is the owner's book. The same path answers `Accept:
+text/event-stream` (the stream) and a plain call (the `view` op: one frame).
 
-**A view for a grantee, in a browser: a view link.** A reader who reads by
-signature (not the operator) mints a link with its own key, on its own
-machine, for one view on one node, for at most a day (default an hour):
+**A view for a grantee, in a browser: a view link.** Any identity whose key
+is valid here mints a link with its own key, on its own machine, for one view
+on one node, for the view's definition as it is now, for at most a day
+(default an hour). The operator may mint one too (then the view is read with
+the operator's access, read-only, for that view, until the link ends):
+prefer it to handing out the operator token, which never expires and writes.
 
 ```sh
 ./src/cli.ts view_link node.example.org stale-pages --url https://node.example.org --ttl 3600 --data ~/.roflenox-eve
 # https://node.example.org/view/node.example.org/stale-pages#link=<claims>.<signature>
-# (expires …; revoke: jti …)
+# (for node.example.org's view red[b_…](P, X); expires …; revoke: jti …)
 ```
+
+The node the link is for (`aud`) is taken from the node's own unauthenticated
+`health` only over HTTPS or on this machine (no `--url`, or a loopback one);
+over plain HTTP to another machine `--aud <the node's identity>` is required,
+and wherever `--aud` is given the node must say the same (409
+`wrong_audience`). The link signs a hash of the view's literal (`lit`), read
+as its issuer when it is minted.
 
 The page sends it as `Authorization: RoflenoxView <link>` on the stream of
 that path, and the node reads the view as the link's issuer, with exactly
@@ -374,15 +391,29 @@ that path, and the node reads the view as the link's issuer, with exactly
 browser never sends: it is in no request line, no proxy log, no `Referer`
 (the page also says `no-referrer`), and the page drops it from the address
 bar on load. It is refused (401 `bad_view_link`) for another view, another
-node, any other route, after its `exp`, with a claim or the signature
-changed, or once its key is no longer valid here (rotated, revoked). Its
-issuer revokes it early by asserting `{source: <jti>, relation:
-"roflenox:revoke_link", target: "revoked"}` in its own book; an open stream of
-the link ends then (`refused`, `link_revoked`) and at its expiry
-(`link_expired`). The owner withdrawing the grant or export ends it as for any
-reader (`refused`, `no_grant`). Until it expires or is revoked, whoever holds
-the link reads that view as its issuer: share it as you would a password, for
-as short as you can.
+node, any other route or a plain call, after its `exp`, with a claim or the
+signature changed or spelt otherwise (base64url has one spelling), once its
+key is no longer valid here (rotated, recovered, revoked), or once the view
+is defined otherwise than when it was signed. An open stream of the link
+ends (`refused`) with the reason: `link_revoked` when its issuer asserts
+`{source: <jti>, relation: "roflenox:revoke_link", target: "revoked"}` in its
+own book, `link_key_invalid` when its key stops being valid, `view_redefined`
+when the owner changes or retracts the view, `link_expired` at `exp`, and
+`no_grant` when the owner withdraws the grant or export, as for any reader. A
+revoke, a key change or a redefinition is admitted in a serial slot of its
+own, before an open (which is then refused) or after it (the stream is then
+ended), never between the open's checks and its stream. A link holds at most
+4 open streams, and a reader at most 32 subscriptions here (all anonymous
+readers together count as one); beyond that a subscription is refused (429
+`too_many_streams`). A link whose signature does not verify is refused
+before it waits on the node's queue. Until it expires or is revoked, whoever
+holds the link reads that view as its issuer: share it as you would a
+password, for as short as you can.
+
+A key signs for one identity only: an identity document listing a key that
+another identity's document already lists is refused (409 `key_taken`; a
+stranger sees `not_vouched`), so one identity cannot make another's
+signatures, requests or view links read as its own.
 
 **A journal** is a fact in the node's own book; the node then signs, in its
 own book, one fact per transition of the literal's rows:
