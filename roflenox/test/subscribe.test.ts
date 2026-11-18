@@ -3,8 +3,10 @@
 // (test/fixtures/invariants: a scanner's `shows`, rules stale/broken/
 // accepted/red/intent). Needs a `rofl` engine with `watch` (ROFL_BIN).
 //
-// THE ORACLE: after every batch, the rows a subscriber has accumulated from
-// its frames equal a fresh `ask` of the same literal.
+// THE ORACLES (test/helpers.ts, oracle): after every batch, the rows a
+// subscriber has accumulated from its frames equal a fresh `ask` of the same
+// literal, as the same reader (the fan-out), and the answer of a node rebuilt
+// from the log on a copy of the data directory (the kept worlds).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
@@ -14,7 +16,7 @@ import { bookOf, type LocalIdentity } from '../src/identity.ts';
 import { signRequest } from '../src/httpsig.ts';
 import type { Fact } from '../src/facts.ts';
 import type { Frame } from '../src/subscribe.ts';
-import { DAY, grant, identityAt, iso, post, start, subscribe, T0, tmpDir, vouch, type Running, type Stream } from './helpers.ts';
+import { DAY, grant, identityAt, iso, post, start, oracle, subscribe, T0, tmpDir, vouch, type Running } from './helpers.ts';
 
 const TOY = path.join(import.meta.dirname, 'fixtures/invariants');
 const toy = (f: string): Fact[] => fs.readFileSync(path.join(TOY, `${f}.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Fact);
@@ -23,13 +25,6 @@ const key = (r: { identity: string; cells: unknown[] }) => JSON.stringify([r.ide
 const asOperator = (n: Running) => ({ authorization: `Bearer ${n.node.operatorToken()}` });
 const signedGet = (n: Running, who: LocalIdentity, p: string) => signRequest(who, 'GET', n.url + p, null, n.clock.t);
 const subPath = (q: string) => `/subscribe?query=${encodeURIComponent(q)}`;
-
-/** THE ORACLE: the accumulated rows equal a fresh ask of the literal, as the same reader. */
-async function oracle(n: Running, s: Stream, query: string, as?: LocalIdentity): Promise<void> {
-  const a = await post(n.url, '/ask', { query }, as ? { as } : {});
-  assert.equal(a.status, 200, JSON.stringify(a.body));
-  assert.deepEqual([...s.rows.keys()].sort(), (a.body.rows as { identity: string; cells: unknown[] }[]).map(key).sort(), `subscription ≠ ask ${query}`);
-}
 
 const pub = (n: Running, facts: Fact[]) => publish(n.url, n.me, facts, () => n.clock.t);
 

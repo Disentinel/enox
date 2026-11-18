@@ -3,8 +3,11 @@
 // given again and expired, an author's first rules. Needs a `rofl` with
 // `watch` and `edit` (ROFL_BIN).
 //
-// THE ORACLE: after every batch, the rows a subscriber has accumulated from
-// its frames equal a fresh `ask` of the same literal, as the same reader; and
+// THE ORACLES (test/helpers.ts, oracle): after every batch, the rows a
+// subscriber has accumulated from its frames equal a fresh `ask` of the same
+// literal, as the same reader, and the answer of a node rebuilt from the log
+// (ask reads the same kept rule world the stream is fed from; the rebuilt
+// node has none, its worlds are built whole); and
 // a reader whose access did not change is sent a `delta`, taken by the
 // engine's delta (`by: delta`), never the answer whole.
 import { test } from 'node:test';
@@ -16,22 +19,16 @@ import type { LocalIdentity } from '../src/identity.ts';
 import { signRequest } from '../src/httpsig.ts';
 import type { Fact } from '../src/facts.ts';
 import type { Frame } from '../src/subscribe.ts';
-import { DAY, fact, grant, identityAt, iso, post, start, subscribe, T0, tmpDir, vouch, type Running, type Stream } from './helpers.ts';
+import { ruleGuard, type World } from '../src/engine.ts';
+import { asked, DAY, fact, grant, identityAt, iso, oracle, rebuilt, rowKeyOf, start, subscribe, T0, tmpDir, vouch, type Running } from './helpers.ts';
 
 const TOY = path.join(import.meta.dirname, 'fixtures/invariants');
 const toy = (f: string): Fact[] => fs.readFileSync(path.join(TOY, `${f}.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Fact);
-const key = (r: { identity: string; cells: unknown[] }) => JSON.stringify([r.identity, r.cells]);
 const rule = (name: string, text: string, confidence = 1): Fact => ({ source: name, relation: 'roflenox:rule', target: text, perspective: 'invariant', confidence });
 const subPath = (q: string) => `/subscribe?query=${encodeURIComponent(q)}`;
 const asOperator = (n: Running) => ({ authorization: `Bearer ${n.node.operatorToken()}` });
 const signedGet = (n: Running, who: LocalIdentity, p: string) => signRequest(who, 'GET', n.url + p, null, n.clock.t);
 const pubAs = (n: Running, who: LocalIdentity, facts: Fact[]) => publish(n.url, who, facts, () => n.clock.t);
-
-async function oracle(n: Running, s: Stream, query: string, as?: LocalIdentity): Promise<void> {
-  const a = await post(n.url, '/ask', { query }, as ? { as } : {});
-  assert.equal(a.status, 200, JSON.stringify(a.body));
-  assert.deepEqual([...s.rows.keys()].sort(), (a.body.rows as { identity: string; cells: unknown[] }[]).map(key).sort(), `subscription ≠ ask ${query}`);
-}
 
 /** The next frame is a delta the engine took by delta, moving exactly these rows. */
 function delta(f: Frame, added: [string, string][], removed: [string, string][], me: string): void {
@@ -159,6 +156,29 @@ test('a runaway rule of the owner is refused by the trial in a fork of the kept 
     await pubAs(n, n.me, toy('accept'));
     assert.equal((await s.next()).kind, 'delta', 'the kept world goes on by delta');
     await oracle(n, s, q);
+    s.close();
+  } finally { await n.stop(); }
+});
+
+test('the rebuild oracle says no where ask says yes: a kept rule world that lost a rule behind the node\'s back', async () => {
+  const n = await start(tmpDir('subr-plant'), 'home.node');
+  const q = 'red(P, X)';
+  try {
+    await pubAs(n, n.me, [...toy('rules'), ...toy('scan'), ...toy('update')]);
+    const s = await subscribe(n.url, subPath(q), asOperator(n));
+    assert.equal((await s.next()).rows!.length, 2);
+    await oracle(n, s, q);
+    // The planted fault: the red rule's guard taken out of the kept world, as a
+    // wrong delta would; then a batch the world takes as usual.
+    const kept = (n.node as unknown as { worlds: Map<string, { w: World }> }).worlds.get(n.me.name)!.w;
+    const red = [...kept.meta!.on].find((t) => t.startsWith('red'))!;
+    await kept.apply('', n.me.name, [ruleGuard(red)]);
+    await pubAs(n, n.me, [fact('note', 'says', 'nothing')]);
+    delta(await s.next(), [], [['home', 'login@v1'], ['settings', 'login@v1']], n.me.name);
+    const have = [...s.rows.keys()].sort();
+    assert.deepEqual(have, await asked(n, q), 'ask reads the same kept world: it agrees with the stream, and is wrong with it');
+    assert.equal((await rebuilt(n, q)).map(rowKeyOf).length, 2, 'the node rebuilt from its log still derives both rows');
+    await assert.rejects(oracle(n, s, q), /rebuilt from its log/);
     s.close();
   } finally { await n.stop(); }
 });

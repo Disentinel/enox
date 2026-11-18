@@ -47,6 +47,8 @@ export interface Running {
   clock: Clock;
   /** The HTTP server, for a test that watches the requests it receives. */
   server?: http.Server;
+  /** The options it was opened with, so the rebuild oracle opens its copy alike. */
+  options?: Partial<NodeOptions>;
   stop: () => Promise<void>;
 }
 
@@ -68,6 +70,7 @@ export async function serveAsIs(dir: string, clock: Clock = { t: T0 }): Promise<
 export async function start(dir: string, name: string, o: Partial<NodeOptions> & { clock?: Clock } = {}): Promise<Running> {
   const clock = o.clock ?? { t: T0 };
   const me = LocalIdentity.load(dir) ?? LocalIdentity.create(dir, name, new Date(T0 - DAY));
+  const { clock: _clock, ...options } = o;
   const node = await RoflenoxNode.open({ dataDir: dir, now: () => clock.t, ...o });
   const server: http.Server = createServer(node);
   const url = await listen(server, 0);
@@ -75,7 +78,7 @@ export async function start(dir: string, name: string, o: Partial<NodeOptions> &
   clocks.set(url, clock);
   if (o.publicUrl) origins.set(url, new URL(o.publicUrl).origin);
   return {
-    node, url, dir, me, clock, server,
+    node, url, dir, me, clock, server, options,
     stop: async () => {
       await new Promise<void>((r) => server.close(() => r()));
       await node.close();
@@ -210,3 +213,48 @@ export async function subscribe(url: string, p: string, headers: Record<string, 
   return s;
 }
 
+
+// ---- the two oracles of a subscription -------------------------------------
+type Row = { identity: string; cells: unknown[] };
+export const rowKeyOf = (r: Row) => JSON.stringify([r.identity, r.cells]);
+const rowsKeys = (s: Stream) => [...s.rows.keys()].sort();
+
+/** THE ASK ORACLE: the literal asked of the same node, as the same reader.
+ *  It reads the same kept rule worlds the stream is fed from, so it checks
+ *  the fan-out (what a reader is sent of what the node holds), never the
+ *  kept worlds themselves. */
+export async function asked(n: Running, query: string, as?: LocalIdentity | null): Promise<string[]> {
+  const a = await post(n.url, '/ask', { query }, as === undefined ? {} : { as });
+  assert.equal(a.status, 200, JSON.stringify(a.body));
+  return (a.body.rows as Row[]).map(rowKeyOf).sort();
+}
+
+/** THE REBUILD ORACLE: the literal asked, as the same reader, of a node
+ *  opened anew on a copy of `n`'s data directory: its log re-verified and
+ *  replayed into a fresh engine, its rule worlds built whole from the books.
+ *  Nothing of `n`'s memory is shared — no kept world, no world advanced or
+ *  reconciled by delta, no engine edited batch by batch, no subscription — so
+ *  a kept world gone wrong makes the stream and `ask` wrong together, and
+ *  this one right. It shares with `n` the log (a fault that writes the
+ *  wrong batch is invisible to it), the code that opens a node and builds a
+ *  world whole, and the engine binary. */
+export async function rebuilt(n: Running, query: string, as?: LocalIdentity | null): Promise<Row[]> {
+  const dir = tmpDir('rebuilt');
+  fs.cpSync(n.dir, dir, { recursive: true, filter: (p) => path.basename(p) !== 'lock' });
+  const node = await RoflenoxNode.open({ ...n.options, dataDir: dir, now: () => n.clock.t });
+  try {
+    const a = await node.ask(query, as === undefined ? n.me.name : as?.name ?? null);
+    return a.rows;
+  } finally {
+    await node.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Both oracles: the rows the stream has accumulated equal a fresh ask (the
+ *  fan-out) AND the answer of a node rebuilt from the log (the kept world). */
+export async function oracle(n: Running, s: Stream, query: string, as?: LocalIdentity | null): Promise<void> {
+  const have = rowsKeys(s);
+  assert.deepEqual(have, await asked(n, query, as), `subscription ≠ ask ${query}`);
+  assert.deepEqual(have, (await rebuilt(n, query, as)).map(rowKeyOf).sort(), `subscription ≠ the node rebuilt from its log ${query}`);
+}
