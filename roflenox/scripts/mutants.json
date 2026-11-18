@@ -5471,8 +5471,8 @@
    "file": "src/federation.ts",
    "edits": [
     [
-     "      f.cells.forEach((c, j) => hold(`${f.rel}#${j}`, c));",
-     "      f.cells.forEach((c, j) => false && hold(`${f.rel}#${j}`, c));"
+     "      for (let j = 0; j < f.cells.length; j++) holdIn(gs[j], f.cells[j]!);",
+     "      for (let j = 0; j < f.cells.length; j++) false && holdIn(gs[j], f.cells[j]!);"
     ]
    ],
    "red": [
