@@ -3,7 +3,7 @@ name: fkts
 
 on:
   push:
-    branches: [spec/enox-rofl]
+    branches: [claude/project-thread-hhlo1w, spec/enox-rofl]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
