@@ -42,10 +42,24 @@ export const EXPORT = 'fkts:export';
 export const EMBEDDER = 'fkts:embedder';
 export const SEARCH = 'fkts:search';
 export const EMBEDDING = 'fkts:embedding';
+/** Subscriptions (src/subscribe.ts), all as facts of the node's own book or an owner's:
+ *    {source: <view name>, relation: "fkts:view", target: <literal>}
+ *      — a page at /view/<owner>/<name> shows the literal's rows live;
+ *    {source: <journal name>, relation: "fkts:journal", target: <literal>}
+ *      — the node journals every row of the literal that appears or vanishes:
+ *    {source: <the row, a ground literal>, relation: "fkts:appeared" | "fkts:vanished", target: <the batch that moved it>}
+ *      — signed by the node, perspective journal:<name>. */
+export const VIEW = 'fkts:view';
+export const JOURNAL = 'fkts:journal';
+export const APPEARED = 'fkts:appeared';
+export const VANISHED = 'fkts:vanished';
+/** {source: <a view link's jti>, relation: "fkts:revoke_link", target: <anything>}
+ *  in the link issuer's own book: the link opens nothing from then on (src/viewlink.ts). */
+export const REVOKE_LINK = 'fkts:revoke_link';
 /** The node's own relations — a closed list: no other fkts: relation is
  *  admitted, so none can slip past a rule that names them. */
 export const RESERVED = ['fkts:rule', 'fkts:trust_rules', GRANT, DELEGATE, EXPORT, 'fkts:follow',
-  'fkts:result', EMBEDDER, SEARCH, EMBEDDING] as const;
+  'fkts:result', EMBEDDER, SEARCH, EMBEDDING, VIEW, JOURNAL, APPEARED, VANISHED, REVOKE_LINK] as const;
 /** What a wildcard export ("*") never covers: every node relation but the
  *  export rule itself. A search, a rule, a grant, a trust or a follow says
  *  what its author asked or allowed, not what they published — only an

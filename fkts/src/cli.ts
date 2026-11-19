@@ -145,7 +145,7 @@ async function runOp(op: Op, args: Record<string, unknown>, data: string, url: s
   const me = LocalIdentity.load(data) ?? undefined;
   const remote = httpCaller(url, me);
   const result = isLocal(op)
-    ? await callOp(op.name, args, { node: null, caller: me?.name ?? null, dataDir: data, now: Date.now, call: remote }, 'local')
+    ? await callOp(op.name, args, { node: null, caller: me?.name ?? null, dataDir: data, now: Date.now, call: remote, url }, 'local')
     : await remote(op.name, args);
   process.stdout.write(`${op.say ? op.say(result) : op.text ? op.text(result) : JSON.stringify(result, null, 2)}\n`);
   return 0;

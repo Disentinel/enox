@@ -1,5 +1,6 @@
 // Test harness: nodes in temp dirs, on loopback ports chosen by the OS, with
 // an injectable clock. Nothing here sleeps or reaches past 127.0.0.1.
+import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -10,6 +11,7 @@ import { createServer, listen } from '../src/http.ts';
 import { newSalt, toJsonl, type Fact } from '../src/facts.ts';
 import { signRequest } from '../src/httpsig.ts';
 import { httpCaller, invitationLink, mirrorVia } from '../src/client.ts';
+import type { Frame } from '../src/subscribe.ts';
 
 /** The identity a test's /ask, /feeds, /op and write requests are signed as,
  *  per node URL: by default the node's own identity — its operator, who sees
@@ -43,6 +45,10 @@ export interface Running {
   dir: string;
   me: LocalIdentity;
   clock: Clock;
+  /** The HTTP server, for a test that watches the requests it receives. */
+  server?: http.Server;
+  /** The options it was opened with, so the rebuild oracle opens its copy alike. */
+  options?: Partial<NodeOptions>;
   stop: () => Promise<void>;
 }
 
@@ -64,6 +70,7 @@ export async function serveAsIs(dir: string, clock: Clock = { t: T0 }): Promise<
 export async function start(dir: string, name: string, o: Partial<NodeOptions> & { clock?: Clock } = {}): Promise<Running> {
   const clock = o.clock ?? { t: T0 };
   const me = LocalIdentity.load(dir) ?? LocalIdentity.create(dir, name, new Date(T0 - DAY));
+  const { clock: _clock, ...options } = o;
   const node = await FktsNode.open({ dataDir: dir, now: () => clock.t, ...o });
   const server: http.Server = createServer(node);
   const url = await listen(server, 0);
@@ -71,7 +78,7 @@ export async function start(dir: string, name: string, o: Partial<NodeOptions> &
   clocks.set(url, clock);
   if (o.publicUrl) origins.set(url, new URL(o.publicUrl).origin);
   return {
-    node, url, dir, me, clock,
+    node, url, dir, me, clock, server, options,
     stop: async () => {
       await new Promise<void>((r) => server.close(() => r()));
       await node.close();
@@ -148,4 +155,106 @@ export async function answers(url: string, o: As = {}): Promise<unknown[]> {
   // have different logs.)
   for (const q of QUESTIONS) { const { head: _h, ...b } = (await post(url, '/ask', { query: q }, o)).body; out.push(b); }
   return out;
+}
+
+// ---- subscriptions (r_subscribe) ------------------------------------------
+const key = (r: { identity: string; cells: unknown[] }) => JSON.stringify([r.identity, r.cells]);
+
+/** One subscription's stream: frames as they come, and the rows they add up to. */
+export interface Stream { next(ms?: number): Promise<Frame>; quiet(ms: number): Promise<void>; rows: Map<string, { identity: string; cells: unknown[] }>; close(): void; status: number; body?: Record<string, unknown> }
+
+export async function subscribe(url: string, p: string, headers: Record<string, string>): Promise<Stream> {
+  const ac = new AbortController();
+  const res = await fetch(url + p, { headers: { accept: 'text/event-stream', ...headers }, signal: ac.signal });
+  const frames: Frame[] = [];
+  let wake: (() => void) | null = null;
+  const rows = new Map<string, { identity: string; cells: unknown[] }>();
+  const s: Stream = {
+    status: res.status, rows,
+    async next(ms = 20_000) {
+      const t0 = Date.now();
+      while (frames.length === 0) {
+        if (Date.now() - t0 > ms) throw new Error(`no frame within ${ms} ms`);
+        await new Promise<void>((r) => { wake = r; setTimeout(r, 50); });
+      }
+      const f = frames.shift()!;
+      // Strict accumulation: a frame may never add a row held or remove one not held.
+      if (f.kind === 'full') { rows.clear(); for (const r of f.rows!) rows.set(key(r), r); }
+      for (const r of f.added ?? []) { assert.ok(!rows.has(key(r)), `added twice: ${key(r)}`); rows.set(key(r), r); }
+      for (const r of f.removed ?? []) { assert.ok(rows.delete(key(r)), `removed but never held: ${key(r)}`); }
+      return f;
+    },
+    async quiet(ms) {
+      await new Promise((r) => setTimeout(r, ms));
+      assert.deepEqual(frames, [], 'no frame was due');
+    },
+    close: () => ac.abort(),
+  };
+  if (res.status !== 200) { s.body = await res.json() as Record<string, unknown>; return s; }
+  void (async () => {
+    const rd = res.body!.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    try {
+      for (;;) {
+        const { value, done } = await rd.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i;
+        while ((i = buf.indexOf('\n\n')) >= 0) {
+          const ev = buf.slice(0, i);
+          buf = buf.slice(i + 2);
+          const data = ev.split('\n').filter((l) => l.startsWith('data: ')).map((l) => l.slice(6)).join('\n');
+          if (data) { frames.push(JSON.parse(data) as Frame); (wake as (() => void) | null)?.(); }
+        }
+      }
+    } catch { /* aborted */ }
+  })();
+  return s;
+}
+
+
+// ---- the two oracles of a subscription -------------------------------------
+type Row = { identity: string; cells: unknown[] };
+export const rowKeyOf = (r: Row) => JSON.stringify([r.identity, r.cells]);
+const rowsKeys = (s: Stream) => [...s.rows.keys()].sort();
+
+/** THE ASK ORACLE: the literal asked of the same node, as the same reader.
+ *  It reads the same kept rule worlds the stream is fed from, so it checks
+ *  the fan-out (what a reader is sent of what the node holds), never the
+ *  kept worlds themselves. */
+export async function asked(n: Running, query: string, as?: LocalIdentity | null): Promise<string[]> {
+  const a = await post(n.url, '/ask', { query }, as === undefined ? {} : { as });
+  assert.equal(a.status, 200, JSON.stringify(a.body));
+  return (a.body.rows as Row[]).map(rowKeyOf).sort();
+}
+
+/** THE REBUILD ORACLE: the literal asked, as the same reader, of a node
+ *  opened anew on a copy of `n`'s data directory: its log re-verified and
+ *  replayed into a fresh engine, its rule worlds built whole from the books.
+ *  Nothing of `n`'s memory is shared — no kept world, no world advanced or
+ *  reconciled by delta, no engine edited batch by batch, no subscription — so
+ *  a kept world gone wrong makes the stream and `ask` wrong together, and
+ *  this one right. It shares with `n` the log (a fault that writes the
+ *  wrong batch is invisible to it), the code that opens a node and builds a
+ *  world whole, and the engine binary. */
+export async function rebuilt(n: Running, query: string, as?: LocalIdentity | null): Promise<Row[]> {
+  const dir = tmpDir('rebuilt');
+  fs.cpSync(n.dir, dir, { recursive: true, filter: (p) => path.basename(p) !== 'lock' });
+  const node = await FktsNode.open({ ...n.options, dataDir: dir, now: () => n.clock.t });
+  try {
+    const a = await node.ask(query, as === undefined ? n.me.name : as?.name ?? null);
+    return a.rows;
+  } finally {
+    await node.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Both oracles: the rows the stream has accumulated equal a fresh ask (the
+ *  fan-out) AND the answer of a node rebuilt from the log (the kept world). */
+export async function oracle(n: Running, s: Stream, query: string, as?: LocalIdentity | null): Promise<void> {
+  const have = rowsKeys(s);
+  assert.deepEqual(have, await asked(n, query, as), `subscription ≠ ask ${query}`);
+  assert.deepEqual(have, (await rebuilt(n, query, as)).map(rowKeyOf).sort(), `subscription ≠ the node rebuilt from its log ${query}`);
 }

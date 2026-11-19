@@ -18,12 +18,14 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { createHash } from 'node:crypto';
-import { checkFact, factId, Refusal, type Fact } from './facts.ts';
-import { LocalIdentity } from './identity.ts';
+import { checkFact, factId, Refusal, roflString, VIEW, type Fact } from './facts.ts';
+import { bookOf, LocalIdentity } from './identity.ts';
 import type { FktsNode } from './node.ts';
 import { edgeIdOf, ENOX_OPS } from './enox-ops.ts';
 import { explainEmpty } from './empty.ts';
 import { parseQuery, rowKey, type AskAnswer } from './engine.ts';
+import type { Frame } from './subscribe.ts';
+import { mintViewLink, VIEW_LINK_DEFAULT_SEC, VIEW_LINK_MAX_SEC, viewLit, viewLiteralOf } from './viewlink.ts';
 
 /** A property; no `type` means any JSON value. */
 export type Prop = { type?: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object'; description?: string; items?: unknown };
@@ -38,6 +40,8 @@ export interface Ctx {
   dataDir: string | null;
   /** Reach another op: in-node directly, or over HTTP signed as the local identity. */
   call: (op: string, args: Record<string, unknown>) => Promise<unknown>;
+  /** The node's URL the CLI calls (--url), when there is one. */
+  url?: string;
   now: () => number;
   /** The name the calling client goes by when the transport knows one: the
    *  OAuth client the owner approved. An Enox write that names no author
@@ -70,6 +74,10 @@ export interface Op {
   /** A wire alias. `:x` path segments and GET query parameters become args;
    *  `body` names the one property a raw body stands for. */
   http?: { method: 'GET' | 'POST'; path: string; body?: string; status?: number };
+  /** Its GET alias asked with `Accept: text/event-stream` is a stream of
+   *  frames (r_subscribe) instead of one answer; `page`: asked with
+   *  `Accept: text/html`, it is the view's page. */
+  stream?: { page?: true };
   run: (ctx: Ctx, args: Record<string, unknown>) => Promise<unknown>;
   /** How the CLI prints a result (default: `text`, then JSON). */
   say?: (result: any) => string;
@@ -80,6 +88,46 @@ export interface Op {
 const obj = (properties: Record<string, Prop>, required: string[] = []): Schema =>
   ({ type: 'object', required, properties, additionalProperties: false });
 const str = (description?: string): Prop => ({ type: 'string', ...(description ? { description } : {}) });
+
+/** The literal of a view, as `caller` may see it, or a refusal naming none. */
+export async function viewQuery(n: FktsNode, a: Record<string, unknown>, caller: string | null): Promise<string> {
+  const L = await n.viewLiteral(String(a.owner), String(a.name), caller);
+  if (L === null) throw new Refusal(404, 'no_view', `no view ${String(a.name)} of ${String(a.owner)} that this reader can see`);
+  return L;
+}
+
+/** A subscription as one call: its whole answer, and the next frame within `wait` seconds. */
+async function oneFrame(n: FktsNode, query: string, caller: string | null, wait: unknown): Promise<unknown> {
+  const frames: Frame[] = [];
+  let wake: (() => void) | null = null;
+  const end = await n.subscribe(query, caller, (f) => { frames.push(f); wake?.(); });
+  try {
+    const first = frames.shift()!;
+    const s = Math.min(Math.max(Number(wait ?? 0) || 0, 0), 60);
+    if (s > 0 && frames.length === 0) await new Promise<void>((r) => { wake = r; setTimeout(r, s * 1000); });
+    return { ...first, next: frames[0] ?? null };
+  } finally { await end(); }
+}
+
+/** The identity of the node a view link is for. The node's own `health`
+ *  says it, unauthenticated: taken as it is only from this machine (no URL,
+ *  or loopback) or over HTTPS, where the transport vouches for the host the
+ *  user named; over plain HTTP to another machine only `aud`, the identity
+ *  the user knows, is — and health must agree with it wherever it is given. */
+async function audienceOf(ctx: Ctx, aud: string | undefined): Promise<string> {
+  const said = ((await ctx.call('health', {})) as { identity?: string | null }).identity ?? null;
+  if (aud !== undefined) {
+    if (said !== aud) throw new Refusal(409, 'wrong_audience', `the node at ${ctx.url ?? 'this machine'} says it is ${said ?? 'nobody'}, not ${aud}`);
+    return aud;
+  }
+  if (!said) throw new Refusal(404, 'no_identity', 'the node has no identity a link could be for');
+  const u = ctx.url ? new URL(ctx.url) : null;
+  const local = u === null || ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname);
+  if (!local && u!.protocol !== 'https:') {
+    throw new Refusal(400, 'unconfirmed_audience', `${ctx.url} is plain HTTP to another machine, where anyone between may answer as the node: name the node's identity with --aud`);
+  }
+  return said;
+}
 
 function needNode(ctx: Ctx): FktsNode {
   if (!ctx.node) throw new Refusal(500, 'no_node', 'this operation runs inside a node');
@@ -230,6 +278,17 @@ export const OPS: Op[] = [
       return { ...(await needNode(ctx).schema(ctx.caller)), units: UNITS,
         asking: 'ask takes ONE literal, e.g. live(F, S, "supersedes", T): a variable starts with an upper-case letter or _, a constant is quoted (stored values are strings), and a book may be named, rel[b_<16 hex>](Args); its perspective argument restricts edge questions to facts asserted under it.' };
     } },
+  { name: 'subscribe', description: 'Subscribe to one literal, e.g. red(P, X): its whole answer, then after every admitted batch only the rows that came and went, taken from the engine\'s delta, with the access ask answers with. As a stream: GET /subscribe?query=… with Accept: text/event-stream (server-sent events `full`, `delta`, `refused`, each frame JSON). As a call: one frame, the whole answer now — and with `wait` seconds, the next frame after it if one comes within that time (at most 60).',
+    input: obj({ query: str('one positive ROFL literal; quote constants: red("home", X)'), wait: { type: 'number', description: 'seconds to wait for the next frame (at most 60)' } }, ['query']),
+    access: 'anyone', positional: ['query'], http: { method: 'GET', path: '/subscribe' }, stream: {},
+    run: async (ctx, a) => oneFrame(needNode(ctx), String(a.query), ctx.caller, a.wait) },
+  { name: 'view', description: 'A view an identity published — {source: <name>, relation: "fkts:view", target: <literal>} in its book — as a subscription to its literal, read as you. GET /view/<owner>/<name> is its page in a browser (Accept: text/html), its stream with Accept: text/event-stream, and as a call one frame like subscribe.',
+    input: obj({ owner: str('the identity whose book names the view'), name: str('the view\'s name'), wait: { type: 'number', description: 'seconds to wait for the next frame (at most 60)' } }, ['owner', 'name']),
+    access: 'anyone', positional: ['owner', 'name'], http: { method: 'GET', path: '/view/:owner/:name' }, stream: { page: true },
+    run: async (ctx, a) => {
+      const n = needNode(ctx);
+      return oneFrame(n, await viewQuery(n, a, ctx.caller), ctx.caller, a.wait);
+    } },
   { name: 'why', description: 'Why a ground literal holds, in the books you may read whole.', input: obj({ literal: str() }, ['literal']),
     access: 'anyone', positional: ['literal'], say: explainSay, run: async (ctx, a) => needNode(ctx).why(await byEdgeId(ctx, a.literal), ctx.caller) },
   { name: 'whynot', description: 'Why a ground literal does not hold, in the books you may read whole.', input: obj({ literal: str() }, ['literal']),
@@ -348,6 +407,24 @@ export const OPS: Op[] = [
       const { invitationLink } = await import('./client.ts');
       const me = localIdentity(ctx);
       return { identity: me.name, link: invitationLink(a.at as string, me) };
+    } },
+  { name: 'view_link', description: `A link that opens a view's page in a browser as this identity, with exactly the access ask gives it: signed by the key on this machine, for one view on one node, for the view's definition as it is now, for --ttl seconds (default ${VIEW_LINK_DEFAULT_SEC}, at most ${VIEW_LINK_MAX_SEC}). The link is in the URL's fragment, which a browser never sends; to revoke it before it expires, assert {source: <its jti>, relation: "fkts:revoke_link", target: "revoked"}. Over plain HTTP to another machine, --aud names the node's identity: the node's word for it there is not authenticated.`,
+    input: obj({ owner: str('the identity whose book names the view'), name: str('the view\'s name'), at: str('the URL readers reach the node at (default: --url)'), ttl: { type: 'number', description: 'seconds the link lives' },
+      aud: str('the node\'s identity, as you know it; needed when --url is plain HTTP to another machine, and checked against the node\'s answer always') }, ['owner', 'name']),
+    access: { local: 'it signs with the private key on this machine' }, positional: ['owner', 'name'],
+    say: (r) => `${r.link}\n(for ${r.node}'s view ${r.literal}; expires ${r.expires}; revoke: jti ${r.jti})`,
+    run: async (ctx, a) => {
+      const me = localIdentity(ctx);
+      const owner = a.owner as string, name = a.name as string;
+      const aud = await audienceOf(ctx, a.aud as string | undefined);
+      // The definition the link is for, read as this identity: the node refuses the link for any other.
+      const ans = await ctx.call('ask', { query: `live[${bookOf(owner)}](F, ${roflString(name)}, ${roflString(VIEW)}, L)`, order: 'admission' }) as { rows?: { cells: unknown[] }[] };
+      const L = ans.rows?.at(-1)?.cells[1];
+      if (typeof L !== 'string') throw new Refusal(404, 'no_view', `no view ${name} of ${owner} that ${me.name} can see`);
+      const literal = viewLiteralOf(owner, L);
+      const { token, claims } = mintViewLink(me, aud, owner, name, ctx.now(), (a.ttl as number | undefined) ?? VIEW_LINK_DEFAULT_SEC, viewLit(literal));
+      const at = String(a.at ?? ctx.url ?? '').replace(/\/+$/, '');
+      return { link: `${at}/view/${encodeURIComponent(claims.owner)}/${encodeURIComponent(claims.name)}#link=${token}`, jti: claims.jti, expires: new Date(claims.exp * 1000).toISOString(), node: aud, literal };
     } },
   { name: 'rotate', signs: true, alone: true, description: 'A new key, signed over by the current one.', input: obj({}),
     access: { local: 'it replaces the private key on this machine' }, say: (r) => `rotated ${r.identity}'s key`,

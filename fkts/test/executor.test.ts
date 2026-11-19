@@ -9,6 +9,7 @@ import { publish } from '../src/client.ts';
 import { DAY, fact, grant, identityAt, iso, post, start, tmpDir, vouch, type Clock, type Running } from './helpers.ts';
 
 const SCRIPT = path.join(import.meta.dirname, 'fixtures', 'burn-executor.ts');
+const SPIN = path.join(import.meta.dirname, 'fixtures', 'spin.ts');
 const wall = { get t() { return Date.now(); }, set t(_v: number) { /* the wall clock */ } } as Clock;
 
 const rule = (name: string, text: string) => ({ source: name, relation: 'fkts:rule', target: text, perspective: 'rules', confidence: 1 });
@@ -106,3 +107,13 @@ test('an ask answers within one second while an executor saturates its CPU budge
     assert.equal(((await post(a.url, '/ask', { query: 'answered(K, E, V)' })).body.rows as unknown[]).length, 2);
   } finally { stop(); await a.stop(); }
 });
+
+// Load slows only the wall clock: the budget counts CPU seconds.
+test('an executor over its CPU budget is stopped by the soft limit\'s SIGXCPU, not the hard limit\'s SIGKILL',
+  { skip: process.platform === 'darwin' && 'macOS sends SIGXCPU at the hard limit too: the two limits cannot be told apart here' }, async () => {
+    const child = spawnExecutor({ url: 'http://127.0.0.1:9', dataDir: tmpDir('spin'), script: SPIN, cpuSeconds: 1 });
+    let err = '';
+    child.stderr!.on('data', (d) => { err += d; });
+    const exit = await new Promise<{ code: number | null; signal: string | null }>((r) => child.once('exit', (code, signal) => r({ code, signal })));
+    assert.deepEqual(exit, { code: null, signal: 'SIGXCPU' }, err);
+  });

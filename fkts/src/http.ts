@@ -13,8 +13,11 @@ import * as http from 'node:http';
 import { Refusal } from './facts.ts';
 import { handleRpc } from './mcp.ts';
 import { serveOAuth } from './oauth.ts';
-import { callOp, isLocal, OPS, type Ctx, type Op } from './ops.ts';
+import { callOp, isLocal, OPS, viewQuery, type Ctx, type Op } from './ops.ts';
 import type { FktsNode } from './node.ts';
+import type { Frame, Sink } from './subscribe.ts';
+import { VIEW_HEADERS, VIEW_PAGE } from './view.ts';
+import { linkOf } from './viewlink.ts';
 
 const MAX_BODY = 16 * 1024 * 1024;
 
@@ -69,6 +72,7 @@ export function targetsOf(node: FktsNode, req: http.IncomingMessage): string[] {
  *  identity through its grant (r_mcp_oauth). Nowhere else. */
 export function callerOf(node: FktsNode, method: string, target: string | readonly string[], headers: http.IncomingHttpHeaders, raw: Buffer | null, mcp = false): string | null {
   const auth = headers.authorization;
+  if (linkOf(auth) !== null) throw new Refusal(401, 'bad_view_link', 'a view link opens only the view it names, at GET /view/<owner>/<name>');
   if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
     const presented = auth.slice('Bearer '.length).trim();
     const given = Buffer.from(presented);
@@ -112,9 +116,20 @@ function matchAlias(op: Op, method: string, path: string): Record<string, string
 
 export function createServer(node: FktsNode): http.Server {
   const network = OPS.filter((o) => !isLocal(o));
-  return http.createServer(async (req, res) => {
+  // Open event streams end when the server closes: a subscriber never holds it open.
+  const streams = new Set<http.ServerResponse>();
+  const server = http.createServer(async (req, res) => {
     try {
-      const url = new URL(req.url ?? '/', 'http://local');
+      // Routed on the request's own path: one that a URL parser would read
+      // otherwise — `//host/…` or `/\host/…` (a host), `.` or `..` segments,
+      // percent-encoded or not — is refused, never routed as the path it
+      // normalises to (a page served at //evil/view/… would read its stream
+      // from evil).
+      const rawUrl = req.url ?? '/';
+      const url = new URL(rawUrl, 'http://local');
+      if (!rawUrl.startsWith('/') || url.host !== 'local' || url.pathname !== rawUrl.split('?')[0]) {
+        return send(res, 400, { error: 'bad_path', message: 'a request path is one absolute path: no leading //, no backslash, no "." or ".." segment' });
+      }
       const p = url.pathname;
       const method = req.method ?? 'GET';
       const target = targetsOf(node, req);
@@ -168,14 +183,83 @@ export function createServer(node: FktsNode): http.Server {
         }
       }
       if (!op) return send(res, 404, { error: 'not_found', message: `${method} ${p}` });
+      // A view link (src/viewlink.ts) is a caller only on the stream of the view it names.
+      const token = linkOf(req.headers.authorization);
+      const accept = String(req.headers.accept ?? '');
+      const alias = op.stream && method === 'GET' && !p.startsWith('/op/');
+      if (token !== null && !(alias && op.name === 'view' && !accept.includes('text/html') && accept.includes('text/event-stream'))) {
+        callerOf(node, method, target, req.headers, raw);
+      }
+      // A subscription's alias (r_subscribe): its page, or its stream, by what the reader accepts.
+      if (alias) {
+        if (op.stream!.page && accept.includes('text/html')) {
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...VIEW_HEADERS });
+          res.end(VIEW_PAGE);
+          return;
+        }
+        if (accept.includes('text/event-stream')) {
+          if (token !== null) {
+            return await stream(req, res, streams, async (sink, over) => {
+              const l = await node.subscribeLink(token, String(args.owner), String(args.name), sink, over);
+              return { close: l.close, exp: l.claims.exp };
+            }, node);
+          }
+          const caller = callerOf(node, method, target, req.headers, raw);
+          const query = op.name === 'view' ? await viewQuery(node, args, caller) : String(args.query ?? '');
+          return await stream(req, res, streams, async (sink) => ({ close: await node.subscribe(query, caller, sink) }), node);
+        }
+      }
       const caller = callerOf(node, method, target, req.headers, raw);
       const result = await callOp(op.name, args, ctx(caller), 'network');
       return send(res, op.http && !p.startsWith('/op/') ? op.http.status ?? 200 : 200, result);
     } catch (e) {
       if (e instanceof Refusal) return send(res, e.status, { error: e.reason, message: e.message, ...e.detail });
+      if (res.headersSent) { res.end(); return; }
       return send(res, 500, { error: 'internal', message: (e as Error).message });
     }
   });
+  const close = server.close.bind(server);
+  server.close = ((cb?: (err?: Error) => void) => { for (const r of streams) r.end(); return close(cb); }) as typeof server.close;
+  return server;
+}
+
+/** One subscription as server-sent events: `event: full|delta|refused`,
+ *  `data:` the frame as JSON (src/subscribe.ts). A refusal before the first
+ *  frame is an ordinary JSON error with its status. `open` starts it with the
+ *  sink and a call that ends it with a reason; a link's stream also ends at
+ *  the link's `exp`. */
+async function stream(req: http.IncomingMessage, res: http.ServerResponse, streams: Set<http.ServerResponse>,
+  open: (sink: Sink, over: (error: string, message: string) => void) => Promise<{ close: () => Promise<void>; exp?: number }>, node: FktsNode): Promise<void> {
+  let started = false;
+  const held: Frame[] = [];
+  const write = (f: Frame) => {
+    if (res.writableEnded) return;
+    res.write(`event: ${f.kind}\ndata: ${JSON.stringify(f)}\n\n`);
+    if (f.kind === 'refused') res.end();
+  };
+  const deliver = (f: Frame) => { if (started) write(f); else held.push(f); };
+  const over = (error: string, message: string) => deliver({ kind: 'refused', head: null, cause: null, error, message });
+  const sub = await open(deliver, over);
+  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
+  started = true;
+  for (const f of held.splice(0)) write(f);
+  streams.add(res);
+  let t: NodeJS.Timeout | null = null;
+  if (sub.exp !== undefined) {
+    t = setTimeout(() => over('link_expired', 'the view link has expired'), Math.max(0, sub.exp * 1000 - node.clockMs()));
+    t.unref();
+  }
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    streams.delete(res);
+    if (t) clearTimeout(t);
+    void sub.close().catch(() => {});
+  };
+  req.on('close', close);
+  res.on('close', close);
+  if (res.writableEnded) close();
 }
 
 export function listen(server: http.Server, port: number, host = '127.0.0.1'): Promise<string> {

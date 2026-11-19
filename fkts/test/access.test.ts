@@ -286,7 +286,7 @@ test('an anonymous caller of every open endpoint learns the node\'s own name and
       const b = batch(fake, [fact(H, 'x', 'y')], null, iso(a.clock.t));
       return {
         health: {}, identity: {}, identity_chain: { identity: H }, chain: { identity: H }, feed: { identity: H }, challenge: {},
-        ask: { query: `edge[${B}](F, S, R, T)` }, why: { literal: `edge[${B}]("f", "a", "b", "c")` }, whynot: { literal: `edge[${B}]("f", "a", "b", "c")` },
+        ask: { query: `edge[${B}](F, S, R, T)` }, subscribe: { query: `edge[${B}](F, S, R, T)` }, view: { owner: H, name: 'v' }, why: { literal: `edge[${B}]("f", "a", "b", "c")` }, whynot: { literal: `edge[${B}]("f", "a", "b", "c")` },
         admit: b, introduce: { chain: fake.identityChain() },
         admit_feed: { identity: fake.identityChain(), batches: [{ manifest: b.manifest, jsonl: b.jsonl, salt: b.salt }], checkpoint: fake.checkpoint(b.manifest.digest, iso(a.clock.t)) },
         admit_sealed: seal(b, [{ identity: 'node-a', enc_public_key: a.me.identityDoc().doc.enc.public_key }]),

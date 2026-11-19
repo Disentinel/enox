@@ -1,0 +1,2 @@
+{"source":"profile","relation":"shows","target":"login@v1","perspective":"scanner","confidence":1}
+{"source":"settings","relation":"accepts_stale","target":"login@v1","perspective":"owner","confidence":1}

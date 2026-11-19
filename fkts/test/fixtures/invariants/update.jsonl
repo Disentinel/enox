@@ -1,0 +1,2 @@
+{"source":"login@v2","relation":"version_of","target":"login","perspective":"scanner","confidence":1}
+{"source":"login@v2","relation":"supersedes","target":"login@v1","perspective":"scanner","confidence":1}

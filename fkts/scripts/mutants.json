@@ -4179,8 +4179,11 @@
      "`ulimit -t ${cpu}; exec \"$0\" \"$@\"`"
     ]
    ],
+   "on": [
+    "linux"
+   ],
    "red": [
-    "an ask answers within one second while an executor saturates its CPU budget"
+    "an executor over its CPU budget is stopped by the soft limit's SIGXCPU, not the hard limit's SIGKILL"
    ]
   },
   {
@@ -5248,6 +5251,601 @@
    ],
    "red": [
     "a session's grant, export, delegation, trust or follow is refused at admission, a stranger it named reads nothing, and the owner's grant still works"
+   ]
+  },
+  {
+   "id": "MS1",
+   "title": "subscriptions: the fan-out drops removals",
+   "file": "src/subscribe.ts",
+   "edits": [
+    [
+     "[[c.added, 1], [c.removed, -1]] as const",
+     "[[c.added, 1]] as const"
+    ]
+   ],
+   "red": [
+    "a subscriber to red(P, X) is sent the whole answer, then +2 on the update and −1 on an acceptance; the journal says why"
+   ]
+  },
+  {
+   "id": "MS2",
+   "title": "subscriptions: a literal's constants are ignored",
+   "file": "src/subscribe.ts",
+   "edits": [
+    [
+     "const m = match(sub.args, values);",
+     "const m = { cells: values };"
+    ]
+   ],
+   "red": [
+    "a subscriber to red(P, X) is sent the whole answer, then +2 on the update and −1 on an acceptance; the journal says why"
+   ]
+  },
+  {
+   "id": "MS3",
+   "title": "subscriptions: a change in a book the reader may not see is sent anyway",
+   "file": "src/subscribe.ts",
+   "edits": [
+    [
+     "const sc = sub.scope.get(book);",
+     "const sc = sub.scope.get(book) ?? { identity: book, only: null };"
+    ]
+   ],
+   "red": [
+    "a subscriber sees only what it may read: no grant, nothing; a grant, the rows; the grant expired, nothing again"
+   ]
+  },
+  {
+   "id": "MS4",
+   "title": "rule worlds rebuilt whole on every batch instead of advanced by delta",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (why) {\n        await c.w.close()",
+     "      if (true) {\n        await c.w.close()"
+    ]
+   ],
+   "red": [
+    "a subscriber to red(P, X) is sent the whole answer, then +2 on the update and −1 on an acceptance; the journal says why",
+    "a rule added, retired and switched on again, and a grant it reads by revoked, given and expired, reach a subscriber as deltas"
+   ]
+  },
+  {
+   "id": "MS5",
+   "title": "the mutant cut takes its units in the order of their files, not heaviest first: more shards than the costs need, or a shard over its budget",
+   "file": "scripts/shard-cut.ts",
+   "edits": [
+    [
+     "for (const [, ids, w] of parts.sort((x, y) => y[2] - x[2] || (x[0] < y[0] ? -1 : 1))) {",
+     "for (const [, ids, w] of parts) {"
+    ]
+   ],
+   "red": [
+    "mutant cut: two shards asked cannot hold 120 s of mutants under 45 s each; three are cut, heaviest first, each under it"
+   ]
+  },
+  {
+   "id": "MB1",
+   "title": "rule worlds: a rule new to a kept world, or switched on again, is never loaded",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "await c.w.apply(on.map(ruleText).join(''), author, off);",
+     "await c.w.apply('', author, off);"
+    ]
+   ],
+   "red": [
+    "a rule added, retired and switched on again, and a grant it reads by revoked, given and expired, reach a subscriber as deltas"
+   ]
+  },
+  {
+   "id": "MB2",
+   "title": "rule worlds: a rule switched off is not taken out (retired rules go on deriving)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "await c.w.apply(on.map(ruleText).join(''), author, off);",
+     "await c.w.apply(on.map(ruleText).join(''), author, []);"
+    ]
+   ],
+   "red": [
+    "a rule added, retired and switched on again, and a grant it reads by revoked, given and expired, reach a subscriber as deltas"
+   ]
+  },
+  {
+   "id": "MB3",
+   "title": "rule worlds: a batch's control rows (grant revoked) are not carried into a kept world",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "          retract.push(...plan.retract);",
+     "          void plan.retract;"
+    ]
+   ],
+   "red": [
+    "a rule added, retired and switched on again, and a grant it reads by revoked, given and expired, reach a subscriber as deltas"
+   ]
+  },
+  {
+   "id": "MB4",
+   "title": "rule worlds: the clock is not moved in a kept world (an expired grant still lets rows in)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (clock !== c.clock) { await c.w.setClock(clock); c.clock = clock; }",
+     "if (false) { await c.w.setClock(clock); c.clock = clock; }"
+    ]
+   ],
+   "red": [
+    "a rule added, retired and switched on again, and a grant it reads by revoked, given and expired, reach a subscriber as deltas"
+   ]
+  },
+  {
+   "id": "MB5",
+   "title": "subscriptions: every reader is sent the answer whole after a batch that moves access, as before",
+   "file": "src/subscribe.ts",
+   "edits": [
+    [
+     "      if (sig(scope) === sig(sub.scope)) continue;\n      if (batch && grownBy(",
+     "      if (!access && sig(scope) === sig(sub.scope)) continue;\n      if (!access && batch && grownBy("
+    ]
+   ],
+   "red": [
+    "a rule added, retired and switched on again, and a grant it reads by revoked, given and expired, reach a subscriber as deltas",
+    "an author's first rules: a world where there was none, its rows sent as added, saying the world was built whole"
+   ]
+  },
+  {
+   "id": "MB6",
+   "title": "rule worlds: the admission trial forks the kept world and never tries the batch in it",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        if (own || add) await w.apply(own + add, op, []);",
+     "        if (false) await w.apply(own + add, op, []);"
+    ]
+   ],
+   "red": [
+    "a runaway rule of the owner is refused by the trial in a fork of the kept world, and the world and its subscribers are untouched"
+   ]
+  },
+  {
+   "id": "P1",
+   "title": "a pod publishes the escaping rows that came, never those that went",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "if (before > 0 && r.n === 0) {",
+     "if (false && before > 0 && r.n === 0) {"
+    ]
+   ],
+   "red": [
+    "pods: the coordinator subscriber equals the whole world after a load, a local edit, a cross-file edit and a deletion"
+   ]
+  },
+  {
+   "id": "P2",
+   "title": "one relation the coordinator's rules read does not cross (the first escape omitted)",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "return [...by.values()].sort((a, b) => (a.rel < b.rel ? -1 : 1));",
+     "return [...by.values()].sort((a, b) => (a.rel < b.rel ? -1 : 1)).slice(1);"
+    ]
+   ],
+   "red": [
+    "pods: the coordinator subscriber equals the whole world after a load, a local edit, a cross-file edit and a deletion"
+   ]
+  },
+  {
+   "id": "P3",
+   "title": "a premise's constant narrows the rows that cross to nothing (filters compared by position off by one)",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "[...f].every(([i, v]) => cells[i] === v)",
+     "[...f].every(([i, v]) => cells[i + 1] === v)"
+    ]
+   ],
+   "red": [
+    "pods: the coordinator subscriber equals the whole world after a load, a local edit, a cross-file edit and a deletion"
+   ]
+  },
+  {
+   "id": "P4",
+   "title": "a pod evaluated anew publishes what came and forgets what its new world lacks",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "      x.d -= r.n;\n",
+     "      x.d -= 0;\n"
+    ]
+   ],
+   "red": [
+    "pods: the coordinator subscriber equals the whole world after a load, a local edit, a cross-file edit and a deletion"
+   ]
+  },
+  {
+   "id": "P5",
+   "title": "a pod is not sent a core fact it reaches when the fact arrives (the router marks no pod for an added fact)",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "for (const p of this.pods.values()) if (!p.dirty && this.passes(f, p.held)) p.dirty = true;",
+     "for (const p of this.pods.values()) if (false && !p.dirty && this.passes(f, p.held)) p.dirty = true;"
+    ]
+   ],
+   "red": [
+    "pods: a pod holds the core its files reach; a core change reaches only the pods it moves; a string no file holds leaves"
+   ]
+  },
+  {
+   "id": "P6",
+   "title": "the core a pod reaches stops at its files' own values (a laid fact's values are not held)",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "      for (let j = 0; j < f.cells.length; j++) holdIn(gs[j], f.cells[j]!);",
+     "      for (let j = 0; j < f.cells.length; j++) false && holdIn(gs[j], f.cells[j]!);"
+    ]
+   ],
+   "red": [
+    "pods: a pod holds the core its files reach; a core change reaches only the pods it moves; a string no file holds leaves"
+   ]
+  },
+  {
+   "id": "P7",
+   "title": "a string no file holds any more stays in the corpus's core",
+   "file": "test/pods-harness.ts",
+   "edits": [
+    [
+     "if (n === 0) { this.core.delete(l); coreOut.push(l); } else this.core.set(l, n);",
+     "if (false) { this.core.delete(l); coreOut.push(l); } else this.core.set(l, n);"
+    ]
+   ],
+   "red": [
+    "pods: a pod holds the core its files reach; a core change reaches only the pods it moves; a string no file holds leaves"
+   ]
+  },
+  {
+   "id": "P8",
+   "title": "the router shares one set of values across every key (a value held at one key opens another)",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "const from = k.from[i]!, h = held[this.group.get(from)!], x = k.calc?.[i]",
+     "const from = k.from[i]!, h = { has: (v: string) => held.some((s) => s.has(v)) }, x = k.calc?.[i]"
+    ]
+   ],
+   "red": [
+    "core routed by key: a name held at one key of the listing does not open the directories holding it"
+   ]
+  },
+  {
+   "id": "P9",
+   "title": "a premise that only asks whether some fact holds a value lays every such fact, not one witness",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "if (!k.exists) { lay(l, f); return; }",
+     "if (true) { lay(l, f); return; }"
+    ]
+   ],
+   "red": [
+    "core routed by key: a name held at one key of the listing does not open the directories holding it"
+   ]
+  },
+  {
+   "id": "P10",
+   "title": "a key reads a derived relation's values as if it held base facts (the sources it is derived from dropped)",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "      } else for (const u of derived.get(t.slice(2)) ?? []) go(u);",
+     "      } else sources.add(t.slice(2));"
+    ]
+   ],
+   "red": [
+    "core routed by key: a name held at one key of the listing does not open the directories holding it"
+   ]
+  },
+  {
+   "id": "P11",
+   "title": "a position the rule's builtins compute (a file's stem from its name) is not keyed: a pod that imports one file of a directory is given the directory's whole listing",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "      if (!rules.has(e.lit.rel)) {",
+     "      if (false && !rules.has(e.lit.rel)) {"
+    ]
+   ],
+   "red": [
+    "core routed by key: a pod importing one file of a large directory holds that file's listing, not the directory's"
+   ]
+  },
+  {
+   "id": "P12",
+   "title": "a premise over the program's own table (index_file) is read after the listing it keys: the listing keyed by its directory alone, laid whole",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "(anchored(e.lit.rel) ? 4 : rigid.get(e.lit.rel) ? 3 : 0)",
+     "(anchored(e.lit.rel) ? 4 : 0)"
+    ]
+   ],
+   "red": [
+    "core routed by key: a pod importing one file of a large directory holds that file's listing, not the directory's"
+   ]
+  },
+  {
+   "id": "P13",
+   "title": "a key position the router computes never holds (what the rule's builtins compute of a name is never compared): too little listing laid, a file another pod's file imports by its stem not found",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "      if (!x.fn(c).some((v) => from.values.has(v) || h?.has(v) === true)) return false;",
+     "      if (!x.fn(c).slice(1).some((v) => from.values.has(v) || h?.has(v) === true)) return false;"
+    ]
+   ],
+   "red": [
+    "pods: a pod holds the core its files reach; a core change reaches only the pods it moves; a string no file holds leaves"
+   ]
+  },
+  {
+   "id": "P14",
+   "title": "a core fact is indexed at one open position of its key only: held last at another, it is never considered again, and too little is laid",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "        if (vs.some((v) => from.values.has(v))) return;\n",
+     "        if (open || vs.some((v) => from.values.has(v))) return;\n"
+    ]
+   ],
+   "red": [
+    "core routed by key: a program of more groups than one word of bits, keys of two open positions and a constant"
+   ]
+  },
+  {
+   "id": "P15",
+   "title": "a value's groups in one word of bits are lost when its groups cross into the next word: the router of a program of more than 30 groups lays too little",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "        if (i !== wi) { if (now !== was) w!.set(c, now); wi = i;",
+     "        if (i !== wi) { wi = i;"
+    ]
+   ],
+   "red": [
+    "core routed by key: a program of more groups than one word of bits, keys of two open positions and a constant"
+   ]
+  },
+  {
+   "id": "P16",
+   "title": "a core fact taken out stays in the router's index (the index not kept with the core on an edit)",
+   "file": "src/federation.ts",
+   "edits": [
+    [
+     "      for (const [g, v] of this.entries(f).at) this.at[g]?.get(v)?.delete(l);\n",
+     ""
+    ]
+   ],
+   "red": [
+    "core routed by key: the router lays what a router with no index lays, through edits of the core and the files"
+   ]
+  },
+  {
+   "id": "MC1",
+   "title": "view links: expiry not checked",
+   "file": "src/viewlink.ts",
+   "edits": [
+    [
+     "  if (now >= k.exp) throw bad('has expired');",
+     "  if (false) throw bad('has expired');"
+    ]
+   ],
+   "red": [
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line"
+   ]
+  },
+  {
+   "id": "MC2",
+   "title": "view links: a link for another node accepted",
+   "file": "src/viewlink.ts",
+   "edits": [
+    [
+     "  if (k.aud !== c.audience) throw",
+     "  if (false) throw"
+    ]
+   ],
+   "red": [
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line"
+   ]
+  },
+  {
+   "id": "MC3",
+   "title": "view links: a link for another view accepted",
+   "file": "src/viewlink.ts",
+   "edits": [
+    [
+     "  if (k.owner !== c.owner || k.name !== c.name) throw",
+     "  if (false) throw"
+    ]
+   ],
+   "red": [
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line"
+   ]
+  },
+  {
+   "id": "MC4",
+   "title": "view links: the signature not checked",
+   "file": "src/viewlink.ts",
+   "edits": [
+    [
+     "  if (!ok) throw bad('does not verify');",
+     "  void ok;"
+    ]
+   ],
+   "red": [
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line"
+   ]
+  },
+  {
+   "id": "MC5",
+   "title": "view links: an issuer's revocation not checked",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (await this.linkRevoked(claims.iss, claims.jti)) throw bad(",
+     "      if (false) throw bad("
+    ]
+   ],
+   "red": [
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line"
+   ]
+  },
+  {
+   "id": "MC6",
+   "title": "view links: a stream opened by a link is not ended when the link is revoked",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "if (l.claims.iss === by && l.claims.jti === f.source) await this.endLink(",
+     "if (false) await this.endLink("
+    ]
+   ],
+   "red": [
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line",
+    "a revoke queued behind a link's open ends the stream, and one queued before refuses the open: no slot between check and registration"
+   ]
+  },
+  {
+   "id": "MC7",
+   "title": "subscriptions: a reader who sees a book in part (an export) is not sent that book's new facts",
+   "file": "src/subscribe.ts",
+   "edits": [
+    [
+     "      const partial = batch !== undefined && sub.scope.get(batch.book)?.only != null;",
+     "      const partial = false;"
+    ]
+   ],
+   "red": [
+    "a grantee's view link opens the view's stream with the grantee's rows only; another view, another node, expired, tampered, revoked links are refused; the link is never in a request line"
+   ]
+  },
+  {
+   "id": "MV1",
+   "title": "view links: a request path that normalises to another (//host, \\, dot segments) is routed as the path it normalises to",
+   "file": "src/http.ts",
+   "edits": [
+    [
+     "      if (!rawUrl.startsWith('/') || url.host !== 'local' || url.pathname !== rawUrl.split('?')[0]) {",
+     "      if (false) {"
+    ]
+   ],
+   "red": [
+    "a request path that is not one single-slash absolute path is refused: the view page is never served under //host"
+   ]
+  },
+  {
+   "id": "MV2",
+   "title": "view links: the page fetches its own path as given (location.pathname), not the URL it builds from its origin",
+   "file": "src/view.ts",
+   "edits": [
+    [
+     "  const res = await fetch(target.href, {",
+     "  const res = await fetch(location.pathname, {"
+    ],
+    [
+     "  if (!here) { $('status')",
+     "  if (false) { $('status')"
+    ]
+   ],
+   "red": [
+    "the view page fetches only its own origin, from the view's owner and name, under a CSP that holds its own script"
+   ]
+  },
+  {
+   "id": "MV3",
+   "title": "view links: the page's CSP lets it connect anywhere",
+   "file": "src/view.ts",
+   "edits": [
+    [
+     " connect-src 'self';",
+     ""
+    ]
+   ],
+   "red": [
+    "the view page fetches only its own origin, from the view's owner and name, under a CSP that holds its own script"
+   ]
+  },
+  {
+   "id": "MV4",
+   "title": "view links: a link opens the view's latest definition, whatever it was signed for",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "      if (viewLit(L) !== claims.lit) throw bad(",
+     "      if (false) throw bad("
+    ]
+   ],
+   "red": [
+    "a link is bound to the view's definition: redefined, its open stream ends and the link opens nothing"
+   ]
+  },
+  {
+   "id": "MV5",
+   "title": "view links: a redefinition leaves open the streams of links to the old definition",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "        if (L === null || viewLit(L) !== l.claims.lit) await this.endLink(",
+     "        if (false) await this.endLink("
+    ]
+   ],
+   "red": [
+    "a link is bound to the view's definition: redefined, its open stream ends and the link opens nothing"
+   ]
+  },
+  {
+   "id": "MV6",
+   "title": "view links: the revocation is checked in a serial slot before the one that registers the stream (the review's race)",
+   "file": "src/node.ts",
+   "edits": [
+    [
+     "    const id = await this.serial(async () => {\n      if (this.keyFor(claims.kid)?.identity !== claims.iss) throw bad('is signed by a key not valid here for its issuer');\n      if (await this.linkRevoked(claims.iss, claims.jti)) throw bad('was revoked by its issuer');",
+     "    if (await this.serial(() => this.linkRevoked(claims.iss, claims.jti))) throw bad('was revoked by its issuer');\n    const id = await this.serial(async () => {\n      if (this.keyFor(claims.kid)?.identity !== claims.iss) throw bad('is signed by a key not valid here for its issuer');"
+    ]
+   ],
+   "red": [
+    "a revoke queued behind a link's open ends the stream, and one queued before refuses the open: no slot between check and registration"
+   ]
+  },
+  {
+   "id": "MV8",
+   "title": "view links: a non-canonical base64url spelling of a link accepted",
+   "file": "src/viewlink.ts",
+   "edits": [
+    [
+     "  if (m.slice(1).some((p) => Buffer.from(p, 'base64url').toString('base64url') !== p)) throw",
+     "  if (false) throw"
+    ]
+   ],
+   "red": [
+    "a link has one spelling: a non-canonical base64url of its claims or signature is refused"
+   ]
+  },
+  {
+   "id": "MWN1",
+   "title": "a refusal's whynot loses the rule a negation blocked (the decisive reason dropped)",
+   "file": "src/engine.ts",
+   "edits": [
+    [
+     "return { holds: false, whynot: r.text as string };",
+     "return { holds: false, whynot: (r.text as string).replace(/\\n  rule [^\\n]*\\n    failed premise: not [^\\n]*/g, '') };"
+    ]
+   ],
+   "red": [
+    "a stolen current key cannot rotate the identity away from its recovery key"
    ]
   }
  ]

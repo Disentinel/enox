@@ -37,7 +37,7 @@ const BOOK = /^b_[0-9a-f]{16}$/;
 const VAR = /^[A-Z][A-Za-z0-9_]*$/;
 
 /** Split at top-level occurrences of `sep` (outside strings and brackets). */
-function splitTop(s: string, sep: string): string[] {
+export function splitTop(s: string, sep: string): string[] {
   const out: string[] = [];
   let cur = '', inStr = false, depth = 0;
   for (let i = 0; i < s.length; i++) {

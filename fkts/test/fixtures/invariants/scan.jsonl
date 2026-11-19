@@ -1,0 +1,5 @@
+{"source":"login@v1","relation":"version_of","target":"login","perspective":"scanner","confidence":1}
+{"source":"signup@v1","relation":"version_of","target":"signup","perspective":"scanner","confidence":1}
+{"source":"home","relation":"shows","target":"login@v1","perspective":"scanner","confidence":1}
+{"source":"settings","relation":"shows","target":"login@v1","perspective":"scanner","confidence":1}
+{"source":"welcome","relation":"shows","target":"signup@v1","perspective":"scanner","confidence":1}
