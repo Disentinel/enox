@@ -878,7 +878,8 @@ export class Pod {
     pod.core = new Set(core);
     for (const [f, facts] of files) pod.files.set(f, new Set(facts));
     const t0 = performance.now();
-    pod.s = await pod.world();
+    // (a world that stops at a wall publishes nothing: its engine is not left running)
+    try { pod.s = await pod.world(); } catch (e) { await port.stop(); throw e; }
     return { pod, published: await pod.publish(pod.net(pod.s), t0, 'anew') };
   }
 

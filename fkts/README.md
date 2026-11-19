@@ -669,6 +669,40 @@ crosses files through another relation (here `may_be_node`, behind
 `export { x }` of an imported `x`) must be among the coordinator's rules or the
 oracle goes red; a cell's type is lost on the wire (an atom and a string
 arrive as one text, an integer as its digits).
+
+**The whole of vscode** (2026-11-19; `scripts/pods-big.ts ROOT PER [--at-once K]
+[--oracle] [--rule-budget N] [--out F.json]`; vscode at eef761e9, `src` without
+tests, 7 234 files; the engine of rofl `main`, release; 4 cores, 15 GB).
+
+| | 145 pods of 50, 2 at once | 97 pods of 75, 1 at once |
+|---|---|---|
+| answer rows of `exports_name` | 8 893 | 8 906 |
+| all pods joined | 612 s | 966 s |
+| a pod's engine, median / max | 4.7 s, 435 MB / 11.4 s, 805 MB | |
+| core facts per pod, of 671 845 | median 9 200 (628 – 24 844) | |
+| the coordinator's engine at its peak | 1 819 MB | 2 143 MB |
+| one file edited: the pod's delta / the frame at the subscriber | 76 ms / 1 485 ms | / 1 857 ms |
+
+Scanning twice took 228 s and the route 5 s. What it showed:
+
+- **The answer depends on the cut.** The 13 rows the second cut has more are
+  all `export const X = createDecorator(...)`: a value returned by a function
+  of another file is resolved only when both files are in one pod, the
+  coordinator's rules do not carry it. vscode has about 690 such exports (by
+  text), and how many of them a cut catches is its luck. Against one engine on `vs/base` with tests
+  (493 files, 10 pods) 1 305 rows of 1 306, the lost one of the same kind
+  (`sampleCount`); one engine there took 91 – 97 s and 5.7 GB.
+- **The default rule budget** (50 000 steps) is spent at about the 82nd pod
+  (some 5 200 rows): the answer is then empty and every batch costs 9 – 21 s.
+  The runs above set `--rule-budget 1000000000`.
+- **The router** holds every file's facts in one process: about 7 GB, 1 MB a
+  file.
+- **The coordinator grows with the corpus**: a pod's `fkts:follow` cost 18 ms
+  at the first pod and about 1.5 s at the last, its pull 131 ms and 2 – 3.3 s
+  (a follow fact has the rule world built anew).
+- Two pods stopped at the memory wall beside a neighbour and passed alone; a
+  pod whose world stops no longer leaves its engine running (`Pod.start`).
+
 ## 11. Moving a node written before the rename
 
 A data directory written as Roflenox (signatures `roflenox-*-v1`, relations
