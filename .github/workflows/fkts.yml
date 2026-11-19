@@ -1,9 +1,11 @@
-# FKTS (fkts/): the suite and the mutant gate on every push to spec/enox-rofl and to the branch it came from. Removing it is this one file.
+# FKTS (fkts/): the suite and the mutant gate on every push to spec/enox-rofl and every pull request into it. Removing it is this one file.
 name: fkts
 
 on:
   push:
-    branches: [claude/project-thread-hhlo1w, spec/enox-rofl]
+    branches: [spec/enox-rofl]
+  pull_request:
+    branches: [spec/enox-rofl]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
