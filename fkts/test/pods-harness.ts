@@ -1,14 +1,15 @@
 // A federation of pods over a JS corpus, and its oracle (src/federation.ts):
-// N pod nodes, each with an engine holding the JS model over its files only,
-// a coordinator node following them with the model's cross-file rules, a
-// subscriber on the coordinator — and, beside them, the WHOLE WORLD: the
-// corpus scanned anew and evaluated in one engine, which the subscriber's
-// rows must equal after every step.
+// N pods, each an engine process settling its files by levels, the root
+// engine beside a coordinator node that publishes its answers, a subscriber on
+// the coordinator — and, beside them, the WHOLE WORLD: the corpus scanned anew
+// and evaluated in one engine, which the subscriber's rows must equal after
+// every step.
 //
 // The JS model and its scanner are those of the pinned @grafema/rofl; the
-// engine holding the pods' and the nodes' worlds is ROFL_BIN (it needs `watch`).
+// engine of the pods, the root and the coordinator is ROFL_BIN (it needs
+// `volumes`, Disentinel/rofl docs/cli.md, *The nodes as processes*).
 import assert from 'node:assert/strict';
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,29 +17,16 @@ import { RoflPort } from '@grafema/rofl/port';
 import { publish } from '../src/client.ts';
 import { DEFAULT_ROFL_BIN } from '../src/engine.ts';
 import { decodeCell, type Fact } from '../src/facts.ts';
-import { cellsOf, coreDemand, CoreRouter, decodeRules, escapesOf, Pod, splitFacts, WALLS, type Escape, type Published } from '../src/federation.ts';
-import { invitation, pull, start, subscribe, tmpDir, vouch, type Clock, type Running, type Stream } from './helpers.ts';
+import { bookOf } from '../src/identity.ts';
+import { Answers, corpusText, decodeRule, EngineNode, podSize, splitFacts, WALLS, type Published } from '../src/federation.ts';
+import { start, subscribe, tmpDir, type Clock, type Running, type Stream } from './helpers.ts';
 
 const PKG = path.dirname(fileURLToPath(import.meta.resolve('@grafema/rofl/package.json')));
 export const MODEL = path.join(PKG, 'rules/js.files');
 const ROFL_CLI = path.join(PKG, 'npm/rofl.js');
-const CLI = path.join(import.meta.dirname, '..', 'src', 'cli.ts');
 
 /** The question: which function node each file offers under which name. */
 export const QUESTION = 'exports_name(F, Name, File)';
-/** The JS model's rules of exports_name that read another file (its [surface] relations), as they stand in
- *  rules/js-dataflow.rofl and rules/js-surface.rofl of @grafema/rofl 1.5.0, books dropped: the coordinator's. */
-export const RULES = [
-  'exports_name(F, Name, File) :- ast_node(E, "export_all_declaration", File), module_target(E, Target), sx_export_node(Target, Name, F).',
-  'exports_name(F, Ext, File) :- reexport_offers(File, Ext, T, Int), sx_export_node(T, Int, F).',
-  'exports_name(F, Ext, File) :- reexport_offers(File, Ext, T, "default"), sx_default(T, F).',
-  'sx_export_node(File, Name, F) :- exports_name(F, Name, File).',
-  'sx_default(File, F) :- exports_default(F, File).',
-];
-
-/** What crosses: every relation the rules read, and the question's own relation. */
-export const ESCAPES = escapesOf([...RULES, `question :- ${QUESTION}.`]);
-
 const wall = (): Clock => ({ get t() { return Date.now(); }, set t(_v: number) { /* the wall clock */ } }) as Clock;
 
 /** The facts of a directory, as the scanner writes them. */
@@ -94,36 +82,45 @@ export function rssOf(pid: number | undefined): number {
   try { return Number(execFileSync('ps', ['-o', 'rss=', '-p', String(pid)], { encoding: 'utf8' }).trim()) / 1024; } catch { return 0; }
 }
 
-export interface PodNode { name: string; node: Running; pod: Pod; files: string[] }
-
-export interface Step { ms: number; frames: number; pod: Published | null }
+export interface PodNode { name: string; engine: EngineNode; files: string[] }
 
 export class Federation {
   readonly root: string;
   readonly coord: Running;
-  readonly pods: PodNode[];
+  pods: PodNode[];
+  /** The root engine, the coordinator's: it settles what is over the pods and answers the question. */
+  top: EngineNode;
   readonly sub: Stream;
   /** The core's facts, each with how many files' shares hold it: a fact no file holds any more leaves. */
   readonly core: Map<string, number>;
   /** Each file's share of the core. */
   private readonly shareOf: Map<string, Set<string>>;
-  readonly router: CoreRouter;
-  private readonly follower: ChildProcess | null;
-  /** The pod of each file. */
-  private readonly home = new Map<string, PodNode>();
   private readonly facts: Map<string, Set<string>>;
+  /** The files in the engines' order: a file's place is its index, a pod's block a run of them. */
+  private files: string[];
+  private readonly n: number;
+  private readonly answers: Answers;
 
-  private constructor(root: string, coord: Running, pods: PodNode[], sub: Stream, c: { core: Map<string, number>; shareOf: Map<string, Set<string>>; router: CoreRouter; facts: Map<string, Set<string>> }, follower: ChildProcess | null) {
-    this.root = root; this.coord = coord; this.pods = pods; this.sub = sub; this.follower = follower;
-    this.core = c.core; this.shareOf = c.shareOf; this.router = c.router; this.facts = c.facts;
-    for (const p of pods) for (const f of p.files) this.home.set(f, p);
+  private constructor(root: string, coord: Running, sub: Stream, c: { core: Map<string, number>; shareOf: Map<string, Set<string>>; facts: Map<string, Set<string>>; files: string[]; n: number; answers: Answers; pods: PodNode[]; top: EngineNode }) {
+    this.root = root; this.coord = coord; this.sub = sub;
+    this.core = c.core; this.shareOf = c.shareOf; this.facts = c.facts; this.files = c.files; this.n = c.n; this.answers = c.answers; this.pods = c.pods; this.top = c.top;
   }
 
-  /** Stand it up: `assign` gives each file's pod (an index); `follow` is
-   *  'pull' (the test pulls each feed after a step: one executor tick) or
-   *  'executor' (the follow executor, every `intervalMs`). */
-  static async start(root: string, assign: (file: string, i: number) => number, n: number,
-    o: { follow?: 'pull' | 'executor'; intervalMs?: number; escapes?: Escape[]; wholeCore?: boolean } = {}): Promise<{ fed: Federation; initial: { ms: number; pods: Published[]; frameMs: number } }> {
+  /** The engines over the corpus as it is now: a pod per block of files, and the root. */
+  private static async engines(files: string[], facts: Map<string, Set<string>>, core: Iterable<string>, n: number): Promise<{ pods: PodNode[]; top: EngineNode }> {
+    const dir = tmpDir('pods-far');
+    const corpus = path.join(dir, 'corpus.rofl');
+    fs.writeFileSync(corpus, corpusText(core, files, facts));
+    const size = podSize(files.length, n);
+    const k = Math.ceil(files.length / size);
+    const o = { program: MODEL, dir, size };
+    // (every process stands up at once: a pod settles its layers with ids from the root, the root waits for the pods)
+    const [top, ...engines] = await Promise.all([EngineNode.start(o, 'root', corpus), ...Array.from({ length: k }, (_, i) => EngineNode.start(o, i, corpus))]);
+    return { top: top!, pods: engines.map((engine, i) => ({ name: `pod-${i}`, engine, files: files.slice(i * size, (i + 1) * size) })) };
+  }
+
+  /** Stand it up over the files of `root`, on `n` pods (as few as hold the files in whole leaves of the engine). */
+  static async start(root: string, n: number): Promise<{ fed: Federation; initial: { ms: number; pod: Published } }> {
     const t0 = performance.now();
     const text = scan(root);
     const files = filesOf(text, root);
@@ -141,40 +138,16 @@ export class Federation {
     assert.deepEqual([...core.keys()].sort(), [...whole.core].sort(), 'the files\' shares of the core ≠ the whole scan\'s core');
     for (const f of files) assert.deepEqual([...byFile.get(f)!].sort(), [...whole.byFile.get(f)!].sort(), `${f} scanned alone ≠ scanned whole`);
     const coord = await start(tmpDir('pods-coord'), 'coordinator', { clock: wall() });
-    const escapes = o.escapes ?? ESCAPES;
-    const router = new CoreRouter(o.wholeCore ? null : await coreDemand(MODEL, escapes.map((e) => e.rel), new Set([...core.keys()].map((l) => cellsOf(l).rel))));
-    router.core(core.keys(), []);
-    const mineOf = files.map((f, k) => assign(f, k));
-    for (let i = 0; i < n; i++) router.files(i, files.filter((_f, k) => mineOf[k] === i).flatMap((f) => [...byFile.get(f)!]), []);
-    router.route();
-    const pods: PodNode[] = [];
-    const published: Published[] = [];
-    for (let i = 0; i < n; i++) {
-      const name = `pod-${i}`;
-      const node = await start(tmpDir(`pods-${i}`), name, { clock: wall() });
-      const mine = files.filter((_f, k) => mineOf[k] === i);
-      // The pod's operator knows the coordinator, and lets it read the pod's book.
-      await vouch(node, coord.me);
-      await publish(node.url, node.me, [{ source: 'coordinator', relation: 'fkts:grant', target: '2100-01-01T00:00:00.000Z', perspective: 'policy', confidence: 1 }]);
-      const { pod, published: p } = await Pod.start({ program: MODEL, escapes, publish: async (f: Fact[]) => { await publish(node.url, node.me, f); } },
-        router.share(i), new Map(mine.map((f) => [f, byFile.get(f)!])));
-      pods.push({ name, node, pod, files: mine });
-      published.push(p);
-    }
-    const rule = (text: string, i: number): Fact => ({ source: `pods-${i}`, relation: 'fkts:rule', target: text, perspective: 'rules', confidence: 1 });
-    await publish(coord.url, coord.me, [...[...RULES, ...decodeRules(escapes)].map(rule),
-      ...pods.map((p) => ({ source: p.name, relation: 'fkts:follow', target: invitation(p.node), perspective: 'follows', confidence: 1 }))]);
-    let follower: ChildProcess | null = null;
-    if (o.follow === 'executor') {
-      follower = spawn(process.execPath, ['--experimental-strip-types', '--no-warnings', CLI, 'follow', '--interval_ms', String(o.intervalMs ?? 50), '--data', coord.dir, '--url', coord.url], { stdio: 'ignore' });
-    } else {
-      for (const p of pods) await pull(coord, invitation(p.node), p.name, coord.me);
-    }
+    const rule: Fact = { source: 'answers', relation: 'fkts:rule', target: decodeRule('exports_name', 3, bookOf(coord.me.name)), perspective: 'rules', confidence: 1 };
+    await publish(coord.url, coord.me, [rule]);
+    const answers = new Answers('exports_name', async (f: Fact[]) => { await publish(coord.url, coord.me, f); });
+    const { pods, top } = await Federation.engines(files, byFile, core.keys(), n);
     const t1 = performance.now();
+    const pod = await answers.step(await top.rows(QUESTION), t0, t1, 'anew');
     const sub = await subscribe(coord.url, `/subscribe?query=${encodeURIComponent(QUESTION)}`, { authorization: `Bearer ${coord.node.operatorToken()}` });
     assert.equal(sub.status, 200, JSON.stringify(sub.body));
-    const fed = new Federation(root, coord, pods, sub, { core, shareOf, router, facts: byFile }, follower);
-    return { fed, initial: { ms: t1 - t0, pods: published, frameMs: 0 } };
+    const fed = new Federation(root, coord, sub, { core, shareOf, facts: byFile, files, n, answers, pods, top });
+    return { fed, initial: { ms: performance.now() - t0, pod } };
   }
 
   /** The subscriber's rows, as the oracle compares them. */
@@ -192,50 +165,53 @@ export class Federation {
         assert.deepEqual([...have].sort(), [...want].sort(), 'the coordinator\'s subscriber ≠ the whole world');
       }
       try { await this.sub.next(Math.max(left, 1)); frames++; } catch { /* timed out: the next turn compares and says how */ }
-      if (!this.follower) for (const p of this.pods) await pull(this.coord, p.node.url, p.name, this.coord.me);
     }
   }
 
-  /** Edit (or, with null, delete) one file in the corpus, as a person would; its pod takes the delta, and the core
-   *  facts that came and went reach only the pods whose share they move (`others`). */
-  async edit(file: string, content: string | null): Promise<{ t0: number; pod: Published; others: Published[]; core: { in: number; out: number } }> {
+  /** Edit (or, with null, delete) one file in the corpus, as a person would. The root sends it to every pod and each
+   *  settles again what it moved; a file that comes, or the core moving (the listing, the strings), stands the
+   *  engines up anew over the corpus as it is now. Then the coordinator publishes the answers that moved. */
+  async edit(file: string, content: string | null): Promise<{ t0: number; pod: Published; core: { in: number; out: number } }> {
     const at = path.join(this.root, file);
-    const owner = this.home.get(file) ?? this.pods[0]!;
     const t0 = performance.now();
     let now: { facts: Set<string>; core: Set<string> } | null = null;
     if (content === null) {
       fs.rmSync(at);
-      this.home.delete(file);
     } else {
       fs.mkdirSync(path.dirname(at), { recursive: true });
       fs.writeFileSync(at, content);
       now = scanOne(this.root, file);
-      this.home.set(file, owner);
     }
-    const was = { facts: this.facts.get(file) ?? new Set<string>(), core: this.shareOf.get(file) ?? new Set<string>() };
+    const was = { core: this.shareOf.get(file) ?? new Set<string>() };
     const coreIn: string[] = [], coreOut: string[] = [];
     for (const l of was.core) if (!now?.core.has(l)) { const n = this.core.get(l)! - 1; if (n === 0) { this.core.delete(l); coreOut.push(l); } else this.core.set(l, n); }
     for (const l of now?.core ?? []) if (!was.core.has(l)) { const n = (this.core.get(l) ?? 0) + 1; this.core.set(l, n); if (n === 1) coreIn.push(l); }
+    const place = this.files.indexOf(file);
     if (now) { this.facts.set(file, now.facts); this.shareOf.set(file, now.core); } else { this.facts.delete(file); this.shareOf.delete(file); }
-    const i = this.pods.indexOf(owner);
-    this.router.core(coreIn, coreOut);
-    this.router.files(i, [...now?.facts ?? []].filter((l) => !was.facts.has(l)), [...was.facts].filter((l) => !now?.facts.has(l)));
-    const moved = this.router.route();
-    const pod = await owner.pod.edit(file, now?.facts ?? null, this.router.share(i));
-    const others: Published[] = [];
-    for (const [k, share] of moved) if (k !== i) others.push(await this.pods[k]!.pod.edit('', null, share));
-    if (!this.follower) for (const p of this.pods) await pull(this.coord, p.node.url, p.name, this.coord.me);
-    return { t0, pod, others, core: { in: coreIn.length, out: coreOut.length } };
+    let by: Published['by'];
+    if (place >= 0 && coreIn.length === 0 && coreOut.length === 0) {
+      await this.top.edit([{ at: place, rofl: now ? `${[...now.facts].join('\n')}\n` : '' }]);
+      by = 'levels';
+    } else {
+      await this.stop();
+      this.files = [...this.facts.keys()].sort();
+      ({ pods: this.pods, top: this.top } = await Federation.engines(this.files, this.facts, this.core.keys(), this.n));
+      by = 'anew';
+    }
+    const t1 = performance.now();
+    const pod = await this.answers.step(await this.top.rows(QUESTION), t0, t1, by);
+    return { t0, pod, core: { in: coreIn.length, out: coreOut.length } };
+  }
+
+  /** The engines stopped: the root first, and each pod goes with it. */
+  private async stop(): Promise<void> {
+    await this.top.close();
+    for (const p of this.pods) await p.engine.close();
   }
 
   async close(): Promise<void> {
     this.sub.close();
-    if (this.follower && this.follower.exitCode === null) {
-      const exited = new Promise((r) => this.follower!.once('exit', r));
-      this.follower.kill('SIGTERM');
-      await exited;
-    }
-    for (const p of this.pods) { await p.pod.close(); await p.node.stop(); }
+    await this.stop();
     await this.coord.stop();
   }
 }
