@@ -18,11 +18,14 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Federation, rssOf, wholeWorld } from '../test/pods-harness.ts';
-import { filePrefix } from '../src/federation.ts';
+import { filePrefix, WALLS } from '../src/federation.ts';
 import { tmpDir } from '../test/helpers.ts';
 
 const each = process.argv.includes('--each');
-const [src, n = '2'] = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+// (a corpus larger than the default wall: `--budget N`, the steps each engine may take)
+const b = process.argv.indexOf('--budget');
+if (b > 0) WALLS.budget = Number(process.argv[b + 1]);
+const [src, n = '2'] = process.argv.slice(2).filter((a, i, all) => !a.startsWith('--') && all[i - 1] !== '--budget');
 if (!src) { console.error('usage: scripts/pods-cost.ts DIR [PODS]'); process.exit(1); }
 const pods = Number(n);
 const root = tmpDir('pods-cost');

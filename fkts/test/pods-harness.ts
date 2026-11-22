@@ -99,11 +99,12 @@ export class Federation {
   /** The files in the engines' order: a file's place is its index, a pod's block a run of them. */
   private files: string[];
   private readonly n: number;
+  private readonly budget: number | undefined;
   private readonly answers: Answers;
 
-  private constructor(root: string, coord: Running, sub: Stream, c: { core: Map<string, number>; shareOf: Map<string, Set<string>>; facts: Map<string, Set<string>>; files: string[]; n: number; answers: Answers; pods: PodNode[]; top: EngineNode }) {
+  private constructor(root: string, coord: Running, sub: Stream, c: { core: Map<string, number>; shareOf: Map<string, Set<string>>; facts: Map<string, Set<string>>; files: string[]; n: number; budget?: number; answers: Answers; pods: PodNode[]; top: EngineNode }) {
     this.root = root; this.coord = coord; this.sub = sub;
-    this.core = c.core; this.shareOf = c.shareOf; this.facts = c.facts; this.files = c.files; this.n = c.n; this.answers = c.answers; this.pods = c.pods; this.top = c.top;
+    this.core = c.core; this.shareOf = c.shareOf; this.facts = c.facts; this.files = c.files; this.n = c.n; this.budget = c.budget; this.answers = c.answers; this.pods = c.pods; this.top = c.top;
   }
 
   /** The engines over the corpus as it is now: a pod per block of files, and the root. */
@@ -155,7 +156,7 @@ export class Federation {
     const pod = await answers.step(await top.rows(QUESTION), t0, t1, 'anew');
     const sub = await subscribe(coord.url, `/subscribe?query=${encodeURIComponent(QUESTION)}`, { authorization: `Bearer ${coord.node.operatorToken()}` });
     assert.equal(sub.status, 200, JSON.stringify(sub.body));
-    const fed = new Federation(root, coord, sub, { core, shareOf, facts: byFile, files, n, answers, pods, top });
+    const fed = new Federation(root, coord, sub, { core, shareOf, facts: byFile, files, n, budget: o.budget, answers, pods, top });
     return { fed, initial: { ms: performance.now() - t0, pod } };
   }
 
@@ -204,7 +205,7 @@ export class Federation {
     } else {
       await this.stop();
       this.files = [...this.facts.keys()].sort();
-      ({ pods: this.pods, top: this.top } = await Federation.engines(this.files, this.facts, this.core.keys(), this.n));
+      ({ pods: this.pods, top: this.top } = await Federation.engines(this.files, this.facts, this.core.keys(), this.n, this.budget));
       by = 'anew';
     }
     const t1 = performance.now();
