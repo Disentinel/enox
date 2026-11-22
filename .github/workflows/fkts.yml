@@ -45,8 +45,15 @@ jobs:
         env: { CARGO_INCREMENTAL: 0 }
         run: |
           cd rofl/rust && cargo build --profile fast -p rofl --bin rofl
-          cargo build --release -q --manifest-path ../models/lang/js/scanner/oxc_scan/Cargo.toml
-          mkdir -p "$GITHUB_WORKSPACE/bin" && cp target/fast/rofl ../models/lang/js/scanner/oxc_scan/target/release/oxc_scan "$GITHUB_WORKSPACE/bin/"
+          mkdir -p "$GITHUB_WORKSPACE/bin" && cp target/fast/rofl "$GITHUB_WORKSPACE/bin/"
+      # the scanner on stable, as rofl's own CI builds it (its oxc needs a newer rustc than the engine's pin)
+      - if: steps.bin.outputs.cache-hit != 'true'
+        uses: dtolnay/rust-toolchain@stable
+      - if: steps.bin.outputs.cache-hit != 'true'
+        env: { CARGO_INCREMENTAL: 0 }
+        run: |
+          cd rofl/models/lang/js/scanner/oxc_scan && cargo build --release
+          cp target/release/oxc_scan "$GITHUB_WORKSPACE/bin/"
       - run: echo "rofl ${{ steps.sha.outputs.sha }}" && ls -l bin
       - uses: actions/upload-artifact@v4
         with: { name: rofl, path: bin, retention-days: 3 }
