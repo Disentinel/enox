@@ -107,20 +107,29 @@ export class Federation {
   }
 
   /** The engines over the corpus as it is now: a pod per block of files, and the root. */
-  private static async engines(files: string[], facts: Map<string, Set<string>>, core: Iterable<string>, n: number): Promise<{ pods: PodNode[]; top: EngineNode }> {
+  private static async engines(files: string[], facts: Map<string, Set<string>>, core: Iterable<string>, n: number, budget?: number): Promise<{ pods: PodNode[]; top: EngineNode }> {
     const dir = tmpDir('pods-far');
     const corpus = path.join(dir, 'corpus.rofl');
     fs.writeFileSync(corpus, corpusText(core, files, facts));
     const size = podSize(files.length, n);
     const k = Math.ceil(files.length / size);
-    const o = { program: MODEL, dir, size };
+    const o = { program: MODEL, dir, size, ...(budget ? { budget } : {}) };
     // (every process stands up at once: a pod settles its layers with ids from the root, the root waits for the pods)
-    const [top, ...engines] = await Promise.all([EngineNode.start(o, 'root', corpus), ...Array.from({ length: k }, (_, i) => EngineNode.start(o, i, corpus))]);
+    const all = [EngineNode.start(o, 'root', corpus), ...Array.from({ length: k }, (_, i) => EngineNode.start(o, i, corpus))];
+    // (one that refuses refuses them all: those standing are let go before the refusal is said)
+    const done = await Promise.allSettled(all);
+    // (and the refusal said is the cause, not a process that saw another go)
+    const no = done.filter((d): d is PromiseRejectedResult => d.status === 'rejected').sort((a, b) => Number(/ went: /.test(String(a.reason))) - Number(/ went: /.test(String(b.reason))));
+    if (no.length) {
+      for (const d of done) if (d.status === 'fulfilled') await d.value.close().catch(() => {});
+      throw no[0]!.reason;
+    }
+    const [top, ...engines] = done.map((d) => (d as PromiseFulfilledResult<EngineNode>).value);
     return { top: top!, pods: engines.map((engine, i) => ({ name: `pod-${i}`, engine, files: files.slice(i * size, (i + 1) * size) })) };
   }
 
   /** Stand it up over the files of `root`, on `n` pods (as few as hold the files in whole leaves of the engine). */
-  static async start(root: string, n: number): Promise<{ fed: Federation; initial: { ms: number; pod: Published } }> {
+  static async start(root: string, n: number, o: { budget?: number } = {}): Promise<{ fed: Federation; initial: { ms: number; pod: Published } }> {
     const t0 = performance.now();
     const text = scan(root);
     const files = filesOf(text, root);
@@ -141,7 +150,7 @@ export class Federation {
     const rule: Fact = { source: 'answers', relation: 'fkts:rule', target: decodeRule('exports_name', 3, bookOf(coord.me.name)), perspective: 'rules', confidence: 1 };
     await publish(coord.url, coord.me, [rule]);
     const answers = new Answers('exports_name', async (f: Fact[]) => { await publish(coord.url, coord.me, f); });
-    const { pods, top } = await Federation.engines(files, byFile, core.keys(), n);
+    const { pods, top } = await Federation.engines(files, byFile, core.keys(), n, o.budget).catch(async (e: unknown) => { await coord.stop(); throw e; });
     const t1 = performance.now();
     const pod = await answers.step(await top.rows(QUESTION), t0, t1, 'anew');
     const sub = await subscribe(coord.url, `/subscribe?query=${encodeURIComponent(QUESTION)}`, { authorization: `Bearer ${coord.node.operatorToken()}` });

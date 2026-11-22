@@ -83,3 +83,11 @@ test('pods: the coordinator subscriber equals the whole world after a load, a lo
     assert.ok([...fed.rows()].some((r) => r.includes('"x2"') && r.includes('lib/n.ts')));
   } finally { await fed.close(); }
 });
+
+test('pods: a pod that reaches its wall refuses, and the federation refuses to stand up, saying the wall', async () => {
+  const root = tmpDir('pods-wall');
+  for (const [f, t] of Object.entries(CORPUS)) { fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true }); fs.writeFileSync(path.join(root, f), t); }
+  const t0 = performance.now();
+  await assert.rejects(Federation.start(root, 2, { budget: 500 }), /budget_exhausted/);
+  assert.ok(performance.now() - t0 < 30_000, 'it refuses at once, nobody waits for a unit that will not come');
+});

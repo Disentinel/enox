@@ -106,6 +106,9 @@ export interface EngineOptions {
   /** Files a pod settles (podSize). */
   size: number;
   bin?: string;
+  /** The steps an evaluation may take (WALLS.budget by default): a process that reaches it refuses, and so does
+   *  every process that waits for its units, saying the wall. */
+  budget?: number;
 }
 
 /** One process of the engine's world by levels: a pod (`me` its number) or the root. */
@@ -129,7 +132,7 @@ export class EngineNode {
       for (const [k, v] of Object.entries(was)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
     }
     try {
-      const base = await port.fresh(WALLS.budget, { space: WALLS.space });
+      const base = await port.fresh(o.budget ?? WALLS.budget, { space: WALLS.space });
       for (const f of programFiles(o.program)) await base.loadFile(f);
       const r = await port.send({ op: 'volumes', session: base.id, path: corpus }) as { session: number };
       const n = new EngineNode(me, port, r.session);
