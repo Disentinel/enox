@@ -5,14 +5,15 @@
 // and evaluated in one engine, which the subscriber's rows must equal after
 // every step.
 //
-// The JS model and its scanner are those of the pinned @grafema/rofl; the
-// engine of the pods, the root and the coordinator is ROFL_BIN (it needs
-// `volumes`, Disentinel/rofl docs/cli.md, *The nodes as processes*).
+// The engine of the pods, the root and the coordinator is ROFL_BIN (it needs
+// `volumes`, Disentinel/rofl docs/cli.md, *The nodes as processes*), and the
+// JS model and its scanner are those of the rofl tree it was built in
+// (rust/target/<profile>/rofl): an engine and a model of different versions
+// meet defects neither has alone (owner, 2026-11-22).
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { RoflPort } from '@grafema/rofl/port';
 import { publish } from '../src/client.ts';
 import { DEFAULT_ROFL_BIN } from '../src/engine.ts';
@@ -21,9 +22,29 @@ import { bookOf } from '../src/identity.ts';
 import { Answers, corpusText, decodeRule, EngineNode, podSize, splitFacts, WALLS, type Published } from '../src/federation.ts';
 import { start, subscribe, tmpDir, type Clock, type Running, type Stream } from './helpers.ts';
 
-const PKG = path.dirname(fileURLToPath(import.meta.resolve('@grafema/rofl/package.json')));
-export const MODEL = path.join(PKG, 'rules/js.files');
-const ROFL_CLI = path.join(PKG, 'npm/rofl.js');
+const TREE = (() => {
+  const at = fs.realpathSync(DEFAULT_ROFL_BIN).split(path.sep);
+  const i = at.lastIndexOf('target');
+  if (i < 2 || at[i - 1] !== 'rust') throw new Error(`ROFL_BIN ${DEFAULT_ROFL_BIN} is no engine built in a rofl tree (rust/target/<profile>/rofl): the pods take their model from that tree`);
+  return at.slice(0, i - 1).join(path.sep);
+})();
+/** The JS model, and the question's cone: only the rules the question needs run (Disentinel/rofl, docs/demand-cones.md). */
+export const MODEL = (() => {
+  const list = path.join(TREE, 'models/lang/js/js.files'), dir = tmpDir('pods-model');
+  fs.writeFileSync(path.join(dir, 'asks.rofl'), 'asks(exports_name).\n');
+  const files = fs.readFileSync(list, 'utf8').split('\n').map((x) => x.trim()).filter((x) => x && !x.startsWith('--')).map((x) => path.resolve(path.dirname(list), x));
+  fs.writeFileSync(path.join(dir, 'js.files'), [...files, path.join(dir, 'asks.rofl')].join('\n') + '\n');
+  return path.join(dir, 'js.files');
+})();
+const SCANNER = path.join(TREE, 'models/lang/js/scanner/cli.ts');
+const { isColumns, fromColumns } = await import(path.join(TREE, 'src/parser.ts')) as { isColumns: (t: string) => boolean; fromColumns: (t: string) => string };
+/** The tree's scanner over `args` (DIR [FILE]): its facts as text, read back from the column form it writes. */
+const scanned = (args: string[]): string => {
+  const out = path.join(tmpDir('pods-out'), 'facts.rofl');
+  execFileSync(process.execPath, ['--experimental-strip-types', '--no-warnings', SCANNER, ...args, '--out', out], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 100_000 });
+  const t = fs.readFileSync(out, 'utf8');
+  return isColumns(t) ? fromColumns(t) : t;
+};
 
 /** The question: which function node each file offers under which name. */
 export const QUESTION = 'exports_name(F, Name, File)';
@@ -31,19 +52,15 @@ const wall = (): Clock => ({ get t() { return Date.now(); }, set t(_v: number) {
 
 /** The facts of a directory, as the scanner writes them. */
 export function scan(root: string): string {
-  const out = path.join(tmpDir('pods-out'), 'facts.rofl');
-  execFileSync(process.execPath, [ROFL_CLI, 'scan', root, '--out', out], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 100_000 });
-  return fs.readFileSync(out, 'utf8');
+  return scanned([root]);
 }
 
-const { codeFacts } = await import(path.join(PKG, 'playground/host.js')) as { codeFacts: (files: Record<string, string>) => { facts: string[]; host: string[] } };
 
 /** One file scanned alone, as `rofl scan DIR FILE` over a directory of that file scans it: its facts, and its share
  *  of the core (the listing of its path, its strings). The scanner keeps no state across files, so the corpus's
  *  core is the union of the files' shares; Federation.start holds that against the whole scan. */
 export function scanOne(root: string, file: string): { facts: Set<string>; core: Set<string> } {
-  const { facts, host } = codeFacts({ [file]: fs.readFileSync(path.join(root, file), 'utf8') });
-  const one = splitFacts([...facts, ...host].join('\n') + '\n', [file]);
+  const one = splitFacts(scanned([root, file]), [file]);
   return { facts: one.byFile.get(file)!, core: one.core };
 }
 
@@ -51,7 +68,7 @@ export function scanOne(root: string, file: string): { facts: Set<string>; core:
 export function filesOf(text: string, root: string): string[] {
   const r = fs.realpathSync(root);
   return text.split('\n').filter((l) => l.startsWith('-- reads: ')).map((l) => l.slice(10).trim())
-    .filter((p) => fs.statSync(p).isFile()).map((p) => path.relative(r, fs.realpathSync(p))).sort();
+    .map((p) => path.relative(r, fs.realpathSync(p))).filter((p) => !p.startsWith('..') && fs.statSync(path.join(r, p)).isFile()).sort();
 }
 
 const rowKey = (cells: unknown[]) => JSON.stringify(cells.map(String));

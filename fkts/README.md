@@ -469,10 +469,13 @@ those that went re-asserted at confidence 0 (`Answers`); one rule
 between the pods of one owner unsigned. `why` on the coordinator reaches its
 signed batch; the root's `why` goes down into the pods' units.
 
-Run it (needs `ROFL_BIN`, a `rofl` with `volumes`; nothing to build):
+Run it (needs `ROFL_BIN`, a `rofl` with `volumes` built in its Disentinel/rofl
+tree: `rust/target/<profile>/rofl`, the JS model and the scanner are read from
+that same tree, so the model always matches the engine; the scanner builds
+its oxc binary there on first use):
 
 ```sh
-export ROFL_BIN=/path/to/rofl            # Disentinel/rofl with volumes
+export ROFL_BIN=/path/to/rofl/rust/target/fast/rofl   # in its tree, with volumes
 node --experimental-strip-types --no-warnings --test test/pods.test.ts test/pods-probe.test.ts   # the oracle, ~16 s
 npm run mutants -- --only P1,P2                                                                   # its planted faults, all red
 node --experimental-strip-types --no-warnings scripts/pods-cost.ts DIR 3                          # the cost on a corpus
@@ -480,7 +483,8 @@ node --experimental-strip-types --no-warnings scripts/pods-cost.ts DIR 3        
 
 The test and the cost script stand the federation up with
 `test/pods-harness.ts` (`Federation.start(root, pods)`): it scans the corpus
-with the pinned `@grafema/rofl`'s `rofl scan`, cuts the facts by file
+with that tree's scanner (models/lang/js/scanner/cli.ts), evaluates under
+its JS model (`models/lang/js/js.files`, the question named by `asks`), cuts the facts by file
 (`splitFacts`: a node id's prefix `n<16 hex>_` names its file), writes the
 corpus in path order (`corpusText`: a file's place is its index, a pod's block
 a run of them, `podSize`), stands up a pod per block and the root at once
@@ -491,7 +495,9 @@ first answers, and subscribes.
 one engine answers the question; after the load, an edit that moves only its
 own file's rows, an edit on one pod that moves what files of the other pod
 offer (a function renamed behind `export *`), a deletion and a new file, the
-subscriber's rows equal it, row for row; the first two go by levels. The planted
+subscriber's rows equal it, row for row; all but the new file go by levels.
+A pod that reaches its wall (`budget`) refuses, and the federation refuses to
+stand up, naming the wall. The planted
 faults `P1` (the coordinator never retires an answer) and `P2` (the corpus
 laid in another order than the files' places) turn it red.
 

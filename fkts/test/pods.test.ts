@@ -68,9 +68,10 @@ test('pods: the coordinator subscriber equals the whole world after a load, a lo
     const proof = await fed.top.why(`exports_name[code](${row.cells[0]}, ${JSON.stringify(row.cells[1])}, ${JSON.stringify(row.cells[2])})`);
     assert.match(proof, /export_all_declaration|reexport/, proof);
 
-    // 3. A deletion: a.ts goes (the listing moves, so the engines stand up anew); what b.ts and c.ts offered of it goes.
+    // 3. A deletion: a.ts goes (its facts and its share of the listing are its own: it is settled again empty, by
+    // levels); what b.ts and c.ts offered of it goes.
     e = await fed.edit('lib/a.ts', null);
-    assert.equal(e.pod.by, 'anew');
+    assert.equal(e.pod.by, 'levels');
     want = (await wholeWorld(root)).rows;
     await fed.converge(want, e.t0);
     assert.ok(![...fed.rows()].some((r) => r.includes('"f"')));
@@ -88,6 +89,6 @@ test('pods: a pod that reaches its wall refuses, and the federation refuses to s
   const root = tmpDir('pods-wall');
   for (const [f, t] of Object.entries(CORPUS)) { fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true }); fs.writeFileSync(path.join(root, f), t); }
   const t0 = performance.now();
-  await assert.rejects(Federation.start(root, 2, { budget: 500 }), /budget_exhausted/);
+  await assert.rejects(Federation.start(root, 2, { budget: 20 }), /budget_exhausted/);
   assert.ok(performance.now() - t0 < 30_000, 'it refuses at once, nobody waits for a unit that will not come');
 });

@@ -22,10 +22,12 @@ env:
   JOBS: 6
 
 jobs:
-  # The unreleased engine FKTS needs (`watch`, `edit`): built once per rofl commit, kept by that commit.
+  # The unreleased engine FKTS needs (`watch`, `edit`) and the oxc scanner of the same tree, whose JS model and scanner
+  # the pods read: built once per rofl commit, kept by that commit.
   engine:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs: { sha: '${{ steps.sha.outputs.sha }}' }
     steps:
       - uses: actions/checkout@v4
         with: { repository: '${{ env.ROFL_REPO }}', ref: '${{ env.ROFL_REF }}', path: rofl }
@@ -33,20 +35,21 @@ jobs:
         run: echo "sha=$(git -C rofl rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - id: bin
         uses: actions/cache@v4
-        with: { path: bin/rofl, key: 'rofl-bin-${{ runner.os }}-${{ env.ROFL_TOOLCHAIN }}-${{ steps.sha.outputs.sha }}' }
+        with: { path: bin, key: 'rofl-bins-${{ runner.os }}-${{ env.ROFL_TOOLCHAIN }}-${{ steps.sha.outputs.sha }}' }
       - if: steps.bin.outputs.cache-hit != 'true'
         uses: dtolnay/rust-toolchain@1.95.0
       - if: steps.bin.outputs.cache-hit != 'true'
         uses: Swatinem/rust-cache@v2
-        with: { workspaces: rofl/rust, key: 'fast-${{ env.ROFL_TOOLCHAIN }}' }
+        with: { workspaces: "rofl/rust\nrofl/models/lang/js/scanner/oxc_scan", key: 'fast-${{ env.ROFL_TOOLCHAIN }}' }
       - if: steps.bin.outputs.cache-hit != 'true'
         env: { CARGO_INCREMENTAL: 0 }
         run: |
           cd rofl/rust && cargo build --profile fast -p rofl --bin rofl
-          mkdir -p "$GITHUB_WORKSPACE/bin" && cp target/fast/rofl "$GITHUB_WORKSPACE/bin/rofl"
-      - run: echo "rofl ${{ steps.sha.outputs.sha }}" && ls -l bin/rofl
+          cargo build --release -q --manifest-path ../models/lang/js/scanner/oxc_scan/Cargo.toml
+          mkdir -p "$GITHUB_WORKSPACE/bin" && cp target/fast/rofl ../models/lang/js/scanner/oxc_scan/target/release/oxc_scan "$GITHUB_WORKSPACE/bin/"
+      - run: echo "rofl ${{ steps.sha.outputs.sha }}" && ls -l bin
       - uses: actions/upload-artifact@v4
-        with: { name: rofl, path: bin/rofl, retention-days: 3 }
+        with: { name: rofl, path: bin, retention-days: 3 }
 
   suite:
     needs: engine
@@ -58,11 +61,20 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '22', cache: npm, cache-dependency-path: fkts/package-lock.json }
       - run: npm ci
+      # the engine in its tree: the pods read the JS model and the scanner of the tree the binary was built from
+      - uses: actions/checkout@v4
+        with: { repository: '${{ env.ROFL_REPO }}', ref: '${{ needs.engine.outputs.sha }}', path: rofl }
+      - run: npm ci --ignore-scripts
+        working-directory: rofl
       - uses: actions/download-artifact@v4
         with: { name: rofl, path: '${{ runner.temp }}/rofl' }
-      - run: chmod +x "$RUNNER_TEMP/rofl/rofl"
+      - run: |
+          mkdir -p rofl/rust/target/fast rofl/models/lang/js/scanner/oxc_scan/target/release
+          install -m 755 "$RUNNER_TEMP/rofl/rofl" rofl/rust/target/fast/rofl
+          install -m 755 "$RUNNER_TEMP/rofl/oxc_scan" rofl/models/lang/js/scanner/oxc_scan/target/release/oxc_scan
+        working-directory: ${{ github.workspace }}
       - run: npm test
-        env: { ROFL_BIN: '${{ runner.temp }}/rofl/rofl' }
+        env: { ROFL_BIN: '${{ github.workspace }}/rofl/rust/target/fast/rofl' }
 
   # The cut of the mutant gate, once, by what each mutant cost in the last run here: every job of the matrix reads it.
   plan:
@@ -111,13 +123,22 @@ jobs:
         working-directory: fkts/executors/embedder
       - uses: actions/cache/restore@v4
         with: { path: fkts/node_modules/.cache/fkts-mutants, key: 'mutant-costs-${{ github.run_id }}', restore-keys: mutant-costs- }
+      # the engine in its tree: the pods read the JS model and the scanner of the tree the binary was built from
+      - uses: actions/checkout@v4
+        with: { repository: '${{ env.ROFL_REPO }}', ref: '${{ needs.engine.outputs.sha }}', path: rofl }
+      - run: npm ci --ignore-scripts
+        working-directory: rofl
       - uses: actions/download-artifact@v4
         with: { name: rofl, path: '${{ runner.temp }}/rofl' }
-      - run: chmod +x "$RUNNER_TEMP/rofl/rofl"
+      - run: |
+          mkdir -p rofl/rust/target/fast rofl/models/lang/js/scanner/oxc_scan/target/release
+          install -m 755 "$RUNNER_TEMP/rofl/rofl" rofl/rust/target/fast/rofl
+          install -m 755 "$RUNNER_TEMP/rofl/oxc_scan" rofl/models/lang/js/scanner/oxc_scan/target/release/oxc_scan
+        working-directory: ${{ github.workspace }}
       - run: echo "$PLAN" > "$RUNNER_TEMP/plan.json"
         env: { PLAN: '${{ needs.plan.outputs.plan }}' }
       - run: node --experimental-strip-types --no-warnings scripts/mutants.ts --from "$RUNNER_TEMP/plan.json" --job "${{ matrix.job }}/$JOBS"
-        env: { ROFL_BIN: '${{ runner.temp }}/rofl/rofl' }
+        env: { ROFL_BIN: '${{ github.workspace }}/rofl/rust/target/fast/rofl' }
       - if: success() || failure()
         uses: actions/upload-artifact@v4
         with: { name: 'costs-${{ matrix.job }}', path: fkts/node_modules/.cache/fkts-mutants/costs.json, retention-days: 3, if-no-files-found: ignore }
