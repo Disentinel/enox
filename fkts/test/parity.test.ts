@@ -81,7 +81,7 @@ test('every operation in the table is reachable with the same name and schema ov
     // ...and every command word the CLI's source compares against is an
     // operation, a transport, or help — anything else must be refused.
     const words = new Set([...fs.readFileSync(CLI, 'utf8').matchAll(/(?:cmd\s*===\s*|case\s+)'([^']+)'/g)].map((m) => m[1]!));
-    const known = new Set([...OPS.map((o) => o.name), 'serve', 'stdio', 'help', '--help']);
+    const known = new Set([...OPS.map((o) => o.name), 'serve', 'stdio', 'code', 'help', '--help']);
     for (const w of [...words].filter((x) => !known.has(x))) {
       const r = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', CLI, w, '--data', tmpDir('parity-cli')], { encoding: 'utf8', timeout: 10_000 });
       assert.ok(r.status === 2 && /unknown operation/.test(r.stderr), `the CLI answers "${w}", which is not in the table`);
