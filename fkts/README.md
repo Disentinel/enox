@@ -462,7 +462,8 @@ target: <cell>}`; a row that goes is re-asserted at confidence 0. The
 coordinator reads them back with one rule per escape (`decodeRules`), over
 every book it follows (`follows(N, B)`), through each fact's current assertion.
 
-Run it (the pinned engine has `watch`; nothing to build):
+Run it (on `@grafema/rofl` 1.8.0 these tests are red: they read the package's 1.5 layout and the scan as
+text; pods as processes of the engine's levels, enox #6, replace them):
 
 ```sh
 node --experimental-strip-types --no-warnings --test test/pods.test.ts      # the oracle, ~13 s
