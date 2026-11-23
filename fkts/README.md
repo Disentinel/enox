@@ -297,9 +297,8 @@ A node keeps a question answered as
 batches arrive. A **subscription** names one positive literal, e.g.
 `red(P, X)` or `red("home", X)` or `red[b_…](P, X)`; it is sent the whole
 answer once, then after every admitted batch only the rows that came and went.
-The rows come from the engine's own delta (`rofl serve` `watch`, which the
-pinned `@grafema/rofl` 1.5.0 does not have yet: set `ROFL_BIN` to a `rofl`
-built from Disentinel/rofl with `watch`), never from asking again, so a frame
+The rows come from the engine's own delta (`rofl serve` `watch`, in
+`@grafema/rofl` since 1.8.0), never from asking again, so a frame
 after a batch costs about the batch, not the relation (measured, `npm run perf`,
 test/perf/subscribe.test.ts: a one-fact batch reaches the subscriber in
 26–43 ms at 10, 10 000 and 100 000 rows, where asking whole takes 25 ms, 0.25 s
@@ -432,7 +431,41 @@ perspective: "journal:<name>"}`, and `why` of one ends with `caused by batch
 rows had to be read whole), it compares the answer with what it last said of
 each row, so nothing is said twice or missed across a restart.
 
-## 10. Pods: each pod settles only its files, a coordinator holds the question
+## 10. Questions over a directory of code, kept answered as it changes
+
+`fkts code` keeps the node's questions over the JS/TS code of a directory
+answered: the directory is scanned, the JS model and your own rules evaluated
+by the engine's levels, and each question's rows published as the node's own
+facts, so a view (section 9) shows them and a subscriber is sent what moved. A
+file written or removed under the directory is scanned alone and settled again
+where it moved the world: the units it touched, not the world (`by: levels`);
+a file that comes, or one that moves the corpus's core (its listing, its
+strings), stands the engine up anew (`by: anew`). `src/code.ts`.
+
+```sh
+./src/cli.ts serve &                                   # the node (section 3)
+printf 'api(Name) :- exports_name[code](F, Name, "lib/b.ts").\n' > mine.rofl
+./src/cli.ts code ~/work/app --rules mine.rofl --ask 'api(Name)' --ask 'exports_name(F, Name, File)'
+./src/cli.ts assert --facts '[{"source":"api","relation":"fkts:view","target":"api(Name)","perspective":"view","confidence":1}]'
+```
+```
+3 files of ~/work/app answered in 4.3 s: api(Name): +3 -0 (anew); exports_name(F, Name, File): +5 -0 (anew)
+lib/a.ts: api(Name): +1 -1 (levels); exports_name(F, Name, File): +2 -2 (levels) in 0.2 s
+```
+
+- The engine needs `rofl serve` `volumes` (@grafema/rofl 1.8.1 or later, or
+  `ROFL_BIN` set to a `rofl` built in a Disentinel/rofl tree). The JS model and
+  the scanner are always those of the engine's own source, the package or the
+  tree it was built in, so the model matches the engine.
+- The JS model's relations are in the book `code`: a rule of yours reads them
+  as `exports_name[code](F, Name, File)`; an unbooked premise reads your own
+  rules' conclusions.
+- Each question is one literal, one per relation; only the rules the
+  questions need run (`asks`, Disentinel/rofl docs/demand-cones.md).
+- One engine process. `--pods N` splits the corpus over N engine processes
+  (section 11); that is no way to speed, it exists for the federation's checks.
+
+## 11. Pods: each pod settles only its files, a coordinator holds the question
 
 A **pod** is a process of the engine's world by levels (`rofl serve` with
 `ROFL_FAR`, Disentinel/rofl docs/cli.md, *The nodes as processes*): every
@@ -501,7 +534,7 @@ stand up, naming the wall. The planted
 faults `P1` (the coordinator never retires an answer) and `P2` (the corpus
 laid in another order than the files' places) turn it red.
 
-## 11. Moving a node written before the rename
+## 12. Moving a node written before the rename
 
 A data directory written as Roflenox (signatures `roflenox-*-v1`, relations
 `roflenox:*`) does not open under FKTS. Copy it into a fresh directory, every
