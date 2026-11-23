@@ -297,9 +297,8 @@ A node keeps a question answered as
 batches arrive. A **subscription** names one positive literal, e.g.
 `red(P, X)` or `red("home", X)` or `red[b_…](P, X)`; it is sent the whole
 answer once, then after every admitted batch only the rows that came and went.
-The rows come from the engine's own delta (`rofl serve` `watch`, which the
-pinned `@grafema/rofl` 1.5.0 does not have yet: set `ROFL_BIN` to a `rofl`
-built from Disentinel/rofl with `watch`), never from asking again, so a frame
+The rows come from the engine's own delta (`rofl serve` `watch`, in
+`@grafema/rofl` since 1.8.0), never from asking again, so a frame
 after a batch costs about the batch, not the relation (measured, `npm run perf`,
 test/perf/subscribe.test.ts: a one-fact batch reaches the subscriber in
 26–43 ms at 10, 10 000 and 100 000 rows, where asking whole takes 25 ms, 0.25 s
@@ -463,10 +462,9 @@ target: <cell>}`; a row that goes is re-asserted at confidence 0. The
 coordinator reads them back with one rule per escape (`decodeRules`), over
 every book it follows (`follows(N, B)`), through each fact's current assertion.
 
-Run it (needs `ROFL_BIN`, a `rofl` with `watch`; nothing to build):
+Run it (the pinned engine has `watch`; nothing to build):
 
 ```sh
-export ROFL_BIN=/path/to/rofl            # Disentinel/rofl with watch
 node --experimental-strip-types --no-warnings --test test/pods.test.ts      # the oracle, ~13 s
 npm run mutants -- --only P1,P2,P3,P4,P5,P6,P7,P8,P9,P10                     # its planted faults, all red
 ```

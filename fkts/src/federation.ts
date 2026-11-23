@@ -58,7 +58,7 @@ import { DEFAULT_ROFL_BIN, termCell, type Change } from './engine.ts';
 import { roflString, type Fact } from './facts.ts';
 import { BUILTIN, splitTop } from './rules.ts';
 
-const ROFL_DIST = path.join(path.dirname(fileURLToPath(import.meta.resolve('@grafema/rofl/package.json'))), 'dist/src');
+const ROFL_DIST = path.join(path.dirname(fileURLToPath(import.meta.resolve('@grafema/rofl/package.json'))), 'src');
 const PARSER = path.join(ROFL_DIST, 'parser.js');
 
 export const ROW = 'row:';

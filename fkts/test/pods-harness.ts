@@ -20,7 +20,7 @@ import { cellsOf, coreDemand, CoreRouter, decodeRules, escapesOf, Pod, splitFact
 import { invitation, pull, start, subscribe, tmpDir, vouch, type Clock, type Running, type Stream } from './helpers.ts';
 
 const PKG = path.dirname(fileURLToPath(import.meta.resolve('@grafema/rofl/package.json')));
-export const MODEL = path.join(PKG, 'rules/js.files');
+export const MODEL = path.join(PKG, 'models/lang/js/js.files');
 const ROFL_CLI = path.join(PKG, 'npm/rofl.js');
 const CLI = path.join(import.meta.dirname, '..', 'src', 'cli.ts');
 
@@ -63,7 +63,7 @@ export function scanOne(root: string, file: string): { facts: Set<string>; core:
 export function filesOf(text: string, root: string): string[] {
   const r = fs.realpathSync(root);
   return text.split('\n').filter((l) => l.startsWith('-- reads: ')).map((l) => l.slice(10).trim())
-    .filter((p) => fs.statSync(p).isFile()).map((p) => path.relative(r, fs.realpathSync(p))).sort();
+    .filter((p) => fs.existsSync(p) && fs.statSync(p).isFile()).map((p) => path.relative(r, fs.realpathSync(p))).sort();
 }
 
 const rowKey = (cells: unknown[]) => JSON.stringify(cells.map(String));
