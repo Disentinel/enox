@@ -101,10 +101,9 @@ export const podSize = (files: number, pods: number) => Math.max(LEAF, Math.ceil
 export interface EngineOptions {
   /** The program every process runs: a `.files` list or a `.rofl`. */
   program: string;
-  /** Where the processes meet: a unix socket each, or TCP where `dir/peers` says where each listens. */
-  dir: string;
-  /** Files a pod settles (podSize). */
-  size: number;
+  /** Pods: where the processes meet (a unix socket each, or TCP where `dir/peers` says where each listens), and the
+   *  files a pod settles (podSize). Without it the engine is one process. */
+  far?: { dir: string; size: number };
   bin?: string;
   /** The steps an evaluation may take (WALLS.budget by default): a process that reaches it refuses, and so does
    *  every process that waits for its units, saying the wall. */
@@ -124,7 +123,7 @@ export class EngineNode {
    *  its block and answers the others, the root waits for them and settles what is over them. */
   static async start(o: EngineOptions, me: number | 'root', corpus: string): Promise<EngineNode> {
     // (the engine reads where it is and which it is from its environment, taken when it is spawned)
-    const env = { ROFL_FAR: o.dir, ROFL_FAR_ME: String(me), ROFL_HELD: String(o.size) };
+    const env: Record<string, string> = o.far ? { ROFL_FAR: o.far.dir, ROFL_FAR_ME: String(me), ROFL_HELD: String(o.far.size) } : {};
     const was = Object.fromEntries(Object.keys(env).map((k) => [k, process.env[k]]));
     Object.assign(process.env, env);
     let port: RoflPort;

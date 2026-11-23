@@ -12,6 +12,9 @@
 //   fkts serve [--port P] [--host H] [--public-url U] [--freshness S]
 //                  [--checkpoint-window S] [--backup-to DIR --backup-every S]
 //   fkts stdio                             MCP over stdin/stdout, no server
+//   fkts code DIR --ask 'rel(Args)' [--ask …] [--rules F.rofl[,G.rofl]] [--pods N] [--budget N]
+//                                          a running node's questions over the JS/TS code in DIR, kept answered as
+//                                          the code changes (src/code.ts)
 //
 // The recovery code printed ONCE when the identity is created is the only key
 // material the CLI ever shows, and `recover` the only operation that takes
@@ -33,6 +36,8 @@ import { httpCaller } from './client.ts';
 import { callOp, createIdentity, isLocal, OP, OPS, type Op } from './ops.ts';
 import { serveStdio } from './stdio.ts';
 import { alive, DataLock, holderOf, refusal } from './lock.ts';
+import { CodeWorld } from './code.ts';
+import { bookOf } from './identity.ts';
 
 const GLOBAL = new Set(['data', 'url']);
 const SERVE = ['port', 'host', 'public-url', 'freshness', 'checkpoint-window', 'backup-to', 'backup-every', 'name', 'domain-vouch'];
@@ -65,7 +70,7 @@ export function usage(): string {
     const where = isLocal(o) ? ` [local: ${(o.access as { local: string }).local}]` : '';
     lines.push(`  ${o.name}${flags}  — ${o.description}${where}`);
   }
-  lines.push('', 'transports:', `  serve${SERVE.map((k) => ` [--${k}]`).join('')}`, '  stdio');
+  lines.push('', 'transports:', `  serve${SERVE.map((k) => ` [--${k}]`).join('')}`, '  stdio', "  code DIR --ask 'rel(Args)' [--ask …] [--rules F.rofl[,G.rofl]]");
   return lines.join('\n');
 }
 
@@ -106,6 +111,38 @@ async function serve(data: string, f: Record<string, string>): Promise<number> {
   return new Promise(() => {}); // runs until signalled
 }
 
+/** `fkts code`: the questions over a directory of code, answered by the engine and published through the running
+ *  node as its own facts; a file written or removed under the directory is taken as an edit. */
+async function code(data: string, url: string, argv: string[]): Promise<number> {
+  const asks: string[] = [], rules: string[] = [];
+  let dir: string | undefined, pods = 0, budget: number | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]!, v = () => argv[++i] ?? '';
+    if (a === '--ask') asks.push(v());
+    else if (a === '--rules') rules.push(...v().split(',').filter(Boolean));
+    else if (a === '--pods') pods = Number(v());
+    else if (a === '--budget') budget = Number(v());
+    else if (!a.startsWith('--')) dir = a;
+    else v();
+  }
+  if (!dir || asks.length === 0) { process.stderr.write("usage: fkts code DIR --ask 'rel(Args)' [--ask …] [--rules F.rofl[,G.rofl]]\n"); return 2; }
+  const me = LocalIdentity.load(data);
+  if (!me) { process.stderr.write(`fkts code: no identity in ${data}: run init and serve first\n`); return 2; }
+  const node = httpCaller(url, me);
+  const t0 = performance.now();
+  const { world, published } = await CodeWorld.start(path.resolve(dir), {
+    asks, rules, pods, ...(budget ? { budget } : {}), book: bookOf(me.name),
+    publish: async (facts) => { if (facts.length) await node('assert', { facts }); },
+  });
+  const said = (p: { added: number; removed: number; by: string }[]) => p.map((x, i) => `${asks[i]}: +${x.added} -${x.removed} (${x.by})`).join('; ');
+  process.stdout.write(`${world.files.length} files of ${dir} answered in ${((performance.now() - t0) / 1000).toFixed(1)} s: ${said(published)}\n`);
+  world.watch((file, r) => process.stdout.write(r instanceof Error ? `${file}: ${r.message}\n` : `${file}: ${said(r.published)} in ${(r.published[0]!.ms.engine / 1000).toFixed(1)} s\n`));
+  const stop = async () => { await world.close(); process.exit(0); };
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
+  return new Promise(() => {}); // runs until signalled
+}
+
 async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
   const { pos, f } = parse(rest);
@@ -114,6 +151,7 @@ async function main(argv: string[]): Promise<number> {
   if (cmd === undefined || cmd === '--help' || cmd === 'help') { process.stdout.write(`${usage()}\n`); return 0; }
   if (cmd === 'serve') return serve(data, f);
   if (cmd === 'stdio') return serveStdio(data);
+  if (cmd === 'code') return code(data, url, rest);
 
   const op = OP.get(cmd);
   if (!op) { process.stderr.write(`fkts: unknown operation ${cmd}\n${usage()}\n`); return 2; }
