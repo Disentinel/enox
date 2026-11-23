@@ -454,7 +454,8 @@ lib/a.ts: api(Name): +1 -1 (levels); exports_name(F, Name, File): +2 -2 (levels)
 ```
 
 - The engine needs `rofl serve` `volumes` (@grafema/rofl 1.8.1 or later, or
-  `ROFL_BIN` set to a `rofl` built in a Disentinel/rofl tree). The JS model and
+  `ROFL_BIN` set to a `rofl` built in a Disentinel/rofl tree at main since
+  Disentinel/rofl#299, which brought them). The JS model and
   the scanner are always those of the engine's own source, the package or the
   tree it was built in, so the model matches the engine.
 - The JS model's relations are in the book `code`: a rule of yours reads them
