@@ -22,7 +22,7 @@ test('mutant cut: two shards asked cannot hold 120 s of mutants under 45 s each;
 });
 
 test('mutant cut: a file whose mutants weigh more than the cap is dealt out; one mutant over the cap is named', () => {
-  const units: Unit[] = [{ key: 'rules', ids: ['MB1', 'MB2', 'MB3', 'MB4'], ms: [21, 21, 21, 21] }, one('P13', 24), one('M66', 1)];
+  const units: Unit[] = [{ key: 'rules', ids: ['MB1', 'MB2', 'MB3', 'MB4'], ms: [21, 21, 21, 21] }, one('P1', 24), one('M66', 1)];
   const c = cut(units, 1, 60);
   assert.ok(c.ms.every((w) => w <= 60), `planned ${c.ms.join(' ')}`);
   assert.ok(!c.shards.some((s) => ['MB1', 'MB2', 'MB3', 'MB4'].every((id) => s.includes(id))), 'the four are not kept together');

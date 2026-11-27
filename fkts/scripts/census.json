@@ -264,6 +264,24 @@
    "kind": "who",
    "match": "crypto.verify(",
    "why": "a view link (r_view_link): an Ed25519 signature by the reader's own identity key, made ahead of the request because a browser cannot sign one; for one view on one node until a time"
+  },
+  {
+   "file": "src/code.ts",
+   "kind": "queue",
+   "match": "queue",
+   "why": "code: the edits of the watched directory taken one at a time, in the order the files changed (an engine takes one edit at once)"
+  },
+  {
+   "file": "src/code.ts",
+   "kind": "store",
+   "match": ".mkdtempSync(",
+   "why": "code: throwaway directories for the engine's program list, the corpus it settles and the scanner's output; the engine's own, never the node's store"
+  },
+  {
+   "file": "src/code.ts",
+   "kind": "store",
+   "match": ".writeFileSync(",
+   "why": "code: the engine's program list and the corpus text it settles, in a throwaway directory"
   }
  ]
 }

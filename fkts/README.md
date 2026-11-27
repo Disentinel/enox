@@ -431,278 +431,111 @@ perspective: "journal:<name>"}`, and `why` of one ends with `caused by batch
 rows had to be read whole), it compares the answer with what it last said of
 each row, so nothing is said twice or missed across a restart.
 
-## 10. Pods: each node holds only its files, a coordinator holds the question
+## 10. Questions over a directory of code, kept answered as it changes
 
-A **pod** is a node of its own identity beside an engine that holds one
-program (the JS model of `@grafema/rofl`, or any ROFL files) over **only its
-files** of a corpus, plus the part of the corpus's core (the facts a scan
-writes naming no file: the listing, the strings) that its files reach by the
-program's keys (below, *The core, routed*). A **coordinator** is a plain node that
-follows the pods' feeds and holds the cross-file rules and the question; a
-subscriber on it (step 9) is sent each pod's edit as a delta. `src/federation.ts`.
-
-```
-  pod-0 (files A)                 pod-1 (files B)
-  engine: program + core(A) + A   engine: program + core(B) + B
-  watch(escapes) -> rows +/-      watch(escapes) -> rows +/-
-  node pod-0: signed batches      node pod-1: signed batches
-        \  fkts:follow (pull)  /
-         v                        v
-   coordinator: decode rules (one per escape) + cross-file rules
-   GET /subscribe?query=exports_name(F, Name, File)  -> full, then deltas
-```
-
-**What crosses** is decided by the coordinator's rules, not by a model's
-names: every relation their bodies read, and the question's own relation
-(`escapesOf`), narrowed by the constants a premise spells
-(`ast_node(E, "export_all_declaration", File)` lets only those rows cross; a
-premise with no constant, or under `not`, lets all of them). A row of `R` is
-published as one fact per cell, `{source: <row id>, relation: "row:R#i",
-target: <cell>}`; a row that goes is re-asserted at confidence 0. The
-coordinator reads them back with one rule per escape (`decodeRules`), over
-every book it follows (`follows(N, B)`), through each fact's current assertion.
-
-Run it (on `@grafema/rofl` 1.8.0 these tests are red: they read the package's 1.5 layout and the scan as
-text; pods as processes of the engine's levels, enox #6, replace them):
+`fkts code` keeps the node's questions over the JS/TS code of a directory
+answered: the directory is scanned, the JS model and your own rules evaluated
+by the engine's levels, and each question's rows published as the node's own
+facts, so a view (section 9) shows them and a subscriber is sent what moved. A
+file written or removed under the directory is scanned alone and settled again
+where it moved the world: the units it touched, not the world (`by: levels`);
+a file that comes, or one that moves the corpus's core (its listing, its
+strings), stands the engine up anew (`by: anew`). `src/code.ts`.
 
 ```sh
-node --experimental-strip-types --no-warnings --test test/pods.test.ts      # the oracle, ~13 s
-npm run mutants -- --only P1,P2,P3,P4,P5,P6,P7,P8,P9,P10                     # its planted faults, all red
+./src/cli.ts serve &                                   # the node (section 3)
+printf 'api(Name) :- exports_name[code](F, Name, "lib/b.ts").\n' > mine.rofl
+./src/cli.ts code ~/work/app --rules mine.rofl --ask 'api(Name)' --ask 'exports_name(F, Name, File)'
+./src/cli.ts assert --facts '[{"source":"api","relation":"fkts:view","target":"api(Name)","perspective":"view","confidence":1}]'
+```
+```
+3 files of ~/work/app answered in 4.3 s: api(Name): +3 -0 (anew); exports_name(F, Name, File): +5 -0 (anew)
+lib/a.ts: api(Name): +1 -1 (levels); exports_name(F, Name, File): +2 -2 (levels) in 0.2 s
 ```
 
-The mutant gate cuts its shards by what each mutant cost when it last ran
-(kept in `node_modules/.cache/fkts-mutants/costs.json`; a fresh clone
-estimates a pods mutant at ~25 s; at most twice as many shards as cores): a
-pods mutant stands up a federation and a red oracle waits out its 15 s, so the
-ten are dealt out over the shards (cold 4 of 62 – 95 s, then 3 of 85 – 89 s,
-measured 2026-11-18, ~40 s of each its baseline) and a shard over 120 s fails
-the gate.
+- The engine needs `rofl serve` `volumes` (@grafema/rofl 1.8.1 or later, or
+  `ROFL_BIN` set to a `rofl` built in a Disentinel/rofl tree at main since
+  Disentinel/rofl#299, which brought them). The JS model and
+  the scanner are always those of the engine's own source, the package or the
+  tree it was built in, so the model matches the engine.
+- The JS model's relations are in the book `code`: a rule of yours reads them
+  as `exports_name[code](F, Name, File)`; an unbooked premise reads your own
+  rules' conclusions.
+- Each question is one literal, one per relation; only the rules the
+  questions need run (`asks`, Disentinel/rofl docs/demand-cones.md).
+- One engine process. `--pods N` splits the corpus over N engine processes
+  (section 11); that is no way to speed, it exists for the federation's checks.
+
+## 11. Pods: each pod settles only its files, a coordinator holds the question
+
+A **pod** is a process of the engine's world by levels (`rofl serve` with
+`ROFL_FAR`, Disentinel/rofl docs/cli.md, *The nodes as processes*): every
+process runs the same levels over the same corpus and settles only the units
+of its block of files (whole leaves of four files); the units it reads of
+another pod it asks for over a unix socket, or TCP where `DIR/peers` says where
+each listens. The **root** is the coordinator's engine: it settles the units
+over more than one pod and answers the question. What crosses between pods is
+decided by the engine from the rules' keys: no relation is named here and no
+rule copied. `src/federation.ts`.
+
+```
+  pod-0 (files A)                pod-1 (files B)
+  rofl serve, ROFL_FAR_ME=0      rofl serve, ROFL_FAR_ME=1
+  settles the units of A         settles the units of B
+          \   units, asked by relation, key, tree, firing   /
+           v                                               v
+      root (the coordinator's engine): the units over A and B, the question
+      coordinator node: the answers as its own signed facts
+      GET /subscribe?query=exports_name(F, Name, File)  -> full, then deltas
+```
+
+**An edit** goes to the root (`EngineNode.edit`, the engine's `volumes_edit`),
+which sends it to every pod; each settles again only its units the edit moved,
+and what they moved crosses as facts. An edit the levels cannot take (a file
+that comes, or the core of the corpus moving: the listing, the strings) stands
+the engines up anew over the corpus as it is now (`by: 'anew'`; else
+`'levels'`).
+
+**What is signed** is the coordinator's answers (owner, 2026-11-22): after each
+step the root's rows that came are published as the coordinator's facts and
+those that went re-asserted at confidence 0 (`Answers`); one rule
+(`decodeRule`) reads them back as the question's relation. The units cross
+between the pods of one owner unsigned. `why` on the coordinator reaches its
+signed batch; the root's `why` goes down into the pods' units.
+
+Run it (needs `ROFL_BIN`, a `rofl` with `volumes` built in its Disentinel/rofl
+tree: `rust/target/<profile>/rofl`, the JS model and the scanner are read from
+that same tree, so the model always matches the engine; the scanner builds
+its oxc binary there on first use):
 
 ```sh
-node --experimental-strip-types --no-warnings scripts/pods-cost.ts DIR 3 --interleave   # the cost on a corpus
+export ROFL_BIN=/path/to/rofl/rust/target/fast/rofl   # in its tree, with volumes
+node --experimental-strip-types --no-warnings --test test/pods.test.ts test/pods-probe.test.ts   # the oracle, ~16 s
+npm run mutants -- --only P1,P2                                                                   # its planted faults, all red
+node --experimental-strip-types --no-warnings scripts/pods-cost.ts DIR 3                          # the cost on a corpus
 ```
 
 The test and the cost script stand the federation up with
-`test/pods-harness.ts` (`Federation.start(root, assign, pods)`): it scans the
-corpus with the pinned `@grafema/rofl`'s `rofl scan`, cuts the facts by file
-(`splitFacts`: a node id's prefix `n<16 hex>_` names its file), starts a node
-and a `Pod` per pod, grants the coordinator its books, publishes on the
-coordinator the rules (`RULES`: the JS model's three rules of `exports_name`
-that read another file and the two `[surface]` mirrors they read, books
-dropped; plus `decodeRules(ESCAPES)`) and a `fkts:follow`
-per pod, and subscribes. To do it by hand, the same calls in this order:
-`Pod.start({program, escapes, publish}, core, files)` per pod (`publish` signs
-the facts as the pod's identity into its node); on each pod a
-`fkts:grant` to the coordinator; on the coordinator one `fkts:rule`
-per rule and decode rule and one `fkts:follow` per pod (target: its
-invitation link), then `./src/cli.ts follow` (or `mirror`). An edit is
-`pod.edit(file, factsNow | null, coreNow)`: the pod sends the difference as one
-`edit` request (the facts out and in, by delta; `by: 'delta'`, or `'whole'` where
-the engine refused the delta and evaluated the same world), evaluates its files
-anew only where the engine refuses the edit or loses the watch (`by: 'anew'`),
-and publishes only the rows that came and went.
+`test/pods-harness.ts` (`Federation.start(root, pods)`): it scans the corpus
+with that tree's scanner (models/lang/js/scanner/cli.ts), evaluates under
+its JS model (`models/lang/js/js.files`, the question named by `asks`), cuts the facts by file
+(`splitFacts`: a node id's prefix `n<16 hex>_` names its file), writes the
+corpus in path order (`corpusText`: a file's place is its index, a pod's block
+a run of them, `podSize`), stands up a pod per block and the root at once
+(`EngineNode.start`), publishes the decode rule on the coordinator and its
+first answers, and subscribes.
 
 **The oracle** (`test/pods.test.ts`): the corpus scanned anew and evaluated in
 one engine answers the question; after the load, an edit that moves only its
-own file's rows, an edit on pod 0 that moves what files of pod 1 offer (a
-function renamed behind `export *`) and a deletion, the subscriber's rows equal
-it, row for row; the rename is asserted to go by delta, and a fourth step (a
-fact taken out of the pod's world behind it, so the engine refuses the edit)
-goes anew. The planted faults `P1` (a pod never retires a row), `P2` (an
-escape omitted), `P3` (constants misread), `P4` (anew forgets what went) turn it red.
+own file's rows, an edit on one pod that moves what files of the other pod
+offer (a function renamed behind `export *`), a deletion and a new file, the
+subscriber's rows equal it, row for row; all but the new file go by levels.
+A pod that reaches its wall (`budget`) refuses, and the federation refuses to
+stand up, naming the wall. The planted
+faults `P1` (the coordinator never retires an answer) and `P2` (the corpus
+laid in another order than the files' places) turn it red.
 
-**The core, routed** (`coreDemand`, `CoreRouter` in `src/federation.ts`). Which
-core facts a pod holds is decided by the program's rules, not by relation
-names, the way the engine's volumes lay a fact where a rule joins it
-(`f_volumes_cross_by_the_rules_keys` in Disentinel/rofl): the escapes are
-demanded whole; a rule's head demand flows to its premises in a sideways order
-(a premise over an anchored relation first, one whose every derivation reads a
-file's fact; then the ones already bound), and a premise is keyed at the
-positions that the head's demand, a constant or an earlier premise binds to a
-*stored* value (a position no `is` or compound writes, the greatest fixpoint).
-Each keyed position carries where its values come from: the places of base
-relations that bind it (through the derived relations between, resolved) and
-the program's constants. A core fact is laid in a pod when one key of its
-relation holds, at each keyed position, a value that the pod's world holds at
-one of *that position's* sources (its files' facts and the core facts laid so
-far, to a fixpoint), so a value bound at one key does not open another. A
-premise whose other places are all `_` only asks whether some fact holds the
-keyed values; for it one fact of each such tuple (a witness, the least) is
-laid. It is magic sets with each magic relation widened to the values its
-sources hold, so every core fact a derivation of an escape reads is laid; the
-oracle holds it to the whole world. For the JS model it reads `str_*` by the
-string, `fs_dir_of` by the file a site or node names, `fs_parent` and
-`fs_file_in` by a directory a walk reaches, `fs_dir_in` by such a directory and
-a segment, and `fs_file_in` by name only for `last_ext` (a witness: the pod's
-own file of that name). Engine-free, `test/core-router.test.ts` holds it on a
-corpus where a string `"z.ts"` and the name `index.ts` must not open `other/`;
-planted faults P8 (one set of values for every key), P9 (no witness) and P10
-(a derived relation's sources dropped, which the engine oracles also see). A program with a construct the analysis does not
-model (a lattice, a dominance rule, a `want`) gives every pod the whole core.
-
-The harness scans each file alone (as `rofl scan DIR FILE` does; the union of
-the shares is held against the whole scan at start) and counts, for each core
-fact, the files whose share holds it: an edit changes the file's share, a fact
-no file holds any more leaves the corpus, and the router re-routes only the
-pods whose files moved, that held a fact that left, or whose values reach a
-fact that came; each of them gets one `edit` of its core by delta.
-
-**`why` on the coordinator** reaches the pod's signed batch: the row's facts,
-their batch digest, admission and the pod's batch number, and the grant it
-reads by. Below that is the pod's own proof, which `pod.why(L)` answers in
-the pod's engine (down to the scanner's facts); the two are not stitched.
-
-**Measured** (vscode `src/vs/base/common`, 155 files, no tests; 3 pods by
-`--interleave`; the `fast` profile of rofl with watch; a shared laptop):
-
-| | whole world, one engine | pods (each) | coordinator |
-|---|---|---|---|
-| evaluation | 26.1 s | 4.3 – 6.8 s (52 files) | — |
-| engine memory | 2 208 MB | 551 – 736 MB (+17 MB its node) | 33 – 60 MB |
-| what it holds | 8.4 M facts | 628 – 830 rows published (1 767 – 2 404 facts) | the pods' 2 115 rows (5 989 facts) |
-| one file edited (an export added) | — | 215 ms by delta | frame 551 ms after the edit |
-| one function renamed behind `export *` | — | 6.8 s anew; by `edit` 478 ms (323 facts out, 323 in; anew on the same run 5.9 s) | frame 7.2 s; by `edit` 852 ms (anew 6.3 s) |
-
-The answer (903 rows) equals the whole world's. On `observableInternal` (39
-files, 2 pods) with the follow executor at 50 ms: frames 284 ms (an export
-added) and 1.3 s (a rename, the pod anew).
-
-**The core routed, measured** (`scripts/pods-cost.ts DIR N [--whole-core]`,
-the flag the control: every pod the whole core; `scripts/core-scale.ts ROOT N
-PREFIX...` routes without an engine; release semantics `fast`, shared laptop):
-
-| | core facts per pod, whole → routed | pod engine MB, whole → routed | pods a new string reaches | pods a new file reaches |
-|---|---|---|---|---|
-| observableInternal, 37 files, 2 pods | 1 062 → 742 / 525 | 182 / 189 → 192 / 197 | 2 → 1 | 2 → 2 |
-| base/common, 153 files, 3 pods | 17 302 → 5 265 / 6 777 / 7 535 | 452 / 682 / 641 → 458 / 674 / 699 | 3 → 1 | 3 → 3 |
-| vs/base, 304 files, 4 pods (router only) | 30 881 → 8 025 – 10 961 | | → 1 | |
-| base+platform, 1 067 files, 8 pods | 100 615 → 14 303 – 21 458 | | → 1 | |
-| base+platform+editor, 1 727 files, 13 pods | 151 363 → 12 282 – 22 349 | | → 1 | |
-
-**Keyed per position** (2026-11-18; the same corpora, the router of the
-commit before as the control, run beside it; "listing" the `fs_*` facts,
-"files" the share of the corpus's `fs_file_in`, one fact a file):
-
-| | core facts per pod, one set → per key | listing per pod | files listed per pod | route ms, all pods |
-|---|---|---|---|---|
-| vs/base, 304 files, 4 pods | 8 029 – 10 964 → 7 595 – 10 575 | 42 – 53% → 24 – 32% | 70 – 83% → 55 – 71% | 50 → 124 |
-| base+platform, 1 067 files, 8 pods | 14 307 – 21 462 → 12 842 – 20 208 | 30 – 52% → 9 – 30% | 49 – 80% → 20 – 65% | 207 → 654 |
-| base+platform+editor, 1 727 files, 13 pods | 12 286 – 22 353 → 10 328 – 20 565 | 30 – 49% → 5 – 29% | 51 – 76% → 12 – 66% | 339 → 1 619 |
-| base/common, 153 files, 3 pods (pods-cost) | 8 218 / 6 113 / 4 938 → 8 090 / 5 918 / 4 746 | | | |
-
-On base/common the pods' engines are 693 / 545 / 597 MB before and 701 / 549 /
-583 MB after (noise), the oracle equal at the end of both runs (891 rows); a
-new string reaches 1 pod, a new file all 3 (one directory).
-
-**Keyed through the builtins** (2026-11-18): `file_stem` finds a file by its
-stem, its name less the last extension, cut with `str_sub`, and the router
-keyed the listing by the directory alone, so a pod held the whole listing of
-every directory its imports walk into. The router now runs a rule's builtins
-FORWARD, with the engine's own (`evalStrOp`, `evalArith` of the pinned
-package): on a listing fact's name it computes the stem, on a pod's import
-segment the stem the import asks for (`./a.js` asks `a`), and lays a name only
-where the two meet. The program's own tables (`index_file`) are read before
-the listing they key, so `index.ts` keys by name, not by directory. Same
-corpus, same machine, the commit before as the control:
-
-| | core facts per pod | listing per pod | files listed per pod | route ms, all pods |
-|---|---|---|---|---|
-| base+platform+editor, 1 727 files, 13 pods | 10 328 – 20 565 → 10 136 – 20 092 | 5 – 29% → 5 – 20% | 12 – 66% → 9 – 29% | 1 579 → 1 586 |
-| base/common, 153 files, 3 pods (pods-cost) | 8 090 / 5 918 / 4 746 (the run before) → 8 056 / 5 859 / 4 695 | | | |
-
-A hand count of the files each pod's relative imports name, and its own files,
-is 9 – 24% at 1 727 files: what is left above it is the widening of the keys
-(a directory and a stem held separately, not as a pair), not the listing of a
-directory. On base/common every edit of pods-cost (a string, a new file
-beside, a rename) touches 1 pod of 3, the new file too (all 3 before: every
-pod walking the directory was given its listing), and the oracle is equal at
-the end. The
-stem is the only position of the JS model the router could not key and now
-does: a sweep of every premise over a core relation with a builtin-written
-variable bound beside it found no other.
-
-The oracle equal at the end of every run. At these sizes the core is under 1%
-of what a pod's engine holds and the pod's memory does not move (within the
-noise); the program alone with 148 457 core facts (1 724 files) takes 241 MB
-against 111 MB with one 133-file pod's share of 17 083 (84 MB the program alone),
-about 1.06 KB a core fact. At 11 100 files the core is about 88 facts a file,
-~975 000 facts and ~1 GB in every pod before; routed, a pod holds its files'
-strings (~110 facts a file of the pod) and the part of the listing its walks
-and the names reach (75% of it at 1 067 files, 64% at 1 727: ~15 000 facts at
-11 100): ~170 000 facts (~180 MB) with 8 pods, ~55 000 (~60 MB) with 32.
-What still grows with the corpus: the router, which holds the whole core once
-beside the scanner, and computes the stem once for each distinct segment a pod
-holds (40 803 at 1 727 files, ~0.2 s, kept for the next route).
-
-**The router's index** (2026-11-18). Keyed per position, the router routed 4.7
-times slower than with one set of values (1.6 s for 13 pods at 1 727 files,
-against 0.35 s): a key's constant (`str_seg(S, 0, _)`, the first segment) was
-indexed like a value, and every pod's route began by visiting every fact of the
-corpus holding it: the 13 routes considered 920 000 facts, 766 000 of them
-str_seg; now 310 000 in all. A
-fact is now indexed only at the positions its key's constants do not hold, by
-the position's group and the value, and a value's groups are bits of one number,
-not an entry in a set per group. The work of a pod's route is now in the core
-its files reach, not in the corpus. The shares are the same, pod for pod
-(`scripts/core-scale.ts`, every pod's share hashed against the commit before);
-a router with no index (test/core-router.test.ts) is the oracle. Medians of
-three runs, alternated, the commit before per key (9894aa1) as the control:
-
-| 1 727 files, 13 pods | one set of values | per key, before | per key, now |
-|---|---|---|---|
-| route ms, all pods, first | 355 | 1 719 | 587 |
-| route ms, all pods again | 282 | 1 340 | 355 |
-| a new string in pod 0, routed ms | 22 | 102 | 26 |
-| a file of pod 0 out and back, ms | 56 | 231 | 68 |
-
-The first route is 1.65 times the one set's: of it, ~190 ms are the stems
-computed for the first time (the builtins run forward, ~40 000 segments), kept
-for every later route.
-
-**What does not scale yet:** (an edit that takes facts out cost the pod's
-whole evaluation while the engine retracted one fact per request, 343 ms a
-fact; since `edit` it costs the facts that moved: on observableInternal, 2
-pods of 19 and 18 files, the rename 842 ms anew against 93 ms by `edit`.) The cut (which
-rules are the coordinator's) is given, not derived, and a model rule that
-crosses files through another relation (here `may_be_node`, behind
-`export { x }` of an imported `x`) must be among the coordinator's rules or the
-oracle goes red; a cell's type is lost on the wire (an atom and a string
-arrive as one text, an integer as its digits).
-
-**The whole of vscode** (2026-11-19; `scripts/pods-big.ts ROOT PER [--at-once K]
-[--oracle] [--rule-budget N] [--out F.json]`; vscode at eef761e9, `src` without
-tests, 7 234 files; the engine of rofl `main`, release; 4 cores, 15 GB).
-
-| | 145 pods of 50, 2 at once | 97 pods of 75, 1 at once |
-|---|---|---|
-| answer rows of `exports_name` | 8 893 | 8 906 |
-| all pods joined | 612 s | 966 s |
-| a pod's engine, median / max | 4.7 s, 435 MB / 11.4 s, 805 MB | |
-| core facts per pod, of 671 845 | median 9 200 (628 – 24 844) | |
-| the coordinator's engine at its peak | 1 819 MB | 2 143 MB |
-| one file edited: the pod's delta / the frame at the subscriber | 76 ms / 1 485 ms | / 1 857 ms |
-
-Scanning twice took 228 s and the route 5 s. What it showed:
-
-- **The answer depends on the cut.** The 13 rows the second cut has more are
-  all `export const X = createDecorator(...)`: a value returned by a function
-  of another file is resolved only when both files are in one pod, the
-  coordinator's rules do not carry it. vscode has about 690 such exports (by
-  text), and how many of them a cut catches is its luck. Against one engine on `vs/base` with tests
-  (493 files, 10 pods) 1 305 rows of 1 306, the lost one of the same kind
-  (`sampleCount`); one engine there took 91 – 97 s and 5.7 GB.
-- **The default rule budget** (50 000 steps) is spent at about the 82nd pod
-  (some 5 200 rows): the answer is then empty and every batch costs 9 – 21 s.
-  The runs above set `--rule-budget 1000000000`.
-- **The router** holds every file's facts in one process: about 7 GB, 1 MB a
-  file.
-- **The coordinator grows with the corpus**: a pod's `fkts:follow` cost 18 ms
-  at the first pod and about 1.5 s at the last, its pull 131 ms and 2 – 3.3 s
-  (a follow fact has the rule world built anew).
-- Two pods stopped at the memory wall beside a neighbour and passed alone; a
-  pod whose world stops no longer leaves its engine running (`Pod.start`).
-
-## 11. Moving a node written before the rename
+## 12. Moving a node written before the rename
 
 A data directory written as Roflenox (signatures `roflenox-*-v1`, relations
 `roflenox:*`) does not open under FKTS. Copy it into a fresh directory, every

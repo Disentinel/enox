@@ -1,11 +1,12 @@
-// PODS (r_pods, src/federation.ts): two pods, each holding only its files of
-// a JS corpus under the JS model, and a coordinator holding the model's
-// cross-file rules of exports_name; a subscriber on the coordinator.
+// PODS (r_pods, src/federation.ts): two pods, each an engine process settling
+// its files of a JS corpus under the JS model by levels, the root engine
+// beside the coordinator, which publishes its answers; a subscriber on the
+// coordinator.
 //
 // THE ORACLE: after every step the subscriber's rows equal the whole world's
 // answer (the corpus scanned anew and evaluated in one engine), row for row.
-// Needs ROFL_BIN, a `rofl` with `watch`. The planted faults are mutants
-// P1-P4 of scripts/mutants.json.
+// Needs ROFL_BIN, a `rofl` with `volumes`. The planted faults are the P
+// mutants of scripts/mutants.json.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
@@ -20,117 +21,74 @@ const CORPUS: Record<string, string> = {
   'lib/b.ts': "export * from './a';\nexport function hb() { return 3; }\n",
   'app/c.ts': "export { f as cf } from '../lib/b';\nexport * from '../lib/b';\n",
   'app/d.ts': "import { cf } from './c';\nexport default function main() { return cf(); }\n",
+  'app/e.ts': 'export const e1 = 1;\n',
+  'app/f.ts': 'export const f1 = 1;\n',
 };
-/** Pod 0 holds lib/a.ts and lib/x.ts; pod 1 the rest: what c.ts and b.ts offer depends on a.ts, across pods. */
-const POD = (f: string) => (f === 'lib/a.ts' || f === 'lib/x.ts' ? 0 : 1);
+/** A pod settles whole leaves of the engine (4 files, in path order): pod 0 holds app/, pod 1 lib/, and what c.ts
+ *  offers depends on a.ts, across pods. */
 
 test('pods: the coordinator subscriber equals the whole world after a load, a local edit, a cross-file edit and a deletion', async () => {
   const root = tmpDir('pods-corpus');
   for (const [f, t] of Object.entries(CORPUS)) { fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true }); fs.writeFileSync(path.join(root, f), t); }
-  const { fed } = await Federation.start(root, POD, 2);
+  const { fed } = await Federation.start(root, 2);
   try {
-    assert.deepEqual(fed.pods.map((p) => p.files), [['lib/a.ts', 'lib/x.ts'], ['app/c.ts', 'app/d.ts', 'lib/b.ts']]);
+    assert.deepEqual(fed.pods.map((p) => p.files), [['app/c.ts', 'app/d.ts', 'app/e.ts', 'app/f.ts'], ['lib/a.ts', 'lib/b.ts', 'lib/x.ts']]);
     const first = await fed.sub.next();
     assert.equal(first.kind, 'full');
     let want = (await wholeWorld(root)).rows;
     assert.ok(want.size >= 9, `the corpus exports through two re-export hops (${want.size} rows)`);
     await fed.converge(want, performance.now());
 
-    // 1. An edit on pod 0 that moves only its own file's rows.
-    const by = new Set<string>();
+    // 1. An edit on pod 1 that moves only its own file's rows.
+    const by: string[] = [];
     let e = await fed.edit('lib/x.ts', 'export function x1() { return 0; }\nexport function x2() { return 1; }\n');
     assert.equal(e.pod.removed, 0);
-    by.add(e.pod.by);
+    by.push(e.pod.by);
     want = (await wholeWorld(root)).rows;
     await fed.converge(want, e.t0);
     assert.ok([...fed.rows()].some((r) => r.includes('"x2"') && r.includes('lib/x.ts')));
 
-    // 2. An edit on pod 0 that moves conclusions about pod 1's files: g goes, h comes, through b.ts and c.ts.
+    // 2. An edit on pod 1 that moves conclusions about pod 0's files: g goes, h comes, through b.ts and c.ts.
     e = await fed.edit('lib/a.ts', 'export function f() { return 1; }\nexport function h() { return 2; }\n');
     assert.ok(e.pod.added > 0 && e.pod.removed > 0, JSON.stringify(e.pod));
-    assert.equal(e.pod.by, 'delta', 'a rename behind export * is taken by the engine\'s delta, not anew');
-    by.add(e.pod.by);
+    by.push(e.pod.by);
     want = (await wholeWorld(root)).rows;
     await fed.converge(want, e.t0);
     for (const file of ['lib/b.ts', 'app/c.ts']) {
-      assert.ok([...fed.rows()].some((r) => r.includes('"h"') && r.includes(file)), `h is offered by ${file}, on the other pod`);
+      assert.ok([...fed.rows()].some((r) => r.includes('"h"') && r.includes(file)), `h is offered by ${file}`);
       assert.ok(![...fed.rows()].some((r) => r.includes('"g"') && r.includes(file)), `g is no longer offered by ${file}`);
     }
+    assert.deepEqual(by, ['levels', 'levels'], 'an edit that moves no core is taken by levels, each pod settling again what it moved');
 
-    // why on the coordinator reaches the pod's signed batch.
+    // why on the coordinator reaches its signed answers; the root's proof goes down into the pods' units.
     const row = [...fed.sub.rows.values()].find((r) => r.cells[1] === 'h' && r.cells[2] === 'app/c.ts')!;
-    const text = JSON.stringify((await ask(fed.coord.url, { why: `exports_name(${row.cells.map((c) => JSON.stringify(c)).join(', ')})` }, fed.coord.me)).why);
-    assert.match(text, /pod-0/, text);
+    const q = `exports_name(${row.cells.map((c) => JSON.stringify(c)).join(', ')})`;
+    const text = JSON.stringify((await ask(fed.coord.url, { why: q }, fed.coord.me)).why);
+    assert.match(text, /coordinator/, text);
+    const proof = await fed.top.why(`exports_name[code](${row.cells[0]}, ${JSON.stringify(row.cells[1])}, ${JSON.stringify(row.cells[2])})`);
+    assert.match(proof, /export_all_declaration|reexport/, proof);
 
-    // 3. A deletion: a.ts goes; what b.ts and c.ts offered of it goes on the other pod.
+    // 3. A deletion: a.ts goes (its facts and its share of the listing are its own: it is settled again empty, by
+    // levels); what b.ts and c.ts offered of it goes.
     e = await fed.edit('lib/a.ts', null);
-    by.add(e.pod.by);
+    assert.equal(e.pod.by, 'levels');
     want = (await wholeWorld(root)).rows;
     await fed.converge(want, e.t0);
     assert.ok(![...fed.rows()].some((r) => r.includes('"f"')));
-    assert.deepEqual([...by], ['delta'], 'every edit by delta');
 
-    // 4. An edit the engine refuses (a fact the pod holds for x.ts was taken out behind it): the pod evaluates anew.
-    const pod0 = fed.pods[0]!.pod as unknown as { s: { retract(q: string): Promise<void> }; files: Map<string, Set<string>> };
-    await pod0.s.retract([...pod0.files.get('lib/x.ts')!].find((l) => l.includes('"x2"'))!.replace(/\.$/, ''));
-    e = await fed.edit('lib/x.ts', 'export function x3() { return 0; }\n');
-    assert.equal(e.pod.by, 'anew', JSON.stringify(e.pod));
+    // 4. A file that comes: anew, and what it re-exports is offered.
+    e = await fed.edit('lib/n.ts', "export * from './x';\n");
+    assert.equal(e.pod.by, 'anew');
     want = (await wholeWorld(root)).rows;
     await fed.converge(want, e.t0);
+    assert.ok([...fed.rows()].some((r) => r.includes('"x2"') && r.includes('lib/n.ts')));
   } finally { await fed.close(); }
 });
 
-// THE CORE ROUTED (CoreRouter): each pod holds only the core its files reach by the model's keys. Pod 0 holds lib/,
-// pod 1 app/; both import into lib/, so the listing of lib/ is needed on both, a string of one file on its pod alone.
-const ROUTED: Record<string, string> = {
-  'lib/a.ts': 'export function f() { return 1; }\n',
-  'lib/x.ts': "export * from './a';\nexport function x1() { return 0; }\n",
-  'lib/b.ts': "export * from './h';\n",
-  'app/c.ts': "export * from '../lib/a.js';\nexport * from '../lib/h';\n",
-  'app/d.ts': 'export const k = 1;\n',
-};
-const strFacts = (fed: Federation, s: string) => [...fed.core.keys()].filter((l) => l.includes(`(${JSON.stringify(s)},`));
-const held = (fed: Federation, i: number) => (fed.pods[i]!.pod as unknown as { core: Set<string> }).core;
-
-test('pods: a pod holds the core its files reach; a core change reaches only the pods it moves; a string no file holds leaves', async () => {
-  const root = tmpDir('pods-routed');
-  for (const [f, t] of Object.entries(ROUTED)) { fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true }); fs.writeFileSync(path.join(root, f), t); }
-  const { fed } = await Federation.start(root, (f) => (f.startsWith('lib/') ? 0 : 1), 2);
-  try {
-    await fed.sub.next();
-    await fed.converge((await wholeWorld(root)).rows, performance.now());
-    for (const i of [0, 1]) assert.deepEqual([...held(fed, i)].sort(), [...fed.router.share(i)].sort(), `pod ${i} holds its share`);
-    assert.ok(strFacts(fed, './a').length > 0 && strFacts(fed, './a').every((l) => held(fed, 0).has(l) && !held(fed, 1).has(l)), 'the string ./a of lib/x.ts is on pod 0 alone');
-    assert.ok(held(fed, 1).size < fed.core.size, `pod 1 holds ${held(fed, 1).size} of the core's ${fed.core.size}`);
-
-    // 1. A string only pod 1's file holds comes: the core moves on pod 1 alone.
-    let e = await fed.edit('app/d.ts', 'export const k = 1;\nexport const s = "only-d";\n');
-    assert.ok(e.core.in > 0, JSON.stringify(e.core));
-    assert.equal(e.others.length, 0, 'pod 0 is not sent a string none of its files reaches');
-    assert.ok(strFacts(fed, 'only-d').every((l) => held(fed, 1).has(l) && !held(fed, 0).has(l)));
-    await fed.converge((await wholeWorld(root)).rows, e.t0);
-
-    // 2. A core fact two pods need changes: lib/h.ts appears, its listing reached from lib/b.ts (pod 0) and app/c.ts (pod 1).
-    e = await fed.edit('lib/h.ts', 'export function hh() { return 2; }\n');
-    assert.equal(e.others.length, 1, 'pod 1 is sent the listing of lib/h.ts');
-    const listing = [...fed.core.keys()].filter((l) => l.includes('"lib/h.ts"'));
-    assert.ok(listing.some((l) => held(fed, 0).has(l)), 'pod 0 holds the listing of lib/h.ts');
-    assert.ok(listing.some((l) => held(fed, 1).has(l)), 'pod 1 holds the listing of lib/h.ts it resolves into');
-    await fed.converge((await wholeWorld(root)).rows, e.t0);
-    assert.ok([...fed.rows()].some((r) => r.includes('"hh"') && r.includes('app/c.ts')), 'hh is offered by app/c.ts, on pod 1');
-
-    // 3. The string leaves the corpus: no file holds it, the core and pod 1 let it go.
-    e = await fed.edit('app/d.ts', 'export const k = 1;\n');
-    assert.ok(e.core.out > 0, JSON.stringify(e.core));
-    assert.deepEqual(strFacts(fed, 'only-d'), [], 'the core holds no fact of a string no file holds');
-    assert.ok(![...held(fed, 1)].some((l) => l.includes('"only-d"')), 'pod 1 let the string go');
-    assert.equal(e.others.length, 0);
-    await fed.converge((await wholeWorld(root)).rows, e.t0);
-
-    // 4. lib/h.ts deleted: its listing leaves both pods.
-    e = await fed.edit('lib/h.ts', null);
-    assert.equal(e.others.length, 1, 'pod 1 is sent the listing\'s going');
-    assert.ok(![...held(fed, 1)].some((l) => l.includes('"lib/h.ts"')));
-    await fed.converge((await wholeWorld(root)).rows, e.t0);
-  } finally { await fed.close(); }
+test('pods: a pod that reaches its wall refuses, and the federation refuses to stand up, saying the wall', async () => {
+  const root = tmpDir('pods-wall');
+  for (const [f, t] of Object.entries(CORPUS)) { fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true }); fs.writeFileSync(path.join(root, f), t); }
+  const t0 = performance.now();
+  await assert.rejects(Federation.start(root, 2, { budget: 20 }), /budget_exhausted/);
+  assert.ok(performance.now() - t0 < 30_000, 'it refuses at once, nobody waits for a unit that will not come');
 });
